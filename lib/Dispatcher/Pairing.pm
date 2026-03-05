@@ -45,6 +45,7 @@ sub run_pairing_mode {
     $log_fn->({ ACTION => 'pairing-mode-start', PORT => $port });
 
     my $interactive = -t STDIN;
+    local $| = 1 if $interactive;  # unbuffered output so prompts appear immediately
 
     if ($interactive) {
         print "Pairing mode active on port $port. Ctrl-C or 'quit' to stop.\n";
