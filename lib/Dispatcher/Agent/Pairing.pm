@@ -40,7 +40,32 @@ sub generate_key_and_csr {
     return { key_pem => $key_pem, csr_pem => $csr_pem };
 }
 
-# Atomically write agent cert and CA cert to their config paths
+# Generate a CSR from the existing agent key, without generating a new key.
+# Used for cert renewal - key continuity is preserved.
+# Returns hashref: { csr_pem => '...' } or dies on failure.
+sub generate_csr_only {
+    my (%opts) = @_;
+    my $hostname = $opts{hostname}  or croak "hostname required";
+    my $key_path = $opts{key_path}  or croak "key_path required";
+
+    croak "Key file not found at '$key_path'" unless -f $key_path;
+
+    my $tmpdir   = tempdir(CLEANUP => 1);
+    my $csr_file = "$tmpdir/agent.csr";
+
+    _run_or_die(
+        'openssl', 'req',
+        '-new',
+        '-key',  $key_path,
+        '-out',  $csr_file,
+        '-subj', "/CN=$hostname",
+    );
+
+    my $csr_pem = _slurp($csr_file);
+    return { csr_pem => $csr_pem };
+}
+
+
 # cert_dir defaults to /etc/dispatcher-agent
 sub store_certs {
     my (%opts) = @_;

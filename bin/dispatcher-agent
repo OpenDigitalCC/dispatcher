@@ -231,6 +231,12 @@ sub handle_connection {
     elsif ($method eq 'GET' && $path eq '/capabilities') {
         handle_capabilities($conn, $peer, $allowlist);
     }
+    elsif ($method eq 'POST' && $path eq '/renew') {
+        handle_renew($conn, $body, $peer);
+    }
+    elsif ($method eq 'POST' && $path eq '/renew-complete') {
+        handle_renew_complete($conn, $body, $peer);
+    }
     else {
         _send_raw($conn, 404, encode_json({ error => 'not found' }));
     }
@@ -339,6 +345,113 @@ sub handle_capabilities {
         version => $VERSION,
         scripts => \@scripts,
     });
+}
+
+sub handle_renew {
+    my ($conn, $body, $peer) = @_;
+
+    my $data  = eval { decode_json($body) } // {};
+    my $reqid = $data->{reqid} // '';
+
+    my $config = eval { Dispatcher::Agent::Config::load_config($CONFIG_PATH) };
+    if ($@) {
+        Dispatcher::Log::log_action('ERR', {
+            ACTION => 'renew',
+            PEER   => $peer,
+            REQID  => $reqid,
+            ERROR  => 'cannot load config',
+        });
+        _send_json($conn, { status => 'error', error => 'cannot load config', reqid => $reqid });
+        return;
+    }
+
+    require Sys::Hostname;
+    my $hostname = Sys::Hostname::hostname();
+    my $key_path = $config->{key};
+
+    my $result = eval {
+        Dispatcher::Agent::Pairing::generate_csr_only(
+            hostname => $hostname,
+            key_path => $key_path,
+        );
+    };
+    if ($@) {
+        chomp(my $err = $@);
+        Dispatcher::Log::log_action('ERR', {
+            ACTION => 'renew',
+            PEER   => $peer,
+            REQID  => $reqid,
+            ERROR  => $err,
+        });
+        _send_json($conn, { status => 'error', error => $err, reqid => $reqid });
+        return;
+    }
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION => 'renew',
+        PEER   => $peer,
+        REQID  => $reqid,
+        STATUS => 'csr-generated',
+    });
+
+    _send_json($conn, {
+        status => 'ok',
+        csr    => $result->{csr_pem},
+        reqid  => $reqid,
+    });
+}
+
+sub handle_renew_complete {
+    my ($conn, $body, $peer) = @_;
+
+    my $data  = eval { decode_json($body) } // {};
+    my $reqid = $data->{reqid} // '';
+
+    unless ($data->{cert} && $data->{ca}) {
+        _send_json($conn, { status => 'error', error => 'cert and ca required', reqid => $reqid });
+        return;
+    }
+
+    my $config = eval { Dispatcher::Agent::Config::load_config($CONFIG_PATH) };
+    if ($@) {
+        _send_json($conn, { status => 'error', error => 'cannot load config', reqid => $reqid });
+        return;
+    }
+
+    eval {
+        Dispatcher::Agent::Pairing::store_certs(
+            cert_pem => $data->{cert},
+            ca_pem   => $data->{ca},
+            key_pem  => _slurp($config->{key}),
+        );
+    };
+    if ($@) {
+        chomp(my $err = $@);
+        Dispatcher::Log::log_action('ERR', {
+            ACTION => 'renew-complete',
+            PEER   => $peer,
+            REQID  => $reqid,
+            ERROR  => $err,
+        });
+        _send_json($conn, { status => 'error', error => $err, reqid => $reqid });
+        return;
+    }
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION => 'renew-complete',
+        PEER   => $peer,
+        REQID  => $reqid,
+        STATUS => 'cert-stored',
+    });
+
+    _send_json($conn, { status => 'ok', reqid => $reqid });
+}
+
+sub _slurp {
+    my ($path) = @_;
+    open my $fh, '<', $path or die "Cannot read '$path': $!";
+    local $/;
+    return scalar <$fh>;
 }
 
 sub _send_json {
