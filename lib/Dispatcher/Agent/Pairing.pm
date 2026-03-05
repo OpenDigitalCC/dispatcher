@@ -105,6 +105,10 @@ sub request_pairing {
     require IO::Socket::SSL;
     require JSON;
 
+    # Generate a per-request nonce to verify the response is for this specific
+    # request and not a replayed or misrouted one.
+    my $nonce = _gen_nonce();
+
     my %ssl_opts = (
         PeerHost        => $dispatcher_host,
         PeerPort        => $port,
@@ -121,6 +125,7 @@ sub request_pairing {
     my $payload = JSON::encode_json({
         hostname => $hostname,
         csr      => $csr_pem,
+        nonce    => $nonce,
     });
 
     print $sock "POST /pair HTTP/1.0\r\n",
@@ -157,6 +162,9 @@ sub request_pairing {
     return { ok => 0, error => "bad JSON: $@" } if $@;
 
     if ($data->{status} eq 'approved') {
+        if (($data->{nonce} // '') ne $nonce) {
+            return { ok => 0, error => 'nonce mismatch in pairing response' };
+        }
         return {
             ok       => 1,
             cert_pem => $data->{cert},
@@ -168,6 +176,12 @@ sub request_pairing {
 }
 
 # --- private helpers ---
+
+sub _gen_nonce {
+    return sprintf '%08x%08x%08x%08x',
+        int(rand(0xffffffff)), int(rand(0xffffffff)),
+        int(rand(0xffffffff)), $$;
+}
 
 sub _run_or_die {
     my @cmd = @_;

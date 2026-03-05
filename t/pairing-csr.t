@@ -60,7 +60,7 @@ subtest 'store_certs: key file is mode 0600' => sub {
         cert_dir => $dir,
     );
     my $mode = (stat "$dir/agent.key")[2] & 07777;
-    is $mode, 0600, 'key is mode 0600';
+    is $mode, 0640, 'key is mode 0640 (group-readable for dispatcher-agent service)';
 };
 
 subtest 'store_certs: cert content correct' => sub {
@@ -108,6 +108,19 @@ subtest 'pairing_status: paired when all files present and valid cert' => sub {
     my $status = Dispatcher::Agent::Pairing::pairing_status(cert_dir => $dir);
     is $status->{paired}, 1, 'paired';
     ok defined $status->{expiry}, 'expiry present';
+};
+
+subtest '_gen_nonce: returns 32-hex-char string' => sub {
+    my $nonce = Dispatcher::Agent::Pairing::_gen_nonce();
+    like $nonce, qr/^[0-9a-f]{32}$/i, 'nonce is 32 hex characters';
+};
+
+subtest '_gen_nonce: produces unique values' => sub {
+    my %seen;
+    for (1..20) {
+        $seen{ Dispatcher::Agent::Pairing::_gen_nonce() } = 1;
+    }
+    ok scalar(keys %seen) > 1, 'nonce values are not all identical';
 };
 
 done_testing;
