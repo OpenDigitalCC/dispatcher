@@ -152,7 +152,8 @@ sub _run_hook {
     $ENV{DISPATCHER_ACTION}    = $context->{action};
     $ENV{DISPATCHER_SCRIPT}    = $context->{script};
     $ENV{DISPATCHER_HOSTS}     = join(',', @{ $context->{hosts} });
-    $ENV{DISPATCHER_ARGS}      = join(' ', @{ $context->{args} });
+    $ENV{DISPATCHER_ARGS}      = join(' ', @{ $context->{args} });   # lossy if args contain spaces - use DISPATCHER_ARGS_JSON
+    $ENV{DISPATCHER_ARGS_JSON} = encode_json($context->{args});       # reliable JSON array
     $ENV{DISPATCHER_USERNAME}  = $context->{username};
     $ENV{DISPATCHER_TOKEN}     = $context->{token};
     $ENV{DISPATCHER_SOURCE_IP} = $context->{source_ip};

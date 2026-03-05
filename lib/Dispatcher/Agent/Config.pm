@@ -57,13 +57,26 @@ sub _validate_config {
     }
     croak "port must be numeric in '$path'"
         unless $config->{port} =~ /^\d+$/;
+
+    # Parse script_dirs from colon-separated string into arrayref
+    if (defined $config->{script_dirs} && length $config->{script_dirs}) {
+        $config->{script_dirs} = [
+            grep { length $_ } split /:/, $config->{script_dirs}
+        ];
+    }
+    else {
+        delete $config->{script_dirs};   # absent = no restriction
+    }
 }
 
 # Load and parse scripts.conf allowlist
 # Returns hashref: { script_name => /absolute/path }
 # Dies on parse errors; unknown/bad entries are skipped with a warning
+#
+# Optional opts:
+#   script_dirs => \@dirs   (arrayref of approved directories; undef = no restriction)
 sub load_allowlist {
-    my ($path) = @_;
+    my ($path, $script_dirs) = @_;
     $path //= '/etc/dispatcher-agent/scripts.conf';
 
     open my $fh, '<', $path
@@ -80,6 +93,10 @@ sub load_allowlist {
                 warn "Allowlist: skipping '$name' - path must be absolute: $script_path\n";
                 next;
             }
+            if ($script_dirs && !_path_in_dirs($script_path, $script_dirs)) {
+                warn "Allowlist: skipping '$name' - path not in approved script_dirs: $script_path\n";
+                next;
+            }
             $allowlist{$name} = $script_path;
         }
         else {
@@ -93,10 +110,29 @@ sub load_allowlist {
 
 # Check whether a script name is permitted
 # Returns the script path if permitted, undef otherwise
+#
+# Optional: script_dirs => \@dirs  re-validates path at execution time
 sub validate_script {
-    my ($name, $allowlist) = @_;
+    my ($name, $allowlist, $script_dirs) = @_;
     return unless defined $name && $name =~ /^[\w-]+$/;
-    return $allowlist->{$name};
+    my $path = $allowlist->{$name};
+    return unless defined $path;
+    if ($script_dirs && !_path_in_dirs($path, $script_dirs)) {
+        warn "validate_script: '$name' path rejected at execution time - not in script_dirs: $path\n";
+        return;
+    }
+    return $path;
+}
+
+# Return true if $path is under any directory in @$dirs.
+# Uses string prefix matching after normalising trailing slashes.
+sub _path_in_dirs {
+    my ($path, $dirs) = @_;
+    for my $dir (@$dirs) {
+        $dir =~ s{/+$}{};   # strip trailing slash
+        return 1 if index($path, "$dir/") == 0;
+    }
+    return 0;
 }
 
 1;

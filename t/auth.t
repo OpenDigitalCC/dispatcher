@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use Test::More tests => 29;
+use Test::More;
 use File::Temp qw(tempdir);
 use FindBin    qw($Bin);
 use lib "$Bin/../lib";
@@ -219,6 +219,25 @@ HOOK
 {
     eval { Dispatcher::Auth::check(action => 'run', config => {}, hosts => 'bad') };
     like $@, qr/hosts must be an arrayref/, 'check: dies if hosts not arrayref';
+}
+
+# --- DISPATCHER_ARGS_JSON ---
+
+{
+    # Hook checks that DISPATCHER_ARGS_JSON is a valid JSON array
+    # and that DISPATCHER_ARGS is the space-joined form
+    my $hook = make_hook('check-args-json', <<'HOOK');
+echo "$DISPATCHER_ARGS_JSON" | grep -q '^\["hello world","two"\]' || exit 1
+[[ "$DISPATCHER_ARGS" == "hello world two" ]] || exit 2
+exit 0
+HOOK
+
+    my $result = Dispatcher::Auth::check(
+        action => 'run',
+        args   => ['hello world', 'two'],
+        config => { auth_hook => $hook },
+    );
+    ok $result->{ok}, 'DISPATCHER_ARGS_JSON: valid JSON array passed to hook';
 }
 
 # Restore stderr

@@ -213,4 +213,86 @@ END
     ok !$@, 'no error for empty tags section';
 };
 
+# --- script_dirs ---
+
+subtest 'load_config: script_dirs parsed into arrayref' => sub {
+    my $path = write_temp(<<'END');
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+script_dirs = /opt/scripts:/usr/local/lib/dispatcher-scripts
+END
+    my $c = Dispatcher::Agent::Config::load_config($path);
+    is ref($c->{script_dirs}), 'ARRAY', 'script_dirs is arrayref';
+    is scalar @{ $c->{script_dirs} }, 2, 'two dirs parsed';
+    is $c->{script_dirs}[0], '/opt/scripts', 'first dir';
+    is $c->{script_dirs}[1], '/usr/local/lib/dispatcher-scripts', 'second dir';
+};
+
+subtest 'load_config: absent script_dirs leaves key undefined' => sub {
+    my $path = write_temp(<<'END');
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+END
+    my $c = Dispatcher::Agent::Config::load_config($path);
+    ok !exists $c->{script_dirs}, 'script_dirs absent when not configured';
+};
+
+subtest 'load_allowlist: rejects path outside script_dirs' => sub {
+    my $path = write_temp(<<'END');
+backup = /opt/scripts/backup.sh
+bad    = /tmp/evil.sh
+END
+    my $warn = '';
+    local $SIG{__WARN__} = sub { $warn .= $_[0] };
+    my $al = Dispatcher::Agent::Config::load_allowlist(
+        $path, ['/opt/scripts']
+    );
+    ok  exists $al->{backup}, 'path in approved dir accepted';
+    ok !exists $al->{bad},    'path outside approved dir rejected';
+    like $warn, qr/not in approved script_dirs/, 'warning issued for rejected path';
+};
+
+subtest 'load_allowlist: accepts path in any approved dir' => sub {
+    my $path = write_temp(<<'END');
+script-a = /opt/scripts/a.sh
+script-b = /usr/local/lib/dispatcher-scripts/b.sh
+END
+    my $al = Dispatcher::Agent::Config::load_allowlist(
+        $path, ['/opt/scripts', '/usr/local/lib/dispatcher-scripts']
+    );
+    ok exists $al->{'script-a'}, 'path in first approved dir accepted';
+    ok exists $al->{'script-b'}, 'path in second approved dir accepted';
+};
+
+subtest 'load_allowlist: no script_dirs means no restriction' => sub {
+    my $path = write_temp("anywhere = /anywhere/script.sh\n");
+    my $al   = Dispatcher::Agent::Config::load_allowlist($path, undef);
+    ok exists $al->{anywhere}, 'path accepted when script_dirs not set';
+};
+
+subtest 'validate_script: rejects path outside script_dirs at execution time' => sub {
+    my $al = { 'safe' => '/opt/scripts/safe.sh', 'unsafe' => '/tmp/evil.sh' };
+    my $dirs = ['/opt/scripts'];
+
+    my $warn = '';
+    local $SIG{__WARN__} = sub { $warn .= $_[0] };
+
+    my $good = Dispatcher::Agent::Config::validate_script('safe',   $al, $dirs);
+    my $bad  = Dispatcher::Agent::Config::validate_script('unsafe', $al, $dirs);
+
+    is   $good, '/opt/scripts/safe.sh', 'approved path returned';
+    ok  !defined $bad,                  'unapproved path returns undef';
+    like $warn, qr/not in script_dirs/, 'warning issued at execution time';
+};
+
+subtest 'validate_script: no script_dirs means no restriction at execution time' => sub {
+    my $al = { 'any' => '/anywhere/script.sh' };
+    my $r  = Dispatcher::Agent::Config::validate_script('any', $al, undef);
+    is $r, '/anywhere/script.sh', 'path returned when no script_dirs';
+};
+
 done_testing;

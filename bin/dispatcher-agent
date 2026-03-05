@@ -56,13 +56,13 @@ sub mode_serve {
     my ($opts) = @_;
 
     my $config    = Dispatcher::Agent::Config::load_config($CONFIG_PATH);
-    my $allowlist = Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH);
+    my $allowlist = Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH, $config->{script_dirs});
 
     $SIG{HUP} = sub {
         warn "Reloading config and allowlist...\n";
         $config    = eval { Dispatcher::Agent::Config::load_config($CONFIG_PATH) }
                      // do { warn "Config reload failed: $@\n"; $config };
-        $allowlist = eval { Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH) };
+        $allowlist = eval { Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH, $config->{script_dirs}) };
         warn "Allowlist reload failed: $@\n" if $@;
     };
 
@@ -225,7 +225,7 @@ sub handle_connection {
     }
 
     if ($method eq 'POST' && $path eq '/run') {
-        handle_run($conn, $body, $peer, $allowlist);
+        handle_run($conn, $body, $peer, $allowlist, $config);
     }
     elsif ($method eq 'POST' && $path eq '/ping') {
         handle_ping($conn, $body, $peer);
@@ -245,7 +245,7 @@ sub handle_connection {
 }
 
 sub handle_run {
-    my ($conn, $body, $peer, $allowlist) = @_;
+    my ($conn, $body, $peer, $allowlist, $config) = @_;
 
     my $data = eval { decode_json($body) };
     if ($@) {
@@ -262,7 +262,9 @@ sub handle_run {
         return;
     }
 
-    my $script_path = Dispatcher::Agent::Config::validate_script($name, $allowlist);
+    my $script_path = Dispatcher::Agent::Config::validate_script(
+        $name, $allowlist, $config->{script_dirs}
+    );
 
     unless ($script_path) {
         Dispatcher::Log::log_action('WARNING', {
