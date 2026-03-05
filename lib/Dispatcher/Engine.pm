@@ -7,8 +7,11 @@ use Carp  qw(croak);
 use POSIX qw(WNOHANG);
 
 use Dispatcher::Log qw();
+use Time::HiRes qw();
 
 our $VERSION = '0.1';
+
+my $_reqid_counter = 0;
 
 my $DEFAULT_PORT = 7443;
 
@@ -239,9 +242,12 @@ sub parse_host {
     return ($host_str, $default_port // $DEFAULT_PORT);
 }
 
-# Generate a random 8-hex-digit request ID.
+# Generate a unique request ID combining timestamp, PID, and per-process counter.
 sub gen_reqid {
-    return sprintf '%08x', int(rand(0xffffffff));
+    my $t   = int(Time::HiRes::time() * 1000) & 0xffff;
+    my $pid = $$ & 0xffff;
+    my $seq = (++$_reqid_counter) & 0xffff;
+    return sprintf '%04x%04x%04x', $t, $pid, $seq;
 }
 
 # --- private ---
@@ -253,7 +259,6 @@ sub _dispatch_one {
     my $config = $opts{config};
     my $reqid  = $opts{reqid};
 
-    require Time::HiRes;
     my $t0 = Time::HiRes::time();
     my $ua = _build_ua($config);
 
@@ -319,7 +324,6 @@ sub _ping_one {
     my $config = $opts{config};
     my $reqid  = $opts{reqid};
 
-    require Time::HiRes;
     my $t0 = Time::HiRes::time();
     my $ua = _build_ua($config);
 
@@ -368,7 +372,6 @@ sub _capabilities_one {
     my $port   = $opts{port};
     my $config = $opts{config};
 
-    require Time::HiRes;
     my $t0 = Time::HiRes::time();
     my $ua = _build_ua($config);
 

@@ -12,6 +12,7 @@ use Dispatcher::Lock    qw();
 use Dispatcher::Pairing qw();
 use Dispatcher::CA        qw();
 use Dispatcher::Registry  qw();
+use Dispatcher::Output    qw();
 use JSON                qw(encode_json decode_json);
 use Getopt::Long        qw(GetOptions :config pass_through);
 use Sys::Hostname       qw(hostname);
@@ -45,8 +46,10 @@ sub main {
         'list-requests' => \&mode_list_requests,
         'approve'       => \&mode_approve,
         'deny'          => \&mode_deny,
-        'setup-ca'      => \&mode_setup_ca,
-        'list-agents'   => \&mode_list_agents,
+        'setup-ca'         => \&mode_setup_ca,
+        'setup-dispatcher' => \&mode_setup_dispatcher,
+        'list-agents'      => \&mode_list_agents,
+        'unpair'           => \&mode_unpair,
     );
 
     my $handler = $dispatch{$mode}
@@ -101,7 +104,7 @@ sub mode_run {
         print encode_json({ ok => 1, results => $results }), "\n";
     }
     else {
-        _format_run_results($results);
+        Dispatcher::Output::format_run_results($results);
     }
 
     my $any_fail = grep { ($_->{exit} // -1) != 0 } @$results;
@@ -139,7 +142,7 @@ sub mode_ping {
         print encode_json({ ok => 1, results => $results }), "\n";
     }
     else {
-        _format_ping_results($results);
+        Dispatcher::Output::format_ping_results($results);
     }
 }
 
@@ -158,16 +161,31 @@ sub mode_list_agents {
         return;
     }
 
-    printf "%-30s  %-16s  %-22s  %s\n",
-        'HOSTNAME', 'IP', 'PAIRED', 'CERT EXPIRY';
-    printf "%s\n", '-' x 85;
-    for my $a (@$agents) {
-        printf "%-30s  %-16s  %-22s  %s\n",
-            $a->{hostname} // '?',
-            $a->{ip}       // '?',
-            $a->{paired}   // '?',
-            $a->{expiry}   // '?';
+    Dispatcher::Output::format_agent_list($agents);
+}
+
+sub mode_unpair {
+    my ($opts, $hostname) = @_;
+    die "Usage: dispatcher unpair <hostname>\n" unless $hostname;
+
+    my $record = eval { Dispatcher::Registry::remove_agent(hostname => $hostname) };
+    if ($@) {
+        chomp(my $err = $@);
+        die "$err\n";
     }
+
+    print "Unpaired '$hostname'.\n";
+    print "\n";
+    print "WARNING: The agent certificate remains valid until its expiry date:\n";
+    print "  $record->{expiry}\n" if $record->{expiry};
+    print "The agent will continue to accept connections from the dispatcher\n";
+    print "until the cert expires. Decommission the host promptly.\n";
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION => 'unpair',
+        AGENT  => $hostname,
+        EXPIRY => $record->{expiry} // '',
+    });
 }
 
 sub mode_pairing {
@@ -224,42 +242,12 @@ sub mode_setup_ca {
     print "Keep ca.key secure - it never leaves this host.\n";
 }
 
-sub _format_run_results {
-    my ($results) = @_;
-    for my $r (@$results) {
-        my $host   = $r->{host}  // '?';
-        my $exit   = $r->{exit}  // -1;
-        my $rtt    = $r->{rtt}   // '';
-        my $status = $exit == 0 ? 'OK' : 'FAIL';
-
-        printf "==> %s  [%s  exit:%d  %s]\n", $host, $status, $exit, $rtt;
-
-        if ($r->{error}) {
-            print "    ERROR: $r->{error}\n";
-        }
-        if ($r->{stdout} && $r->{stdout} =~ /\S/) {
-            print $r->{stdout};
-            print "\n" unless $r->{stdout} =~ /\n$/;
-        }
-        if ($r->{stderr} && $r->{stderr} =~ /\S/) {
-            print "    STDERR: $r->{stderr}\n";
-        }
-    }
-}
-
-sub _format_ping_results {
-    my ($results) = @_;
-    printf "%-30s  %-8s  %-8s  %-28s  %s\n",
-        'HOST', 'STATUS', 'RTT', 'CERT EXPIRY', 'VERSION';
-    printf "%s\n", '-' x 85;
-    for my $r (@$results) {
-        printf "%-30s  %-8s  %-8s  %-28s  %s\n",
-            $r->{host}    // '?',
-            $r->{status}  // 'error',
-            $r->{rtt}     // '?',
-            $r->{expiry}  // '?',
-            $r->{version} // '?';
-    }
+sub mode_setup_dispatcher {
+    print "Generating dispatcher key and certificate...\n";
+    my $result = Dispatcher::CA::generate_dispatcher_cert(ca_dir => '/etc/dispatcher');
+    print "Dispatcher certificate created:\n";
+    print "  Key:  $result->{key}\n";
+    print "  Cert: $result->{cert}\n";
 }
 
 sub _auth_error {
@@ -338,7 +326,9 @@ Modes:
   approve <reqid>            Approve a pairing request
   deny <reqid>               Deny a pairing request
   setup-ca                   One-time CA initialisation
+  setup-dispatcher           Generate the dispatcher key and certificate
   list-agents                List all registered (paired) agents
+  unpair <hostname>          Remove an agent from the registry
 
 Options:
   --config <path>            Path to dispatcher.conf

@@ -108,6 +108,14 @@ sub mode_request_pairing {
     my $dispatcher = $opts->{dispatcher}
         or die "--dispatcher <host> required for request-pairing\n";
 
+    # Preflight: check cert directory is writable before making any network
+    # connection. Avoids a stale pairing request being left in the dispatcher
+    # queue if the agent cannot write the received certs.
+    my $cert_dir = '/etc/dispatcher-agent';
+    unless (-w $cert_dir) {
+        die "Cannot write to $cert_dir - re-run with sudo\n";
+    }
+
     my $host = hostname();
 
     print "Generating key and CSR for '$host'...\n";
