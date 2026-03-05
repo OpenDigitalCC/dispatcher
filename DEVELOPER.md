@@ -4,6 +4,7 @@ subtitle: Purpose, contents, protocol, logging, security model and extending
 brand: cloudient
 ---
 
+
 # Dispatcher - Developer Documentation
 
 ## Purpose and Design Criteria
@@ -35,6 +36,12 @@ pairing workflow
   signed and the cert is delivered back over the open connection. Approved
   agents are recorded in a persistent registry.
 
+automatic cert renewal
+: Agent certs are renewed automatically by the dispatcher over the mTLS
+  operational port (7443). Renewal is triggered when remaining cert validity
+  drops below half the configured lifetime. No operator involvement required
+  during normal operation.
+
 argument support
 : Scripts can receive arguments. Arguments are passed as a JSON array and
   forwarded to `exec` as a list, never interpolated into a shell command.
@@ -48,7 +55,9 @@ auth hook
 : An optional external executable is called before every `run` and `ping`
   request, from both the CLI and the API. It receives request context as
   environment variables and JSON on stdin. Exit codes map to authorisation
-  outcomes. No hook configured means unconditional pass.
+  outcomes. No hook configured means unconditional pass. The hook is the
+  intended policy engine for per-token, per-script, and per-argument access
+  control; dispatcher deliberately does not implement config-based ACLs.
 
 HTTP REST API
 : An optional API server (`dispatcher-api`) exposes the same run, ping, and
@@ -78,9 +87,10 @@ lib/Dispatcher/
   CA.pm                   CA and cert signing via openssl subprocess
   Pairing.pm              Dispatcher-side pairing server and approval queue
   Registry.pm             Persistent agent store (written at pairing, read by API)
-  Engine.pm               Parallel dispatch, ping, and capabilities query
+  Engine.pm               Parallel dispatch, ping, capabilities, and cert renewal
   Auth.pm                 Auth hook runner
   Lock.pm                 flock-based host:script concurrency control
+  Output.pm               Output formatting for CLI tables
   API.pm                  HTTP API server (fork-per-request)
   Agent/
     Config.pm             Config and allowlist loading and validation
@@ -104,21 +114,25 @@ t/
   lock.t                  Tests for Dispatcher::Lock
   lock-holder.pl          Test helper: acquires a lock and holds until stdin closes
   log.t                   Tests for Dispatcher::Log
-  pairing-csr.t           Tests for Dispatcher::Agent::Pairing (key/CSR generation)
+  output.t                Tests for Dispatcher::Output
+  pairing-csr.t           Tests for Dispatcher::Agent::Pairing (key/CSR/nonce)
+  pairing-dispatcher.t    Tests for Dispatcher::Pairing (stale expiry, nonce storage)
   registry.t              Tests for Dispatcher::Registry
+  renewal.t               Tests for cert renewal functions
 
 install.sh                Installer: --agent | --dispatcher | --api | --uninstall
 README.md                 User-facing install, test, and configuration guide
 DEVELOPER.md              This file
+TODO.md                   Outstanding work items with implementation context
 ```
 
 
 ## Ports
 
 7443
-: Operational mTLS port. The agent listens here for `run`, `ping`, and
-  `capabilities` requests. Both sides present certificates signed by the
-  private CA.
+: Operational mTLS port. The agent listens here for `run`, `ping`,
+  `capabilities`, `renew`, and `renew-complete` requests. Both sides present
+  certificates signed by the private CA.
 
 7444
 : Pairing port. Only open when the dispatcher is in `pairing-mode`. TLS server
@@ -150,7 +164,7 @@ Agent host (`/etc/dispatcher-agent/`)
 agent.key       Agent's private key (0640, root:dispatcher-agent)
 agent.crt       Agent's cert, signed by dispatcher CA (0640, root:dispatcher-agent)
 ca.crt          CA cert from dispatcher (0644)
-agent.conf      Port, cert paths
+agent.conf      Port, cert paths, optional script_dirs and tags
 scripts.conf    Allowlist: name = /absolute/path
 ```
 
@@ -215,12 +229,20 @@ Functions:
 
 `sign_csr(%opts)`
 : Accepts a CSR as a PEM string, writes it to a temp file, calls
-  `openssl x509 -req` to sign it, returns the signed cert PEM.
-  Options: `csr_pem` (required), `ca_dir`, `days` (default 825), `out_path`.
+  `openssl x509 -req` to sign it, returns the signed cert PEM. The `days`
+  parameter controls cert lifetime and should be passed from `config->{cert_days}`
+  (default 365). Options: `csr_pem` (required), `ca_dir`, `days`, `out_path`.
 
 `read_ca_cert(%opts)`
-: Returns the CA cert PEM from `ca_dir/ca.crt`. Used during pairing to send
-  the CA cert to the agent alongside the signed agent cert.
+: Returns the CA cert PEM from `ca_dir/ca.crt`. Used during pairing and renewal
+  to send the CA cert to the agent alongside the signed agent cert.
+
+`generate_dispatcher_cert(%opts)`
+: Generates `dispatcher.key` (4096-bit RSA, 0600), `dispatcher.csr`, signs it
+  with the CA, writes `dispatcher.crt` (825 days), removes the CSR.
+  Guards: dies if CA does not exist, dies if `dispatcher.crt` already exists
+  unless `force => 1`. Called by `bin/dispatcher setup-dispatcher`.
+  Options: `ca_dir`, `force`.
 
 
 ### `Dispatcher::Pairing`
@@ -235,7 +257,7 @@ and the forked child processes (which hold connections open to waiting agents).
 File states in `/var/lib/dispatcher/pairing/`:
 
 ```
-{reqid}.json      Pending request (CSR, hostname, IP, timestamp)
+{reqid}.json      Pending request (CSR, hostname, IP, nonce, timestamp)
 {reqid}.approved  Written by approve_request(); read by waiting child
 {reqid}.denied    Written by deny_request(); read by waiting child
 ```
@@ -246,22 +268,44 @@ or `.denied` file it sends the response and exits.
 `approve_request` also calls `Dispatcher::Registry::register_agent()` to write
 a persistent record of the approved agent before cleaning up the pairing files.
 
+Nonce
+: Each pairing request carries a random nonce generated by the agent. The
+  dispatcher stores it in the `.json` queue file and echoes it in the
+  `.approved` response. The agent verifies the nonce matches before storing
+  the delivered certs. This prevents misrouted or replayed approval responses.
+
+Stale request expiry
+: `_expire_stale_requests()` is called at entry to `run_pairing_mode()` and
+  `list_requests()`. It deletes `.json` files older than 10 minutes with no
+  corresponding `.approved` or `.denied` file, cleaning up requests abandoned
+  due to agent-side failures (e.g. running without sudo).
+
+Interactive mode
+: When STDIN is a tty, `run_pairing_mode()` uses `IO::Select` to multiplex the
+  server socket and STDIN. Incoming requests are displayed immediately and the
+  operator is prompted. Commands: `a`/`d`/`s` for single request; `a1`/`d2`
+  etc. for numbered selection when multiple are pending; `list`/`l` to
+  redisplay; `quit`/`q` to exit. When STDIN is not a tty (service, pipe),
+  behaviour is unchanged from the original blocking accept loop.
+
 Functions:
 
 `run_pairing_mode(%opts)`
 : Starts a TLS server on port 7444. Accepts connections, forks a child per
   connection. Each child calls `_handle_pair_request()`. Blocks until SIGINT
-  or SIGTERM. Options: `port`, `cert`, `key`, `ca_dir`, `log_fn`.
+  or SIGTERM. Interactive when STDIN is a tty. Options: `port`, `cert`, `key`,
+  `ca_dir`, `log_fn`.
 
 `list_requests(%opts)`
-: Returns an arrayref of pending request hashrefs from `pairing_dir`, sorted
-  by `received` timestamp. Each hashref has: `id`, `hostname`, `ip`, `csr`, `received`.
+: Expires stale requests, then returns an arrayref of pending request hashrefs
+  from `pairing_dir`, sorted by `received` timestamp. Each hashref has: `id`,
+  `hostname`, `ip`, `csr`, `nonce`, `received`.
 
 `approve_request(%opts)`
 : Reads the `.json` file, signs the CSR with `Dispatcher::CA::sign_csr()`,
-  writes the signed cert and CA cert to `{reqid}.approved`, then calls
-  `Dispatcher::Registry::register_agent()`. The waiting child picks this up
-  within 2 seconds and delivers it to the agent.
+  writes the signed cert, CA cert, and echoed nonce to `{reqid}.approved`, then
+  calls `Dispatcher::Registry::register_agent()`. The waiting child picks this
+  up within 2 seconds and delivers it to the agent.
   Options: `reqid` (required), `ca_dir`, `pairing_dir`, `log_fn`.
 
 `deny_request(%opts)`
@@ -280,8 +324,9 @@ Important SSL note - `SSL_no_shutdown => 1` on parent close
 ### `Dispatcher::Registry`
 
 Persistent store of all paired agents. Written by `Dispatcher::Pairing::approve_request`
-at pairing time. Read by `bin/dispatcher list-agents` and by `Dispatcher::API`
-for the `/discovery` endpoint.
+at pairing time and updated by `Dispatcher::Engine::_renew_one` after cert
+renewal. Read by `bin/dispatcher list-agents` and by `Dispatcher::API` for
+the `/discovery` endpoint.
 
 One JSON file per agent in `/var/lib/dispatcher/agents/{hostname}.json`.
 Re-pairing the same hostname overwrites its registry entry. Files are written
@@ -294,10 +339,15 @@ Record format:
   "hostname": "sjm-explore",
   "ip":       "192.168.125.125",
   "paired":   "2026-03-05T14:30:00Z",
-  "expiry":   "Jun  7 16:28:00 2028 GMT",
-  "reqid":    "1a15334d"
+  "expiry":   "Jun  7 16:28:00 2027 GMT",
+  "reqid":    "1a15334d0001"
 }
 ```
+
+The `expiry` field is updated after each successful cert renewal. An agent
+whose cert has expired and has not been renewed has been out of contact for
+more than the full cert lifetime - this is intentional self-expiry for
+decommissioned hosts.
 
 Functions:
 
@@ -316,15 +366,29 @@ Functions:
 : Returns an arrayref of hostname strings only. Convenience wrapper for
   passing directly to Engine functions.
 
+`remove_agent(%opts)`
+: Deletes the registry entry for `hostname`. Returns the deleted record so the
+  caller can log the cert expiry date in the warning message. Dies if the
+  hostname is not in the registry. Required: `hostname`. Optional: `registry_dir`.
+  Note: the agent's cert remains valid until its natural expiry date. No cert
+  revocation mechanism exists - the agent should be decommissioned promptly
+  after unpairing.
+
 
 ### `Dispatcher::Engine`
 
-Parallel dispatch, ping, and capabilities query. Uses fork-per-host with pipes
-to collect results. No threads.
+Parallel dispatch, ping, capabilities query, and automatic cert renewal. Uses
+fork-per-host with pipes to collect results. No threads.
 
 Pattern: for each host, fork a child that performs the operation and writes a
 JSON result to a pipe, then exits. The parent loops `waitpid -1, 0` collecting
 children and reading their pipes as they finish.
+
+Cert renewal is triggered automatically after every successful ping. If the
+agent's cert expiry (returned in the ping response) is within half the
+configured `cert_days`, the dispatcher initiates renewal over the same mTLS
+connection. Renewal failure is logged at ERR level but does not affect the
+ping result.
 
 Functions:
 
@@ -333,19 +397,41 @@ Functions:
   Returns arrayref of `{ host, script, exit, stdout, stderr, reqid, rtt }`.
 
 `ping_all(%opts)`
-: Required: `hosts`, `config`. Optional: `reqid`, `port`.
+: Required: `hosts`, `config`. Optional: `reqid`, `port`. After collecting
+  ping results, checks each successful response for renewal need and calls
+  `_renew_one` if due.
   Returns arrayref of `{ host, status, version, expiry, rtt, reqid }`.
 
 `capabilities_all(%opts)`
 : Required: `hosts`, `config`. Optional: `port`.
   Queries each host's `/capabilities` endpoint. Returns arrayref of
-  `{ host, status, version, scripts => [{name, path, executable}, ...], rtt }`.
+  `{ host, status, version, tags, scripts => [{name, path, executable}, ...], rtt }`.
 
 `parse_host($host_str, $default_port)`
 : Parses `"hostname"` or `"hostname:port"`. Returns `($host, $port)`.
 
 `gen_reqid()`
-: Returns an 8-hex-digit random ID.
+: Returns a 12-hex-character ID composed of a `Time::HiRes` timestamp fragment,
+  PID, and a per-process counter. Format: `TTTTPPPPSSSS`. IDs are opaque
+  strings; no code assumes fixed length.
+
+Private functions (not part of public API but documented for extension):
+
+`_renewal_due($expiry_str, $cert_days)`
+: Returns true if the OpenSSL notAfter date string represents a cert whose
+  remaining validity is less than half of `cert_days`. Returns false (safe
+  default) if the date string cannot be parsed. Uses `Time::Piece` for parsing
+  (core since Perl 5.10).
+
+`_renew_one(%opts)`
+: Performs the full renewal exchange for one agent: POST `/renew` to get CSR,
+  sign via `Dispatcher::CA::sign_csr`, POST `/renew-complete` to deliver cert,
+  update registry. Dies on any failure so the caller can log at ERR.
+  Required: `host`, `port`, `config`, `reqid`.
+
+`_extract_expiry($cert_pem)`
+: Extracts the notAfter date string from a PEM cert via `openssl x509 -noout
+  -enddate`. Returns the date string or undef on failure.
 
 
 ### `Dispatcher::Auth`
@@ -355,6 +441,11 @@ the CLI and the API. If no hook is configured, all requests pass unconditionally
 
 The hook is an external executable called with request context as environment
 variables and a JSON object on stdin. Its exit code determines the outcome.
+
+The hook is the intended policy engine. Dispatcher deliberately does not
+implement config-based ACLs. Per-token script restrictions, per-host targeting
+rules, argument validation, and user-based privilege separation are all
+implemented in the hook.
 
 Exit codes:
 
@@ -368,19 +459,49 @@ Exit codes:
 Environment variables passed to hook:
 
 ```
-DISPATCHER_ACTION     run | ping
-DISPATCHER_SCRIPT     script name (empty for ping)
-DISPATCHER_HOSTS      comma-separated host list
-DISPATCHER_ARGS       space-separated script args
-DISPATCHER_USERNAME   username from request (may be empty)
-DISPATCHER_TOKEN      token from request (may be empty)
-DISPATCHER_SOURCE_IP  originating IP address
-DISPATCHER_TIMESTAMP  ISO8601 UTC timestamp
+DISPATCHER_ACTION      run | ping
+DISPATCHER_SCRIPT      script name (empty for ping)
+DISPATCHER_HOSTS       comma-separated host list
+DISPATCHER_ARGS        space-joined args (lossy if args contain spaces - see below)
+DISPATCHER_ARGS_JSON   args as a JSON array string (reliable for all arg values)
+DISPATCHER_USERNAME    username from request (may be empty)
+DISPATCHER_TOKEN       token from request (may be empty)
+DISPATCHER_SOURCE_IP   originating IP address
+DISPATCHER_TIMESTAMP   ISO8601 UTC timestamp
 ```
 
-stdin: full request context as a JSON object (same fields, hosts and args as arrays).
+`DISPATCHER_ARGS` vs `DISPATCHER_ARGS_JSON`
+: `DISPATCHER_ARGS` is kept for backwards compatibility but is ambiguous when
+  arguments contain spaces - a hook reading it will silently miscalculate the
+  argument count. `DISPATCHER_ARGS_JSON` contains the args as a proper JSON
+  array and should be used for all argument inspection. Example hook pattern
+  using JSON stdin (more complete than env vars alone):
+
+```bash
+#!/bin/bash
+# Restrict the backup token to backup-* scripts only
+if [[ "$DISPATCHER_TOKEN" == "backup-token" ]]; then
+    if [[ "$DISPATCHER_SCRIPT" != backup-* ]]; then
+        exit 3   # insufficient privilege
+    fi
+fi
+
+# Read full args from JSON stdin for reliable argument inspection
+ARGS=$(cat | python3 -c "import sys,json; print(json.load(sys.stdin)['args'])")
+
+# Block dangerous argument patterns regardless of token
+if echo "$ARGS" | grep -q '\-\-drop'; then
+    exit 3
+fi
+
+exit 0
+```
+
+stdin: full request context as a JSON object. Fields: `action`, `script`,
+`hosts` (array), `args` (array), `username`, `token`, `source_ip`, `timestamp`.
 
 The hook must not produce output. Use syslog for audit logging in the hook.
+stdout and stderr are redirected to `/dev/null` before exec.
 
 SIGCHLD note
 : `_run_hook` sets `local $SIG{CHLD} = 'DEFAULT'` before forking the hook
@@ -440,6 +561,31 @@ Functions:
   Closes all filehandles, releasing all flocks.
 
 
+### `Dispatcher::Output`
+
+Output formatting for CLI tables. Extracted from `bin/dispatcher` to enable
+independent unit testing. All functions write to stdout.
+
+Functions:
+
+`format_run_results(\@results)`
+: Prints a table of run results with columns: HOST, EXIT, STDOUT, STDERR.
+  Whitespace-only stdout is suppressed. Appends a newline to stdout/stderr
+  content if not already terminated.
+
+`format_ping_results(\@results)`
+: Prints a table of ping results with columns: HOST, STATUS, RTT, CERT EXPIRY,
+  VERSION.
+
+`format_agent_list(\@agents)`
+: Prints a table of registered agents with columns: HOSTNAME, IP, PAIRED,
+  CERT EXPIRY.
+
+`format_discovery(\%hosts)`
+: Formats the output of a discovery operation, listing each host with its
+  scripts, tags, and status.
+
+
 ### `Dispatcher::API`
 
 HTTP API server. Listens on `api_port` (default 7445). TLS is enabled if
@@ -470,7 +616,7 @@ Endpoints:
 `GET /discovery` or `POST /discovery`
 : Optional body: `{ hosts?, username?, token? }`. If hosts omitted, uses
   `Registry::list_hostnames()` to query all registered agents. Auth uses ping
-  privilege level. Returns `{ ok: true, hosts: { hostname: { scripts, version, rtt, ... } } }`.
+  privilege level. Returns `{ ok: true, hosts: { hostname: { scripts, tags, version, rtt, ... } } }`.
 
 HTTP status codes:
 
@@ -493,19 +639,28 @@ Functions:
 
 Config and allowlist loading for the agent. Both functions die on unrecoverable
 errors (missing file, required key absent) and warn on recoverable issues
-(malformed allowlist line, non-absolute path).
+(malformed allowlist line, non-absolute path, path outside approved dirs).
 
 Functions:
 
 `load_config($path)`
-: Parses `agent.conf`. Returns hashref. Required keys: `port`, `cert`, `key`, `ca`.
+: Parses `agent.conf`. Returns hashref. Required keys: `port`, `cert`, `key`,
+  `ca`. Parses `script_dirs` from a colon-separated string into an arrayref.
+  If absent or empty, the `script_dirs` key is not present in the returned
+  hashref (no restriction). Parses `[tags]` section into `$config->{tags}`
+  hashref; other sections are silently ignored.
 
-`load_allowlist($path)`
+`load_allowlist($path, $script_dirs)`
 : Parses `scripts.conf`. Returns hashref of `{ name => /absolute/path }`.
+  If `$script_dirs` is provided (arrayref), rejects any path not under an
+  approved directory with a warning. If undef, any absolute path is accepted.
 
-`validate_script($name, $allowlist)`
+`validate_script($name, $allowlist, $script_dirs)`
 : Returns the script path if `$name` matches `/^[\w-]+$/` and exists in the
   allowlist, `undef` otherwise. Security gate called on every `run` request.
+  If `$script_dirs` is provided, re-validates the path at execution time (not
+  only at load time), guarding against allowlist modification between load and
+  execution.
 
 Config format (`agent.conf`):
 
@@ -514,6 +669,14 @@ port = 7443
 cert = /etc/dispatcher-agent/agent.crt
 key  = /etc/dispatcher-agent/agent.key
 ca   = /etc/dispatcher-agent/ca.crt
+
+# Optional: restrict scripts to approved directories
+# script_dirs = /opt/dispatcher-scripts:/usr/local/lib/dispatcher-scripts
+
+[tags]
+env  = prod
+role = db
+site = london
 ```
 
 Allowlist format (`scripts.conf`):
@@ -545,12 +708,19 @@ Functions:
 
 ### `Dispatcher::Agent::Pairing`
 
-Agent-side pairing. Generates key and CSR, connects to the dispatcher pairing
-port, submits the CSR and waits (up to 11 minutes) for the signed cert.
+Agent-side pairing and cert renewal support. Generates key and CSR, connects
+to the dispatcher pairing port, submits the CSR and waits (up to 11 minutes)
+for the signed cert. Also handles cert-only renewal using the existing key.
 
 The 11-minute timeout on the socket is intentionally longer than the
 dispatcher's 10-minute poll window, so the agent gets a proper denial response
 rather than a socket timeout.
+
+Nonce
+: `request_pairing` generates a 32-hex-character nonce via `_gen_nonce`, sends
+  it in the pairing payload, and verifies that the nonce in the approval
+  response matches before storing the delivered certs. Mismatched nonce returns
+  `{ ok => 0, error => 'nonce mismatch in pairing response' }`.
 
 Functions:
 
@@ -558,14 +728,22 @@ Functions:
 : Generates a 4096-bit RSA key and a CSR. Returns `{ key_pem, csr_pem }`.
   Options: `hostname` (required), `bits` (default 4096).
 
+`generate_csr_only(%opts)`
+: Generates a CSR from the existing agent key without creating a new key.
+  Used for cert renewal - key continuity is preserved across renewals.
+  Returns `{ csr_pem }`. Required: `hostname`, `key_path`. Dies if the key
+  file does not exist.
+
 `request_pairing(%opts)`
-: Connects to the dispatcher's pairing port, sends `{ hostname, csr }`, waits
-  for response. Returns `{ ok => 1, cert_pem, ca_pem }` or `{ ok => 0, error }`.
+: Connects to the dispatcher's pairing port, sends `{ hostname, csr, nonce }`,
+  waits for response, verifies nonce. Returns `{ ok => 1, cert_pem, ca_pem }`
+  or `{ ok => 0, error }`.
   Options: `dispatcher` (required), `csr_pem`, `hostname`, `port` (default 7444).
 
 `store_certs(%opts)`
 : Writes `agent.crt` (0640), `agent.key` (0640), `ca.crt` (0644) to `cert_dir`.
-  Uses atomic rename via temp file.
+  Uses atomic rename via temp file. Sets group ownership to `dispatcher-agent`
+  if the group exists on the system.
 
 `pairing_status(%opts)`
 : Checks cert files, reads expiry via `openssl x509 -noout -enddate`.
@@ -586,10 +764,18 @@ logic is in the library modules.
 Modes:
 
 `setup-ca`
-: Calls `Dispatcher::CA::generate_ca()`. One-time operation.
+: Calls `Dispatcher::CA::generate_ca()`. One-time operation on the dispatcher
+  host. Creates the CA key and cert in `/etc/dispatcher/`.
+
+`setup-dispatcher`
+: Calls `Dispatcher::CA::generate_dispatcher_cert()`. Generates the
+  dispatcher's own key and cert signed by the CA. Run after `setup-ca`.
+  Replaces the four manual openssl commands previously required.
 
 `pairing-mode`
 : Calls `Dispatcher::Pairing::run_pairing_mode()`. Blocks until interrupted.
+  Interactive when run in a terminal (tty): displays incoming requests and
+  prompts for approve/deny. Non-interactive when piped or run from a service.
 
 `list-requests`
 : Calls `Dispatcher::Pairing::list_requests()` and prints a table.
@@ -602,8 +788,14 @@ Modes:
 : Calls `Dispatcher::Registry::list_agents()` and prints a table of all
   paired agents with hostname, IP, paired timestamp, and cert expiry.
 
+`unpair <hostname>`
+: Calls `Dispatcher::Registry::remove_agent()`. Removes the agent from the
+  registry and prints a warning that the cert remains valid until expiry.
+  Logs `ACTION=unpair` with the cert expiry date.
+
 `ping <host>...`
-: Calls `Engine::ping_all()`. Auth hook checked first.
+: Auth hook checked first, then `Engine::ping_all()`. Cert renewal triggered
+  automatically for any host whose cert is past half-life.
 
 `run <host>... <script> [-- <args>]`
 : Auth hook checked, then `Lock::check_available`, then `Engine::dispatch_all`.
@@ -612,10 +804,6 @@ Auth options
 : `--token` reads from the flag or `$DISPATCHER_TOKEN` env var (never appears
   in `ps` output when set via env). `--username` defaults to `$ENV{USER}`.
   Source IP is hardcoded to `127.0.0.1` for CLI calls.
-
-Parallel execution
-: `dispatch_all` and `ping_all` fork one child per host. Each child writes a
-  JSON result to a pipe and exits. The parent collects all via `waitpid -1, 0`.
 
 Arg parsing for `run`
 : `_parse_run_args()` splits `@ARGV` on `--`. Everything after `--` becomes
@@ -638,11 +826,14 @@ Modes:
 : Starts the `IO::Socket::SSL` server. Forks one child per connection. The
   child calls `handle_connection()` and exits. The parent closes its copy with
   `SSL_no_shutdown => 1` and reaps children with `waitpid -1, WNOHANG`.
-  SIGHUP reloads the allowlist without restart.
+  SIGHUP reloads both config and allowlist without restart; tag changes and
+  `script_dirs` changes take effect on reload.
 
 `request-pairing`
-: Calls `Agent::Pairing::generate_key_and_csr()`, `request_pairing()`,
-  `store_certs()`. Prints progress to stdout.
+: Performs a preflight writability check on `/etc/dispatcher-agent` before
+  making any network connection. Dies immediately with "re-run with sudo" if
+  the directory is not writable. On success: generates key and CSR, connects
+  to the dispatcher pairing port, waits for approval, stores certs.
 
 `pairing-status`
 : Calls `Agent::Pairing::pairing_status()` and prints the result.
@@ -654,16 +845,27 @@ Modes:
 Endpoints handled in `handle_connection`:
 
 `POST /run`
-: Validates script name and allowlist, executes via `Agent::Runner::run_script`,
-  returns `{ script, exit, stdout, stderr, reqid }`.
+: Validates script name against allowlist (and `script_dirs` if configured),
+  executes via `Agent::Runner::run_script`, returns
+  `{ script, exit, stdout, stderr, reqid }`.
 
 `POST /ping`
 : Returns `{ status: "ok", host, version, expiry, reqid }`.
 
 `GET /capabilities`
-: Returns `{ status: "ok", host, version, scripts: [{name, path, executable}, ...] }`.
-  Iterates the loaded allowlist, checks `-x` on each path.
-  Used by `Engine::capabilities_all` and the API `/discovery` endpoint.
+: Returns `{ status: "ok", host, version, tags, scripts: [{name, path, executable}, ...] }`.
+  Iterates the loaded allowlist, checks `-x` on each path. Tags come from
+  `$config->{tags}` (populated from `[tags]` section of `agent.conf`).
+
+`POST /renew`
+: Dispatcher-initiated cert renewal request. Loads config to find the existing
+  key path, calls `Agent::Pairing::generate_csr_only`, returns
+  `{ status: "ok", csr: "<PEM>", reqid }`. Dies on config or CSR generation
+  failure.
+
+`POST /renew-complete`
+: Receives `{ cert, ca, reqid }` from the dispatcher, calls `store_certs` with
+  the new cert and the existing key. Logs `ACTION=renew-complete STATUS=cert-stored`.
 
 
 ## `bin/dispatcher-api`
@@ -682,68 +884,87 @@ All JSON over HTTP/1.0.
 
 Agent endpoints (dispatcher → agent, mTLS on port 7443):
 
-Run request (POST `/run`):
+Run request (`POST /run`):
 
 ```json
-{ "script": "backup-mysql", "args": ["--db", "myapp"], "reqid": "a3f9b2c1" }
+{ "script": "backup-mysql", "args": ["--db", "myapp"], "reqid": "a3f9b2c10001" }
 ```
 
 Run response:
 
 ```json
-{ "script": "backup-mysql", "exit": 0, "stdout": "...", "stderr": "", "reqid": "a3f9b2c1" }
+{ "script": "backup-mysql", "exit": 0, "stdout": "...", "stderr": "", "reqid": "a3f9b2c10001" }
 ```
 
-Ping request (POST `/ping`):
+Ping request (`POST /ping`):
 
 ```json
-{ "reqid": "b7c3d1e4" }
+{ "reqid": "b7c3d1e40001" }
 ```
 
 Ping response:
 
 ```json
-{ "status": "ok", "host": "prod-db-01", "version": "0.1", "expiry": "Jun  7 2028 GMT", "reqid": "b7c3d1e4" }
+{ "status": "ok", "host": "prod-db-01", "version": "0.1", "expiry": "Jun  7 16:28:00 2027 GMT", "reqid": "b7c3d1e40001" }
 ```
 
-Capabilities response (GET `/capabilities`):
+Capabilities response (`GET /capabilities`):
 
 ```json
 {
   "status": "ok", "host": "sjm-explore", "version": "0.1",
+  "tags": { "env": "prod", "role": "db" },
   "scripts": [
-    { "name": "logger", "path": "/usr/bin/logger", "executable": true }
+    { "name": "backup-mysql", "path": "/opt/dispatcher-scripts/backup-mysql.sh", "executable": true }
   ]
 }
 ```
 
-Pairing request (agent → dispatcher, port 7444, POST `/pair`):
+Cert renewal request (`POST /renew`, dispatcher → agent):
 
 ```json
-{ "hostname": "sjm-explore", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n..." }
+{ "reqid": "c1d2e3f40001" }
+```
+
+Cert renewal response (agent → dispatcher):
+
+```json
+{ "status": "ok", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "reqid": "c1d2e3f40001" }
+```
+
+Cert delivery (`POST /renew-complete`, dispatcher → agent):
+
+```json
+{ "status": "ok", "cert": "-----BEGIN CERTIFICATE-----\n...", "ca": "-----BEGIN CERTIFICATE-----\n...", "reqid": "c1d2e3f40001" }
+```
+
+Pairing request (agent → dispatcher, port 7444, `POST /pair`):
+
+```json
+{ "hostname": "sjm-explore", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "nonce": "a3f4c2b1..." }
 ```
 
 Pairing response:
 
 ```json
-{ "status": "approved", "cert": "-----BEGIN CERTIFICATE-----\n...", "ca": "-----BEGIN CERTIFICATE-----\n..." }
+{ "status": "approved", "cert": "-----BEGIN CERTIFICATE-----\n...", "ca": "-----BEGIN CERTIFICATE-----\n...", "nonce": "a3f4c2b1..." }
 ```
 
 API endpoints (caller → dispatcher-api, port 7445):
 
-POST `/ping` request:
+`POST /ping` request:
 
 ```json
 { "hosts": ["sjm-explore", "prod-db-01"], "username": "stuart", "token": "..." }
 ```
 
-POST `/run` request:
+`POST /run` request:
 
 ```json
-{ "hosts": ["sjm-explore"], "script": "logger", "args": ["-t", "test", "hello"], "username": "stuart", "token": "..." }
+{ "hosts": ["sjm-explore"], "script": "backup-mysql", "args": ["--db", "myapp"], "username": "stuart", "token": "..." }
 ```
 
-GET `/discovery` response:
+`GET /discovery` response:
 
 ```json
 {
@@ -751,7 +972,8 @@ GET `/discovery` response:
   "hosts": {
     "sjm-explore": {
       "status": "ok", "version": "0.1", "rtt": "68ms",
-      "scripts": [{ "name": "logger", "path": "/usr/bin/logger", "executable": true }]
+      "tags": { "env": "prod", "role": "db" },
+      "scripts": [{ "name": "backup-mysql", "path": "/opt/scripts/backup-mysql.sh", "executable": true }]
     }
   }
 }
@@ -772,10 +994,13 @@ all remaining keys alphabetical. Values containing spaces are quoted.
 Dispatcher examples:
 
 ```
-dispatcher[1234]: ACTION=dispatch HOSTS=prod-db-01 REQID=a3f9b2c1 SCRIPT=backup-mysql
-dispatcher[1234]: ACTION=run EXIT=0 REQID=a3f9b2c1 RTT=87ms SCRIPT=backup-mysql TARGET=prod-db-01:7443
-dispatcher[1234]: ACTION=pair-approve AGENT=sjm-explore REQID=fa5e7463
+dispatcher[1234]: ACTION=dispatch HOSTS=prod-db-01 REQID=a3f9b2c10001 SCRIPT=backup-mysql
+dispatcher[1234]: ACTION=run EXIT=0 REQID=a3f9b2c10001 RTT=87ms SCRIPT=backup-mysql TARGET=prod-db-01:7443
+dispatcher[1234]: ACTION=pair-approve AGENT=sjm-explore REQID=fa5e74630001
 dispatcher[1234]: ACTION=auth AUTHACTION=run IP=127.0.0.1 RESULT=pass USER=stuart
+dispatcher[1234]: ACTION=unpair AGENT=sjm-explore EXPIRY="Jun  7 16:28:00 2027 GMT"
+dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=sjm-explore:7443
+dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=sjm-explore:7443
 dispatcher[1234]: ACTION=lock-acquire HOST=sjm-explore SCRIPT=backup-mysql
 ```
 
@@ -783,10 +1008,12 @@ Agent examples:
 
 ```
 dispatcher-agent[5678]: ACTION=start PORT=7443
-dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.168.125.189 REQID=a3f9b2c1 SCRIPT=backup-mysql
-dispatcher-agent[5678]: ACTION=deny PEER=192.168.125.189 REQID=b1c2d3e4 SCRIPT=not-in-allowlist
-dispatcher-agent[5678]: ACTION=ping PEER=192.168.125.189 REQID=b7c3d1e4
+dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.168.125.189 REQID=a3f9b2c10001 SCRIPT=backup-mysql
+dispatcher-agent[5678]: ACTION=deny PEER=192.168.125.189 REQID=b1c2d3e40001 SCRIPT=not-in-allowlist
+dispatcher-agent[5678]: ACTION=ping PEER=192.168.125.189 REQID=b7c3d1e40001
 dispatcher-agent[5678]: ACTION=capabilities PEER=192.168.125.189 SCRIPTS=3
+dispatcher-agent[5678]: ACTION=renew PEER=192.168.125.189 REQID=c1d2e3f40001 STATUS=csr-generated
+dispatcher-agent[5678]: ACTION=renew-complete PEER=192.168.125.189 REQID=c1d2e3f40001 STATUS=cert-stored
 ```
 
 API examples:
@@ -801,12 +1028,48 @@ The REQID field appears in both dispatcher and agent log lines for the same
 operation, enabling cross-host log correlation.
 
 
+## Automatic Cert Renewal
+
+Cert lifetime is configured in `dispatcher.conf` as `cert_days` (default 365).
+Renewal is triggered by the dispatcher after every successful ping when the
+agent's remaining cert validity drops below half the configured lifetime.
+
+The renewal flow:
+
+1. `ping_all` collects ping results. For each successful result, `_renewal_due`
+   parses the returned expiry string and compares remaining seconds against
+   `(cert_days / 2) * 86400`.
+2. If renewal is due, `_renew_one` sends `POST /renew` to the agent. The agent
+   generates a CSR from its existing key (`generate_csr_only`) and returns it.
+   The key is not regenerated - key continuity is preserved across renewals.
+3. The dispatcher signs the CSR via `Dispatcher::CA::sign_csr` using
+   `cert_days` from config, then sends `POST /renew-complete` with the new
+   cert and CA PEM.
+4. The agent stores the new cert via `store_certs` and logs completion.
+5. The dispatcher updates the registry expiry for the agent.
+
+Renewal failure is logged at ERR level and does not affect the ping result.
+The operator can investigate via syslog. A cert that fails renewal will
+eventually expire; the next successful ping will retry renewal.
+
+An agent that has been out of contact for the full cert lifetime self-expires,
+which is correct behaviour for a decommissioned host that was never explicitly
+unpaired.
+
+
 ## Security Model
 
 allowlist validation
 : `validate_script()` checks the name against `/^[\w-]+$/` before allowlist
   lookup. This prevents path traversal (no `/` or `..` can pass). The allowlist
   maps names to absolute paths; relative paths are rejected at load time.
+
+script_dirs restriction
+: If `script_dirs` is configured in `agent.conf`, `load_allowlist` rejects any
+  path not under an approved directory at load time. `validate_script` also
+  re-checks the resolved path at execution time, guarding against allowlist
+  modifications between agent startup and execution. When not configured,
+  behaviour is unchanged - any absolute path is permitted (opt-in hardening).
 
 no shell execution
 : `exec { $path } $path, @args` passes the argument list directly to the OS.
@@ -820,8 +1083,26 @@ mTLS on port 7443
 pairing port security
 : Port 7444 uses `SSL_VERIFY_NONE` for the client - the agent has no cert yet.
   This is a bootstrap problem: the first connection is unauthenticated.
-  Mitigation: the operator reviews the hostname and IP in `list-requests` before
-  approving. The pairing port is only open when `pairing-mode` is running.
+  Mitigation: the operator reviews the hostname and IP before approving. The
+  pairing port is only open when `pairing-mode` is running. Nonce verification
+  prevents misrouted or replayed approvals.
+
+pairing preflight check
+: `request-pairing` verifies that `/etc/dispatcher-agent` is writable before
+  making any network connection. This prevents a stale pairing request being
+  left in the dispatcher queue when the agent cannot write the received certs.
+
+cert renewal security
+: Renewal uses the already-authenticated mTLS connection on port 7443. The
+  dispatcher only initiates renewal for hosts in its registry. The agent only
+  accepts renewal over the authenticated operational port - pairing mode does
+  not need to be running.
+
+unpairing
+: `dispatcher unpair <hostname>` removes the registry entry, ending the
+  dispatcher's knowledge of the agent. The agent's cert remains technically
+  valid until its natural expiry date. No CRL mechanism is implemented. The
+  agent should be decommissioned promptly after unpairing.
 
 API security
 : Port 7445 has no mTLS. Auth is delegated entirely to the auth hook. The
@@ -854,7 +1135,7 @@ SIGCHLD race in auth hook (fixed)
   forked children. When `_run_hook` in `Auth.pm` forks the hook executable, the
   inherited reaper could collect the hook grandchild before `_run_hook`'s own
   `waitpid` could. `waitpid` on an already-reaped PID returns -1, `$?` stays
-  -1, and `(-1 >> 8) & 0xff = 255`, appearing as a hook failure.
+  -1, and `($? >> 8) & 0xff = 255`, appearing as a hook failure.
   Fixed by setting `local $SIG{CHLD} = 'DEFAULT'` before the fork in `_run_hook`.
 
 `HTTP::Daemon::SSL` interoperability (fixed)
@@ -866,6 +1147,11 @@ SIGCHLD race in auth hook (fixed)
 : `GetOptions` strips `--` from `@ARGV` by default, causing all args after `--`
   to be treated as hosts. Fixed with `:config pass_through`.
 
+Interactive pairing prompt buffering (fixed)
+: When STDIN is a tty, the pairing mode prompt was written to a buffered
+  stdout and did not appear until Ctrl-C flushed the buffer. Fixed by setting
+  `local $| = 1` (autoflush) at the start of `run_pairing_mode` when
+  interactive mode is detected.
 
 
 ## Adding a New Script to an Agent
@@ -886,7 +1172,8 @@ echo "my-script = /opt/dispatcher-scripts/my-script.sh" \
 sudo systemctl kill --signal=HUP dispatcher-agent
 
 # Verify discovery sees the new script
-curl -s http://localhost:7445/discovery | python3 -m json.tool
+sudo dispatcher ping sjm-explore
+sudo dispatcher run sjm-explore my-script
 ```
 
 Scripts receive positional arguments exactly as passed. They should exit 0 on
@@ -898,7 +1185,8 @@ success, non-zero on failure. stdout and stderr are both captured and returned.
 Adding a new agent endpoint
 : Add a route check in `handle_connection()` in `bin/dispatcher-agent`.
   Add the handler following the `handle_run`/`handle_ping` pattern: decode
-  body, do work, call `_send_json()`.
+  body, do work, call `_send_json()`. Pass `$config` if agent configuration
+  or tags are needed.
 
 Adding a new API endpoint
 : Add a route in `_handle_connection()` in `Dispatcher::API`. Add a
@@ -907,12 +1195,27 @@ Adding a new API endpoint
 
 Adding a new dispatcher CLI mode
 : Add an entry to the `%dispatch` hash in `main()` in `bin/dispatcher`.
-  Keep network logic in Engine; keep output formatting in the mode function.
+  Add a `mode_*` function. Keep network logic in Engine; keep output formatting
+  in `Dispatcher::Output`; keep the mode function thin.
 
 Adding a new library module
 : Place in `lib/Dispatcher/` or `lib/Dispatcher/Agent/`. Use `use strict;
   use warnings;`. All callers use `Module::function()` syntax - nothing exported
   by default. Private helpers prefixed `_`. Add a corresponding test in `t/`.
+
+Adding agent tags
+: Tags are free-form key-value pairs in the `[tags]` section of `agent.conf`.
+  They appear in `/capabilities` responses and therefore in discovery output.
+  The dispatcher does not interpret them. Tag-based filtering or routing belongs
+  in the auth hook or in tooling that consumes the API.
+
+Changing cert lifetime
+: Set `cert_days` in `dispatcher.conf`. All new certs (pairing and renewal)
+  will use the new value. Existing certs are unaffected until their next
+  renewal. Renewal is triggered at half the configured lifetime, so a change
+  from 365 to 730 days will mean existing 365-day certs are renewed when they
+  have approximately 182 days remaining, then the new 730-day cert begins its
+  own half-life cycle.
 
 
 ## Dependencies
@@ -936,5 +1239,5 @@ openssl                  (binary)          CA and cert operations
 
 Both roles also use core Perl modules (`Sys::Syslog`, `File::Temp`, `File::Path`,
 `File::Basename`, `Getopt::Long`, `Sys::Hostname`, `POSIX`, `Time::HiRes`,
-`Fcntl`, `IPC::Open2`, `Carp`) which are in `perl-base` or `perl` and present
-on any Debian system.
+`Time::Piece`, `IO::Select`, `Fcntl`, `IPC::Open2`, `Carp`) which are in
+`perl-base` or `perl` and present on any Debian system.
