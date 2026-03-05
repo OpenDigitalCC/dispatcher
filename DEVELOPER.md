@@ -867,49 +867,6 @@ SIGCHLD race in auth hook (fixed)
   to be treated as hosts. Fixed with `:config pass_through`.
 
 
-## Todo
-
-unpairing
-: Remove an agent from the registry and revoke trust. Requires deleting the
-  registry entry, and ideally invalidating the agent cert (CRL or re-issuing
-  all certs with a new CA serial range). Currently re-pairing overwrites the
-  registry entry but the old cert remains valid until expiry.
-
-multiple dispatcher support
-: Allow an agent to trust more than one dispatcher CA. The PEM format supports
-  multiple certs in one file by concatenation. `IO::Socket::SSL` accepts a
-  multi-cert CA file. The change required is in `Agent::Pairing::store_certs`:
-  merge the new CA into the existing `ca.crt` bundle rather than overwriting it.
-  The allowlist does not distinguish by dispatcher - any trusted dispatcher can
-  run any allowed script.
-
-installer: `apt-get` → `apt`
-: Replace all `apt-get install` suggestions in installer output with `apt install`.
-
-installer: `sudo` prefix on suggested commands
-: Prefix suggested post-install commands with `sudo` since the operator is not
-  necessarily root at that point.
-
-installer: `setup-ca` helper
-: Add a helper function to the installer (or a separate `dispatcher setup-ca`
-  subcommand improvement) that generates the dispatcher cert in one step, replacing
-  the current four manual `openssl` commands in the next-steps output.
-
-cert renewal
-: Agent certs are signed for 825 days with no automated renewal. A `renew`
-  mode on both agent and dispatcher would re-run the pairing flow and overwrite
-  certs without requiring operator intervention beyond approving the new CSR.
-
-reqid entropy
-: `gen_reqid()` uses `rand()` with Perl's default seeding. For higher-volume
-  environments, combining `Time::HiRes`, PID, and a counter would give better
-  uniqueness guarantees.
-
-output module
-: `_format_run_results()` and `_format_ping_results()` in `bin/dispatcher` are
-  not independently testable without invoking the CLI. Extracting to a
-  `Dispatcher::Output` module would allow unit tests.
-
 
 ## Adding a New Script to an Agent
 
