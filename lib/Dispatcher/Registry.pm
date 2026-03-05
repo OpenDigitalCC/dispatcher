@@ -77,6 +77,29 @@ sub get_agent {
     return eval { decode_json(_slurp($path)) };
 }
 
+# Remove a registered agent from the registry.
+# Returns the deleted record so the caller can log details.
+# Dies if the agent is not found.
+#
+# Required opts:
+#   hostname => $str
+#
+# Note: the agent's certificate remains valid until its natural expiry.
+# The cert is not revoked - the agent should be decommissioned promptly.
+sub remove_agent {
+    my (%opts) = @_;
+    my $hostname = $opts{hostname} or croak "hostname required";
+    my $dir      = $opts{registry_dir} // $REGISTRY_DIR;
+    my $path     = "$dir/$hostname.json";
+
+    croak "No registry entry for '$hostname'" unless -f $path;
+
+    my $record = eval { decode_json(_slurp($path)) } // {};
+    unlink $path or croak "Cannot remove registry entry '$path': $!";
+
+    return $record;
+}
+
 # Return list of hostnames only - convenience for building host lists
 # to pass to Engine functions.
 sub list_hostnames {

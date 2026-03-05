@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use Test::More tests => 24;
+use Test::More;
 use File::Temp qw(tempdir);
 use FindBin    qw($Bin);
 use lib "$Bin/../lib";
@@ -131,6 +131,58 @@ my $dir = tempdir(CLEANUP => 1);
     ok exists $agent->{paired},   'record: paired field present';
     ok exists $agent->{expiry},   'record: expiry field present';
     ok exists $agent->{reqid},    'record: reqid field present';
+}
+
+# --- remove_agent ---
+
+{
+    eval { Dispatcher::Registry::remove_agent(registry_dir => $dir) };
+    like $@, qr/hostname required/, 'remove_agent: dies without hostname';
+}
+
+{
+    eval { Dispatcher::Registry::remove_agent(
+        hostname     => 'does-not-exist',
+        registry_dir => $dir,
+    ) };
+    like $@, qr/No registry entry/, 'remove_agent: dies for unknown host';
+}
+
+{
+    # Register a host to remove
+    Dispatcher::Registry::register_agent(
+        hostname     => 'host-to-remove',
+        ip           => '10.0.0.99',
+        paired       => '2026-03-05T15:00:00Z',
+        expiry       => 'Jun  7 13:00:00 2027 GMT',
+        reqid        => 'deadbeef',
+        registry_dir => $dir,
+    );
+
+    my $record = Dispatcher::Registry::remove_agent(
+        hostname     => 'host-to-remove',
+        registry_dir => $dir,
+    );
+
+    ok !-f "$dir/host-to-remove.json", 'remove_agent: registry file deleted';
+    is $record->{hostname}, 'host-to-remove', 'remove_agent: returns deleted record';
+    is $record->{expiry}, 'Jun  7 13:00:00 2027 GMT', 'remove_agent: record includes expiry';
+}
+
+{
+    # Confirm removed agent no longer appears in list
+    my $agents = Dispatcher::Registry::list_agents(registry_dir => $dir);
+    my @found = grep { $_->{hostname} eq 'host-to-remove' } @$agents;
+    is scalar @found, 0, 'remove_agent: agent no longer in list_agents';
+}
+
+{
+    # Confirm get_agent returns undef after removal
+    my $agent = Dispatcher::Registry::get_agent(
+        hostname     => 'host-to-remove',
+        registry_dir => $dir,
+    );
+    ok !defined $agent, 'remove_agent: get_agent returns undef after removal';
 }
 
 done_testing;
