@@ -16,12 +16,27 @@ sub load_config {
         or croak "Cannot open config '$path': $!";
 
     my %config;
+    my $section = '';   # current section name; '' means top-level
+
     while (my $line = <$fh>) {
         chomp $line;
         next if $line =~ /^\s*#/;   # skip comments
         next if $line =~ /^\s*$/;   # skip blank lines
-        if ($line =~ /^\s*(\w+)\s*=\s*(.+?)\s*$/) {
-            $config{$1} = $2;
+
+        if ($line =~ /^\s*\[(\w+)\]\s*$/) {
+            $section = lc $1;
+            next;
+        }
+
+        if ($line =~ /^\s*(\w+[\w-]*)\s*=\s*(.+?)\s*$/) {
+            my ($k, $v) = ($1, $2);
+            if ($section eq 'tags') {
+                $config{tags}{$k} = $v;
+            }
+            elsif ($section eq '') {
+                $config{$k} = $v;
+            }
+            # silently ignore keys in unrecognised sections
         }
         else {
             croak "Malformed config line in '$path': $line";

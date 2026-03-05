@@ -59,7 +59,9 @@ sub mode_serve {
     my $allowlist = Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH);
 
     $SIG{HUP} = sub {
-        warn "Reloading allowlist...\n";
+        warn "Reloading config and allowlist...\n";
+        $config    = eval { Dispatcher::Agent::Config::load_config($CONFIG_PATH) }
+                     // do { warn "Config reload failed: $@\n"; $config };
         $allowlist = eval { Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH) };
         warn "Allowlist reload failed: $@\n" if $@;
     };
@@ -92,7 +94,7 @@ sub mode_serve {
         if ($pid == 0) {
             # Child: close server socket, handle connection, exit
             $server->close(SSL_no_shutdown => 1);
-            handle_connection($conn, $peer, $allowlist);
+            handle_connection($conn, $peer, $allowlist, $config);
             $conn->close;
             exit 0;
         }
@@ -192,7 +194,7 @@ sub mode_ping_self {
 # Reads raw HTTP/1.0 request from IO::Socket::SSL, dispatches, sends response.
 
 sub handle_connection {
-    my ($conn, $peer, $allowlist) = @_;
+    my ($conn, $peer, $allowlist, $config) = @_;
 
     # Read request line
     my $request_line = <$conn>;
@@ -229,7 +231,7 @@ sub handle_connection {
         handle_ping($conn, $body, $peer);
     }
     elsif ($method eq 'GET' && $path eq '/capabilities') {
-        handle_capabilities($conn, $peer, $allowlist);
+        handle_capabilities($conn, $peer, $allowlist, $config);
     }
     elsif ($method eq 'POST' && $path eq '/renew') {
         handle_renew($conn, $body, $peer);
@@ -321,7 +323,7 @@ sub handle_ping {
 }
 
 sub handle_capabilities {
-    my ($conn, $peer, $allowlist) = @_;
+    my ($conn, $peer, $allowlist, $config) = @_;
 
     my @scripts;
     for my $name (sort keys %$allowlist) {
@@ -343,6 +345,7 @@ sub handle_capabilities {
         status  => 'ok',
         host    => hostname(),
         version => $VERSION,
+        tags    => ($config->{tags} // {}),
         scripts => \@scripts,
     });
 }

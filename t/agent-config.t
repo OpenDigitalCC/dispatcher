@@ -136,4 +136,81 @@ subtest 'validate_script: undef name returns undef' => sub {
     ok !defined $r, 'undef for undef name';
 };
 
+# --- [tags] section ---
+
+subtest 'load_config: [tags] section parsed into tags hashref' => sub {
+    my $path = write_temp(<<'END');
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+
+[tags]
+env  = prod
+role = db
+site = london
+END
+    my $c = Dispatcher::Agent::Config::load_config($path);
+    is ref($c->{tags}), 'HASH',   'tags is a hashref';
+    is $c->{tags}{env},  'prod',   'env tag parsed';
+    is $c->{tags}{role}, 'db',     'role tag parsed';
+    is $c->{tags}{site}, 'london', 'site tag parsed';
+};
+
+subtest 'load_config: [tags] section is optional' => sub {
+    my $path = write_temp(<<'END');
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+END
+    my $c = Dispatcher::Agent::Config::load_config($path);
+    ok !defined $c->{tags} || ref($c->{tags}) eq 'HASH',
+        'tags absent or empty hashref when section not present';
+};
+
+subtest 'load_config: tags do not interfere with top-level keys' => sub {
+    my $path = write_temp(<<'END');
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+
+[tags]
+env = staging
+END
+    my $c = Dispatcher::Agent::Config::load_config($path);
+    is $c->{port}, '7443',     'port unaffected by tags section';
+    is $c->{tags}{env}, 'staging', 'tag parsed correctly';
+    ok !exists $c->{env}, 'tag key not promoted to top-level config';
+};
+
+subtest 'load_config: unknown section keys are silently ignored' => sub {
+    my $path = write_temp(<<'END');
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+
+[unknown]
+foo = bar
+END
+    my $c = eval { Dispatcher::Agent::Config::load_config($path) };
+    ok !$@,               'no error for unknown section';
+    ok !exists $c->{foo}, 'unknown section key not in config';
+};
+
+subtest 'load_config: empty [tags] section returns empty hashref' => sub {
+    my $path = write_temp(<<'END');
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+
+[tags]
+END
+    my $c = eval { Dispatcher::Agent::Config::load_config($path) };
+    ok !$@, 'no error for empty tags section';
+};
+
 done_testing;
