@@ -1,0 +1,7 @@
+# dispatcher-agent configuration
+# /etc/dispatcher-agent/agent.conf
+
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt

@@ -1,0 +1,30 @@
+#!/bin/bash
+# auth-hook.example - Dispatcher authorisation hook
+#
+# This hook is called before every run and ping request, from both the
+# CLI and the API. It receives request context as environment variables
+# and as a JSON object on stdin.
+#
+# Environment variables:
+#   DISPATCHER_ACTION     run | ping
+#   DISPATCHER_SCRIPT     script name (empty for ping)
+#   DISPATCHER_HOSTS      comma-separated host list
+#   DISPATCHER_ARGS       space-separated script args
+#   DISPATCHER_USERNAME   username from request (may be empty)
+#   DISPATCHER_TOKEN      token from request (may be empty)
+#   DISPATCHER_SOURCE_IP  originating IP address
+#   DISPATCHER_TIMESTAMP  ISO8601 UTC timestamp
+#
+# stdin: full request context as a JSON object (same fields as above,
+#        with hosts and args as arrays)
+#
+# Exit codes:
+#   0   authorised
+#   1   denied - generic
+#   2   denied - bad credentials
+#   3   denied - insufficient privilege
+#
+# This example always authorises. Replace with real logic as needed.
+# The hook should not produce output; use syslog for audit logging.
+
+exit 0

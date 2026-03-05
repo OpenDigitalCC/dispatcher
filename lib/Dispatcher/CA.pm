@@ -1,0 +1,130 @@
+package Dispatcher::CA;
+
+use strict;
+use warnings;
+use File::Temp  qw(tempfile tempdir);
+use File::Path  qw(make_path);
+use Carp        qw(croak);
+
+our $VERSION = '0.1';
+
+my $CA_DIR   = '/etc/dispatcher';
+my $CA_KEY   = "$CA_DIR/ca.key";
+my $CA_CERT  = "$CA_DIR/ca.crt";
+my $SERIAL   = "$CA_DIR/ca.serial";
+
+# One-time CA setup - generates ca.key and ca.crt
+# Dies if CA already exists unless force => 1
+sub generate_ca {
+    my (%opts) = @_;
+    my $days  = $opts{days}  // 3650;
+    my $bits  = $opts{bits}  // 4096;
+    my $cn    = $opts{cn}    // 'Dispatcher CA';
+    my $force = $opts{force} // 0;
+    my $ca_dir = $opts{ca_dir} // $CA_DIR;
+
+    my $ca_key  = "$ca_dir/ca.key";
+    my $ca_cert = "$ca_dir/ca.crt";
+
+    if (-f $ca_key && !$force) {
+        croak "CA already exists at '$ca_key'. Use force => 1 to overwrite.";
+    }
+
+    make_path($ca_dir) unless -d $ca_dir;
+
+    _run_or_die('openssl', 'genrsa', '-out', $ca_key, $bits);
+    chmod 0600, $ca_key;
+
+    _run_or_die(
+        'openssl', 'req', '-new', '-x509',
+        '-key',     $ca_key,
+        '-out',     $ca_cert,
+        '-days',    $days,
+        '-subj',    "/CN=$cn",
+    );
+
+    _write_serial("$ca_dir/ca.serial", '01');
+
+    return { ca_key => $ca_key, ca_cert => $ca_cert };
+}
+
+# Sign a CSR PEM string, return the signed cert PEM
+# Writes cert to $out_path if provided, else returns PEM string only
+sub sign_csr {
+    my (%opts) = @_;
+    my $csr_pem  = $opts{csr_pem}  or croak "csr_pem required";
+    my $days     = $opts{days}     // 825;
+    my $ca_dir   = $opts{ca_dir}   // $CA_DIR;
+    my $out_path = $opts{out_path};
+
+    my $ca_key   = "$ca_dir/ca.key";
+    my $ca_cert  = "$ca_dir/ca.crt";
+    my $serial   = "$ca_dir/ca.serial";
+
+    croak "CA key not found at '$ca_key'"   unless -f $ca_key;
+    croak "CA cert not found at '$ca_cert'" unless -f $ca_cert;
+
+    # Write CSR to temp file
+    my ($csr_fh, $csr_path) = tempfile(SUFFIX => '.csr', UNLINK => 1);
+    print $csr_fh $csr_pem;
+    close $csr_fh;
+
+    my ($cert_fh, $cert_path) = tempfile(SUFFIX => '.crt', UNLINK => 1);
+    close $cert_fh;
+
+    _run_or_die(
+        'openssl', 'x509', '-req',
+        '-in',        $csr_path,
+        '-CA',        $ca_cert,
+        '-CAkey',     $ca_key,
+        '-CAserial',  $serial,
+        '-CAcreateserial',
+        '-out',       $cert_path,
+        '-days',      $days,
+    );
+
+    my $cert_pem = _slurp($cert_path);
+
+    if ($out_path) {
+        _write_file($out_path, $cert_pem, 0644);
+    }
+
+    return $cert_pem;
+}
+
+# Read CA cert PEM - for distribution to agents during pairing
+sub read_ca_cert {
+    my (%opts) = @_;
+    my $ca_dir = $opts{ca_dir} // $CA_DIR;
+    return _slurp("$ca_dir/ca.crt");
+}
+
+# --- private helpers ---
+
+sub _run_or_die {
+    my @cmd = @_;
+    system(@cmd) == 0
+        or croak "Command failed (@cmd): exit $?";
+}
+
+sub _slurp {
+    my ($path) = @_;
+    open my $fh, '<', $path or croak "Cannot read '$path': $!";
+    local $/;
+    return scalar <$fh>;
+}
+
+sub _write_file {
+    my ($path, $content, $mode) = @_;
+    open my $fh, '>', $path or croak "Cannot write '$path': $!";
+    print $fh $content;
+    close $fh;
+    chmod $mode, $path;
+}
+
+sub _write_serial {
+    my ($path, $value) = @_;
+    _write_file($path, $value, 0600);
+}
+
+1;

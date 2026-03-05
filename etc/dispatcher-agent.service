@@ -1,0 +1,39 @@
+[Unit]
+Description=Dispatcher Agent - remote script execution service
+Documentation=https://github.com/yourorg/dispatcher
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=dispatcher-agent
+Group=dispatcher-agent
+
+ExecStart=/usr/local/bin/dispatcher-agent serve
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+# Give the process time to shut down cleanly
+TimeoutStopSec=10
+
+# Logging goes via syslog; suppress journal duplication
+StandardOutput=null
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log
+PrivateTmp=yes
+PrivateDevices=yes
+
+# Allow reading config and certs
+ReadOnlyPaths=/etc/dispatcher-agent
+
+# Allow executing scripts in the managed scripts directory
+ReadOnlyPaths=/opt/dispatcher-scripts
+
+[Install]
+WantedBy=multi-user.target

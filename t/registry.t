@@ -1,0 +1,136 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Test::More tests => 24;
+use File::Temp qw(tempdir);
+use FindBin    qw($Bin);
+use lib "$Bin/../lib";
+
+use Dispatcher::Registry qw();
+
+my $dir = tempdir(CLEANUP => 1);
+
+# --- register_agent ---
+
+{
+    eval { Dispatcher::Registry::register_agent(registry_dir => $dir) };
+    like $@, qr/hostname required/, 'register_agent: dies without hostname';
+}
+
+{
+    Dispatcher::Registry::register_agent(
+        hostname     => 'host-a',
+        ip           => '10.0.0.1',
+        paired       => '2026-03-05T12:00:00Z',
+        expiry       => 'Jun  7 13:00:00 2028 GMT',
+        reqid        => 'aabbccdd',
+        registry_dir => $dir,
+    );
+    ok -f "$dir/host-a.json", 'register_agent: creates JSON file';
+}
+
+{
+    # Re-register same host - should overwrite
+    Dispatcher::Registry::register_agent(
+        hostname     => 'host-a',
+        ip           => '10.0.0.2',
+        paired       => '2026-03-05T13:00:00Z',
+        expiry       => 'Jun  7 13:00:00 2029 GMT',
+        reqid        => 'eeff0011',
+        registry_dir => $dir,
+    );
+
+    my $agent = Dispatcher::Registry::get_agent(
+        hostname     => 'host-a',
+        registry_dir => $dir,
+    );
+    is $agent->{ip},     '10.0.0.2',              'register_agent: overwrites existing entry';
+    is $agent->{expiry}, 'Jun  7 13:00:00 2029 GMT', 'register_agent: updates expiry on overwrite';
+}
+
+# --- get_agent ---
+
+{
+    eval { Dispatcher::Registry::get_agent(registry_dir => $dir) };
+    like $@, qr/hostname required/, 'get_agent: dies without hostname';
+}
+
+{
+    my $agent = Dispatcher::Registry::get_agent(
+        hostname     => 'host-a',
+        registry_dir => $dir,
+    );
+    ok defined $agent,               'get_agent: returns record for known host';
+    is $agent->{hostname}, 'host-a', 'get_agent: hostname field';
+    is $agent->{reqid}, 'eeff0011',  'get_agent: reqid field';
+}
+
+{
+    my $agent = Dispatcher::Registry::get_agent(
+        hostname     => 'does-not-exist',
+        registry_dir => $dir,
+    );
+    ok !defined $agent, 'get_agent: returns undef for unknown host';
+}
+
+# --- list_agents ---
+
+{
+    # Add more agents
+    for my $h (qw(host-b host-c)) {
+        Dispatcher::Registry::register_agent(
+            hostname     => $h,
+            ip           => '10.0.0.5',
+            paired       => '2026-03-05T14:00:00Z',
+            expiry       => 'Jun  7 2028',
+            reqid        => 'deadbeef',
+            registry_dir => $dir,
+        );
+    }
+
+    my $agents = Dispatcher::Registry::list_agents(registry_dir => $dir);
+    is scalar @$agents, 3, 'list_agents: returns all registered agents';
+
+    # Should be sorted by hostname
+    is $agents->[0]{hostname}, 'host-a', 'list_agents: sorted alphabetically (first)';
+    is $agents->[1]{hostname}, 'host-b', 'list_agents: sorted alphabetically (second)';
+    is $agents->[2]{hostname}, 'host-c', 'list_agents: sorted alphabetically (third)';
+}
+
+{
+    my $empty_dir = tempdir(CLEANUP => 1);
+    my $agents = Dispatcher::Registry::list_agents(registry_dir => $empty_dir);
+    is_deeply $agents, [], 'list_agents: empty list for empty dir';
+}
+
+{
+    my $no_dir = tempdir(CLEANUP => 1) . '/nonexistent';
+    my $agents = Dispatcher::Registry::list_agents(registry_dir => $no_dir);
+    is_deeply $agents, [], 'list_agents: empty list when dir does not exist';
+}
+
+# --- list_hostnames ---
+
+{
+    my $hosts = Dispatcher::Registry::list_hostnames(registry_dir => $dir);
+    is scalar @$hosts, 3,        'list_hostnames: returns correct count';
+    is $hosts->[0], 'host-a',    'list_hostnames: first hostname';
+    is $hosts->[2], 'host-c',    'list_hostnames: last hostname';
+    ok !ref($hosts->[0]),        'list_hostnames: returns plain strings not hashrefs';
+}
+
+# --- record completeness ---
+
+{
+    my $agent = Dispatcher::Registry::get_agent(
+        hostname     => 'host-b',
+        registry_dir => $dir,
+    );
+    ok exists $agent->{hostname}, 'record: hostname field present';
+    ok exists $agent->{ip},       'record: ip field present';
+    ok exists $agent->{paired},   'record: paired field present';
+    ok exists $agent->{expiry},   'record: expiry field present';
+    ok exists $agent->{reqid},    'record: reqid field present';
+}
+
+done_testing;

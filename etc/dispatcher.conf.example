@@ -1,0 +1,19 @@
+# dispatcher configuration
+# /etc/dispatcher/dispatcher.conf
+
+# mTLS certificates for talking to agents
+cert = /etc/dispatcher/dispatcher.crt
+key  = /etc/dispatcher/dispatcher.key
+ca   = /etc/dispatcher/ca.crt
+
+# Default port agents listen on (can be overridden per-request with host:port)
+port = 7443
+
+# Auth hook - called before every run and ping, from both CLI and API.
+# Must be executable. Exit 0 = authorised, 1 = denied, 2 = bad credentials,
+# 3 = insufficient privilege. Comment out or leave empty to disable auth
+# (all requests unconditionally authorised).
+auth_hook = /etc/dispatcher/auth-hook
+
+# API server port (used by dispatcher-api, coming soon)
+# api_port = 7445

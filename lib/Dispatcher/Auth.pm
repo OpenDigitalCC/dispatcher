@@ -1,0 +1,196 @@
+package Dispatcher::Auth;
+
+use strict;
+use warnings;
+use JSON  qw(encode_json);
+use Carp  qw(croak);
+use POSIX qw(strftime);
+
+use Dispatcher::Log qw();
+
+our $VERSION = '0.1';
+
+# Exit codes returned by auth hooks
+use constant {
+    AUTH_OK          => 0,
+    AUTH_DENIED      => 1,
+    AUTH_BAD_CREDS   => 2,
+    AUTH_INSUFFICIENT => 3,
+};
+
+my %CODE_REASON = (
+    AUTH_DENIED,       'denied',
+    AUTH_BAD_CREDS,    'bad credentials',
+    AUTH_INSUFFICIENT, 'insufficient privilege',
+);
+
+# Check authorisation for a request by running the configured auth hook.
+#
+# If no hook is configured (auth_hook absent or empty in config), the call
+# is unconditionally authorised. This preserves backwards compatibility for
+# CLI use without a hook configured.
+#
+# Required opts:
+#   action    => 'run' | 'ping'
+#   config    => \%config          (may contain auth_hook path)
+#
+# Optional opts:
+#   script    => $name             (empty string for ping)
+#   hosts     => \@hosts           (default [])
+#   args      => \@args            (default [])
+#   username  => $str              (default '')
+#   token     => $str              (default '')
+#   source_ip => $str              (default '127.0.0.1')
+#
+# Returns:
+#   { ok => 1 }
+#   { ok => 0, reason => $str, code => $n }
+sub check {
+    my (%opts) = @_;
+
+    my $action    = $opts{action}    or croak "action required";
+    my $config    = $opts{config}    or croak "config required";
+    my $script    = $opts{script}    // '';
+    my $hosts     = $opts{hosts}     // [];
+    my $args      = $opts{args}      // [];
+    my $username  = $opts{username}  // '';
+    my $token     = $opts{token}     // '';
+    my $source_ip = $opts{source_ip} // '127.0.0.1';
+
+    croak "hosts must be an arrayref" unless ref $hosts eq 'ARRAY';
+    croak "args must be an arrayref"  unless ref $args  eq 'ARRAY';
+
+    my $hook = $config->{auth_hook} // '';
+
+    # No hook configured - unconditionally authorised
+    unless ($hook) {
+        Dispatcher::Log::log_action('INFO', {
+            ACTION   => 'auth',
+            RESULT   => 'pass',
+            REASON   => 'no-hook',
+            AUTHACTION => $action,
+            USER     => $username || '(none)',
+            IP       => $source_ip,
+        });
+        return { ok => 1 };
+    }
+
+    unless (-f $hook && -x $hook) {
+        Dispatcher::Log::log_action('ERR', {
+            ACTION => 'auth',
+            RESULT => 'error',
+            REASON => 'hook-not-executable',
+            HOOK   => $hook,
+        });
+        return { ok => 0, reason => "auth hook not found or not executable: $hook", code => AUTH_DENIED };
+    }
+
+    my $context = _build_context(
+        action    => $action,
+        script    => $script,
+        hosts     => $hosts,
+        args      => $args,
+        username  => $username,
+        token     => $token,
+        source_ip => $source_ip,
+    );
+
+    my $exit_code = _run_hook($hook, $context);
+
+    if ($exit_code == AUTH_OK) {
+        Dispatcher::Log::log_action('INFO', {
+            ACTION     => 'auth',
+            RESULT     => 'pass',
+            AUTHACTION => $action,
+            USER       => $username || '(none)',
+            IP         => $source_ip,
+        });
+        return { ok => 1 };
+    }
+
+    my $reason = $CODE_REASON{$exit_code} // "hook exited $exit_code";
+
+    Dispatcher::Log::log_action('WARNING', {
+        ACTION     => 'auth',
+        RESULT     => 'deny',
+        REASON     => $reason,
+        AUTHACTION => $action,
+        USER       => $username || '(none)',
+        IP         => $source_ip,
+    });
+
+    return { ok => 0, reason => $reason, code => $exit_code };
+}
+
+# --- private ---
+
+# Build the context hashref passed to the hook as env vars and JSON stdin
+sub _build_context {
+    my (%opts) = @_;
+    return {
+        action    => $opts{action},
+        script    => $opts{script},
+        hosts     => $opts{hosts},
+        args      => $opts{args},
+        username  => $opts{username},
+        token     => $opts{token},
+        source_ip => $opts{source_ip},
+        timestamp => strftime('%Y-%m-%dT%H:%M:%SZ', gmtime),
+    };
+}
+
+# Run the hook, passing context as env vars and JSON on stdin.
+# Returns the hook's exit code.
+# On exec failure returns AUTH_DENIED.
+sub _run_hook {
+    my ($hook, $context) = @_;
+
+    my $json_in = encode_json($context);
+
+    # Build environment for hook
+    local %ENV = %ENV;
+    $ENV{DISPATCHER_ACTION}    = $context->{action};
+    $ENV{DISPATCHER_SCRIPT}    = $context->{script};
+    $ENV{DISPATCHER_HOSTS}     = join(',', @{ $context->{hosts} });
+    $ENV{DISPATCHER_ARGS}      = join(' ', @{ $context->{args} });
+    $ENV{DISPATCHER_USERNAME}  = $context->{username};
+    $ENV{DISPATCHER_TOKEN}     = $context->{token};
+    $ENV{DISPATCHER_SOURCE_IP} = $context->{source_ip};
+    $ENV{DISPATCHER_TIMESTAMP} = $context->{timestamp};
+
+    # Fork: child execs hook with JSON on stdin, parent waits.
+    # Block SIGCHLD before forking so the API server reaper cannot collect
+    # the hook child between fork() and waitpid(). local restores on scope exit.
+    local $SIG{CHLD} = 'DEFAULT';
+
+    pipe my $stdin_r, my $stdin_w or return AUTH_DENIED;
+
+    my $pid = fork();
+    return AUTH_DENIED unless defined $pid;
+
+    if ($pid == 0) {
+        close $stdin_w;
+        open STDIN, '<&', $stdin_r or exit AUTH_DENIED;
+        close $stdin_r;
+
+        # Redirect hook stdout/stderr to /dev/null - hook must not produce
+        # output; logging is the dispatcher's responsibility
+        open STDOUT, '>', '/dev/null';
+        open STDERR, '>', '/dev/null';
+
+        exec { $hook } $hook;
+        exit AUTH_DENIED;   # only reached if exec fails
+    }
+
+    close $stdin_r;
+    print $stdin_w $json_in;
+    close $stdin_w;
+
+    waitpid $pid, 0;
+
+    # Extract exit code from $?. If waitpid was raced (ret -1), $? is -1
+    # and ($? >> 8) & 0xff = 255 - guarded against by the local SIGCHLD above.
+    return ($? >> 8) & 0xff;
+}
+
+1;

@@ -1,0 +1,60 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+
+use Dispatcher::Log qw();
+use Dispatcher::API qw();
+use Getopt::Long    qw(GetOptions);
+
+our $VERSION = '0.1';
+
+my $CONFIG_PATH = '/etc/dispatcher/dispatcher.conf';
+
+main();
+
+sub main {
+    GetOptions('config=s' => \$CONFIG_PATH)
+        or die usage();
+
+    Dispatcher::Log::init('dispatcher-api');
+
+    my $config = load_config($CONFIG_PATH);
+
+    Dispatcher::API::run(config => $config);
+}
+
+sub load_config {
+    my ($path) = @_;
+    open my $fh, '<', $path
+        or die "Cannot open config '$path': $!\n";
+    my %config;
+    while (my $line = <$fh>) {
+        chomp $line;
+        next if $line =~ /^\s*[#\s]/;
+        $config{$1} = $2 if $line =~ /^\s*(\w+)\s*=\s*(.+?)\s*$/;
+    }
+    close $fh;
+    for my $k (qw(cert key ca)) {
+        die "Missing '$k' in $path\n" unless $config{$k};
+    }
+    return \%config;
+}
+
+sub usage {
+    return <<'END';
+Usage: dispatcher-api [options]
+
+Options:
+  --config <path>    Path to dispatcher.conf (default /etc/dispatcher/dispatcher.conf)
+
+The API server reads its configuration from dispatcher.conf.
+Relevant keys:
+  api_port   Port to listen on (default 7445)
+  api_cert   TLS certificate (optional - plain HTTP if absent)
+  api_key    TLS private key  (optional - plain HTTP if absent)
+  auth_hook  Auth hook executable (optional)
+END
+}

@@ -1,0 +1,351 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+
+use Dispatcher::Log     qw();
+use Dispatcher::Engine  qw();
+use Dispatcher::Auth    qw();
+use Dispatcher::Lock    qw();
+use Dispatcher::Pairing qw();
+use Dispatcher::CA        qw();
+use Dispatcher::Registry  qw();
+use JSON                qw(encode_json decode_json);
+use Getopt::Long        qw(GetOptions :config pass_through);
+use Sys::Hostname       qw(hostname);
+
+our $VERSION = '0.1';
+
+my $CONFIG_PATH = '/etc/dispatcher/dispatcher.conf';
+my $PAIR_PORT   = 7444;
+
+main();
+
+sub main {
+    my %opts;
+
+    GetOptions(
+        'config=s'   => \$CONFIG_PATH,
+        'json'       => \$opts{json},
+        'port=i'     => \$opts{port},
+        'username=s' => \$opts{username},
+        'token=s'    => \$opts{token},
+    ) or die usage();
+
+    my $mode = shift @ARGV // die usage();
+
+    Dispatcher::Log::init('dispatcher');
+
+    my %dispatch = (
+        'run'           => \&mode_run,
+        'ping'          => \&mode_ping,
+        'pairing-mode'  => \&mode_pairing,
+        'list-requests' => \&mode_list_requests,
+        'approve'       => \&mode_approve,
+        'deny'          => \&mode_deny,
+        'setup-ca'      => \&mode_setup_ca,
+        'list-agents'   => \&mode_list_agents,
+    );
+
+    my $handler = $dispatch{$mode}
+        or die "Unknown mode '$mode'\n" . usage();
+
+    $handler->(\%opts, @ARGV);
+}
+
+sub mode_run {
+    my ($opts, @args) = @_;
+    die "Usage: dispatcher run <host>[:<port>] [<host>...] <script> [-- <arg>...]\n"
+        unless @args >= 2;
+
+    my ($hosts, $script, $script_args) = _parse_run_args(@args);
+    my $config   = _load_config();
+    my $username = $opts->{username} // $ENV{USER} // '';
+    my $token    = $opts->{token}    // $ENV{DISPATCHER_TOKEN} // '';
+
+    my $auth = Dispatcher::Auth::check(
+        action    => 'run',
+        script    => $script,
+        hosts     => $hosts,
+        args      => $script_args,
+        username  => $username,
+        token     => $token,
+        source_ip => '127.0.0.1',
+        config    => $config,
+    );
+    unless ($auth->{ok}) {
+        _auth_error($auth, $opts->{json});
+        exit 1;
+    }
+
+    my $lock = Dispatcher::Lock::check_available(
+        hosts  => $hosts,
+        script => $script,
+    );
+    unless ($lock->{ok}) {
+        _lock_error($lock, $opts->{json});
+        exit 1;
+    }
+
+    my $results = Dispatcher::Engine::dispatch_all(
+        hosts  => $hosts,
+        script => $script,
+        args   => $script_args,
+        config => $config,
+        port   => $opts->{port},
+    );
+
+    if ($opts->{json}) {
+        print encode_json({ ok => 1, results => $results }), "\n";
+    }
+    else {
+        _format_run_results($results);
+    }
+
+    my $any_fail = grep { ($_->{exit} // -1) != 0 } @$results;
+    exit($any_fail ? 1 : 0);
+}
+
+sub mode_ping {
+    my ($opts, @hosts) = @_;
+    die "Usage: dispatcher ping <host>[:<port>] [<host>...]\n" unless @hosts;
+
+    my $config   = _load_config();
+    my $username = $opts->{username} // $ENV{USER} // '';
+    my $token    = $opts->{token}    // $ENV{DISPATCHER_TOKEN} // '';
+
+    my $auth = Dispatcher::Auth::check(
+        action    => 'ping',
+        hosts     => \@hosts,
+        username  => $username,
+        token     => $token,
+        source_ip => '127.0.0.1',
+        config    => $config,
+    );
+    unless ($auth->{ok}) {
+        _auth_error($auth, $opts->{json});
+        exit 1;
+    }
+
+    my $results = Dispatcher::Engine::ping_all(
+        hosts  => \@hosts,
+        config => $config,
+        port   => $opts->{port},
+    );
+
+    if ($opts->{json}) {
+        print encode_json({ ok => 1, results => $results }), "\n";
+    }
+    else {
+        _format_ping_results($results);
+    }
+}
+
+sub mode_list_agents {
+    my ($opts) = @_;
+    my $agents = Dispatcher::Registry::list_agents();
+
+    if (!@$agents) {
+        print "No registered agents.\n";
+        return;
+    }
+
+    if ($opts->{json}) {
+        require JSON;
+        print JSON::encode_json($agents), "\n";
+        return;
+    }
+
+    printf "%-30s  %-16s  %-22s  %s\n",
+        'HOSTNAME', 'IP', 'PAIRED', 'CERT EXPIRY';
+    printf "%s\n", '-' x 85;
+    for my $a (@$agents) {
+        printf "%-30s  %-16s  %-22s  %s\n",
+            $a->{hostname} // '?',
+            $a->{ip}       // '?',
+            $a->{paired}   // '?',
+            $a->{expiry}   // '?';
+    }
+}
+
+sub mode_pairing {
+    my ($opts) = @_;
+    my $config = _load_config();
+    Dispatcher::Pairing::run_pairing_mode(
+        port   => $opts->{port} // $PAIR_PORT,
+        ca_dir => '/etc/dispatcher',
+        cert   => $config->{cert},
+        key    => $config->{key},
+        log_fn => sub { Dispatcher::Log::log_action('INFO', $_[0]) },
+    );
+}
+
+sub mode_list_requests {
+    my $requests = Dispatcher::Pairing::list_requests();
+    if (!@$requests) {
+        print "No pending pairing requests.\n";
+        return;
+    }
+    printf "%-10s  %-30s  %-16s  %s\n", 'ID', 'HOSTNAME', 'IP', 'RECEIVED';
+    printf "%s\n", '-' x 75;
+    for my $r (@$requests) {
+        printf "%-10s  %-30s  %-16s  %s\n",
+            $r->{id}, $r->{hostname}, $r->{ip}, $r->{received};
+    }
+}
+
+sub mode_approve {
+    my ($opts, $reqid) = @_;
+    die "Usage: dispatcher approve <reqid>\n" unless $reqid;
+    Dispatcher::Pairing::approve_request(
+        reqid  => $reqid,
+        ca_dir => '/etc/dispatcher',
+        log_fn => sub { Dispatcher::Log::log_action('INFO', $_[0]) },
+    );
+}
+
+sub mode_deny {
+    my ($opts, $reqid) = @_;
+    die "Usage: dispatcher deny <reqid>\n" unless $reqid;
+    Dispatcher::Pairing::deny_request(
+        reqid  => $reqid,
+        log_fn => sub { Dispatcher::Log::log_action('INFO', $_[0]) },
+    );
+}
+
+sub mode_setup_ca {
+    print "Setting up Dispatcher CA...\n";
+    my $result = Dispatcher::CA::generate_ca(ca_dir => '/etc/dispatcher');
+    print "CA created:\n";
+    print "  Key:  $result->{ca_key}\n";
+    print "  Cert: $result->{ca_cert}\n";
+    print "Keep ca.key secure - it never leaves this host.\n";
+}
+
+sub _format_run_results {
+    my ($results) = @_;
+    for my $r (@$results) {
+        my $host   = $r->{host}  // '?';
+        my $exit   = $r->{exit}  // -1;
+        my $rtt    = $r->{rtt}   // '';
+        my $status = $exit == 0 ? 'OK' : 'FAIL';
+
+        printf "==> %s  [%s  exit:%d  %s]\n", $host, $status, $exit, $rtt;
+
+        if ($r->{error}) {
+            print "    ERROR: $r->{error}\n";
+        }
+        if ($r->{stdout} && $r->{stdout} =~ /\S/) {
+            print $r->{stdout};
+            print "\n" unless $r->{stdout} =~ /\n$/;
+        }
+        if ($r->{stderr} && $r->{stderr} =~ /\S/) {
+            print "    STDERR: $r->{stderr}\n";
+        }
+    }
+}
+
+sub _format_ping_results {
+    my ($results) = @_;
+    printf "%-30s  %-8s  %-8s  %-28s  %s\n",
+        'HOST', 'STATUS', 'RTT', 'CERT EXPIRY', 'VERSION';
+    printf "%s\n", '-' x 85;
+    for my $r (@$results) {
+        printf "%-30s  %-8s  %-8s  %-28s  %s\n",
+            $r->{host}    // '?',
+            $r->{status}  // 'error',
+            $r->{rtt}     // '?',
+            $r->{expiry}  // '?',
+            $r->{version} // '?';
+    }
+}
+
+sub _auth_error {
+    my ($auth, $json) = @_;
+    if ($json) {
+        print encode_json({ ok => 0, error => $auth->{reason}, code => $auth->{code} }), "\n";
+    }
+    else {
+        print STDERR "Denied: $auth->{reason}\n";
+    }
+}
+
+sub _lock_error {
+    my ($lock, $json) = @_;
+    if ($json) {
+        print encode_json({
+            ok        => 0,
+            error     => 'locked',
+            code      => 4,
+            conflicts => $lock->{conflicts},
+        }), "\n";
+    }
+    else {
+        print STDERR "Locked: already running: "
+            . join(', ', @{ $lock->{conflicts} }) . "\n";
+    }
+}
+
+sub _load_config {
+    open my $fh, '<', $CONFIG_PATH
+        or die "Cannot open config '$CONFIG_PATH': $!\n";
+    my %config;
+    while (my $line = <$fh>) {
+        chomp $line;
+        next if $line =~ /^\s*[#\s]/;
+        $config{$1} = $2 if $line =~ /^\s*(\w+)\s*=\s*(.+?)\s*$/;
+    }
+    close $fh;
+    for my $k (qw(cert key ca)) {
+        die "Missing '$k' in $CONFIG_PATH\n" unless $config{$k};
+    }
+    return \%config;
+}
+
+sub _parse_run_args {
+    my @args = @_;
+
+    my @script_args;
+    for my $i (0 .. $#args) {
+        if ($args[$i] eq '--') {
+            @script_args = @args[$i+1 .. $#args];
+            @args = @args[0 .. $i-1];
+            last;
+        }
+    }
+
+    die "Need at least one host and a script name\n" unless @args >= 2;
+
+    my $script = pop @args;
+    my @hosts  = @args;
+
+    return (\@hosts, $script, \@script_args);
+}
+
+sub usage {
+    return <<'END';
+Usage: dispatcher <mode> [options] [args]
+
+Modes:
+  run <host>[:<port>] [<host>...] <script> [-- <arg>...]
+                             Run a script on one or more hosts
+  ping <host>[:<port>] [<host>...]
+                             Test mTLS connectivity to hosts
+  pairing-mode               Accept agent pairing requests
+  list-requests              Show pending pairing requests
+  approve <reqid>            Approve a pairing request
+  deny <reqid>               Deny a pairing request
+  setup-ca                   One-time CA initialisation
+  list-agents                List all registered (paired) agents
+
+Options:
+  --config <path>            Path to dispatcher.conf
+  --json                     Output results as JSON
+  --port <n>                 Override default port (7443)
+  --username <name>          Username for auth hook (default: $USER)
+  --token <token>            Auth token (default: $DISPATCHER_TOKEN env var)
+
+END
+}

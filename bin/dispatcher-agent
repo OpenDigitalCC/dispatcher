@@ -1,0 +1,369 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+
+use Dispatcher::Agent::Config  qw();
+use Dispatcher::Agent::Runner  qw();
+use Dispatcher::Agent::Pairing qw();
+use Dispatcher::Log            qw();
+use JSON                       qw(encode_json decode_json);
+use POSIX                      qw(SIGTERM WNOHANG);
+use Sys::Hostname              qw(hostname);
+use Getopt::Long               qw(GetOptions);
+
+our $VERSION = '0.1';
+
+my $CONFIG_PATH    = '/etc/dispatcher-agent/agent.conf';
+my $ALLOWLIST_PATH = '/etc/dispatcher-agent/scripts.conf';
+
+# --- entry point ---
+
+main();
+
+sub main {
+    my ($mode, %opts);
+
+    GetOptions(
+        'config=s'      => \$CONFIG_PATH,
+        'allowlist=s'   => \$ALLOWLIST_PATH,
+        'dispatcher=s'  => \$opts{dispatcher},
+        'port=i'        => \$opts{port},
+    ) or die usage();
+
+    $mode = shift @ARGV // 'serve';
+
+    Dispatcher::Log::init('dispatcher-agent');
+
+    my %dispatch = (
+        serve             => \&mode_serve,
+        'request-pairing' => \&mode_request_pairing,
+        'pairing-status'  => \&mode_pairing_status,
+        'ping-self'       => \&mode_ping_self,
+    );
+
+    my $handler = $dispatch{$mode}
+        or die "Unknown mode '$mode'\n" . usage();
+
+    $handler->(\%opts);
+}
+
+# --- modes ---
+
+sub mode_serve {
+    my ($opts) = @_;
+
+    my $config    = Dispatcher::Agent::Config::load_config($CONFIG_PATH);
+    my $allowlist = Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH);
+
+    $SIG{HUP} = sub {
+        warn "Reloading allowlist...\n";
+        $allowlist = eval { Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH) };
+        warn "Allowlist reload failed: $@\n" if $@;
+    };
+
+    require IO::Socket::SSL;
+
+    my $server = IO::Socket::SSL->new(
+        LocalPort       => $config->{port},
+        Listen          => 10,
+        ReuseAddr       => 1,
+        SSL_cert_file   => $config->{cert},
+        SSL_key_file    => $config->{key},
+        SSL_ca_file     => $config->{ca},
+        SSL_verify_mode => IO::Socket::SSL::SSL_VERIFY_PEER(),
+    ) or die "Cannot start server: $IO::Socket::SSL::SSL_ERROR\n";
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION => 'start',
+        PORT   => $config->{port},
+    });
+
+    while (my $conn = $server->accept) {
+        my $peer = $conn->peerhost // 'unknown';
+        my $pid  = fork();
+        if (!defined $pid) {
+            warn "fork failed: $!\n";
+            $conn->close(SSL_no_shutdown => 1);
+            next;
+        }
+        if ($pid == 0) {
+            # Child: close server socket, handle connection, exit
+            $server->close(SSL_no_shutdown => 1);
+            handle_connection($conn, $peer, $allowlist);
+            $conn->close;
+            exit 0;
+        }
+        # Parent: release fd without SSL shutdown so child owns it
+        $conn->close(SSL_no_shutdown => 1);
+        waitpid -1, WNOHANG();
+    }
+}
+
+sub mode_request_pairing {
+    my ($opts) = @_;
+
+    my $dispatcher = $opts->{dispatcher}
+        or die "--dispatcher <host> required for request-pairing\n";
+
+    my $host = hostname();
+
+    print "Generating key and CSR for '$host'...\n";
+    my $pair = Dispatcher::Agent::Pairing::generate_key_and_csr(
+        hostname => $host,
+    );
+
+    print "Connecting to dispatcher at $dispatcher for pairing...\n";
+    my $result = Dispatcher::Agent::Pairing::request_pairing(
+        dispatcher => $dispatcher,
+        port       => $opts->{port} // 7444,
+        csr_pem    => $pair->{csr_pem},
+        hostname   => $host,
+    );
+
+    unless ($result->{ok}) {
+        die "Pairing failed: $result->{error}\n";
+    }
+
+    Dispatcher::Agent::Pairing::store_certs(
+        cert_pem => $result->{cert_pem},
+        ca_pem   => $result->{ca_pem},
+        key_pem  => $pair->{key_pem},
+    );
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION     => 'pair-complete',
+        STATUS     => 'approved',
+        DISPATCHER => $dispatcher,
+    });
+
+    print "Pairing complete. Certificates stored.\n";
+}
+
+sub mode_pairing_status {
+    my $status = Dispatcher::Agent::Pairing::pairing_status();
+    if ($status->{paired}) {
+        print "Paired. Certificate expires: $status->{expiry}\n";
+    }
+    else {
+        print "Not paired. Reason: $status->{reason}\n";
+        exit 1;
+    }
+}
+
+sub mode_ping_self {
+    print "Checking config...\n";
+    my $config = eval { Dispatcher::Agent::Config::load_config($CONFIG_PATH) };
+    if ($@) { print "Config error: $@\n"; exit 1; }
+    print "  Config OK (port $config->{port})\n";
+
+    my $allowlist = eval { Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH) };
+    if ($@) { print "Allowlist error: $@\n"; exit 1; }
+    printf "  Allowlist OK (%d scripts)\n", scalar keys %$allowlist;
+
+    my $status = Dispatcher::Agent::Pairing::pairing_status();
+    if ($status->{paired}) {
+        print "  Certs OK (expires $status->{expiry})\n";
+    }
+    else {
+        print "  Certs: NOT paired - $status->{reason}\n";
+    }
+
+    for my $name (sort keys %$allowlist) {
+        my $path = $allowlist->{$name};
+        my $ok   = -x $path ? 'ok' : 'NOT EXECUTABLE';
+        print "  Script '$name': $path [$ok]\n";
+    }
+
+    print "Self-check complete.\n";
+}
+
+# --- connection handler (runs in forked child) ---
+# Reads raw HTTP/1.0 request from IO::Socket::SSL, dispatches, sends response.
+
+sub handle_connection {
+    my ($conn, $peer, $allowlist) = @_;
+
+    # Read request line
+    my $request_line = <$conn>;
+    unless ($request_line) {
+        _send_raw($conn, 400, encode_json({ error => 'empty request' }));
+        return;
+    }
+    chomp $request_line;
+    $request_line =~ s/\r//;
+
+    my ($method, $path) = split ' ', $request_line;
+
+    # Read headers
+    my %headers;
+    while (my $line = <$conn>) {
+        $line =~ s/\r\n$//;
+        $line =~ s/\n$//;
+        last if $line eq '';
+        if ($line =~ /^([^:]+):\s*(.*)$/) {
+            $headers{ lc $1 } = $2;
+        }
+    }
+
+    # Read body
+    my $body = '';
+    if (my $len = $headers{'content-length'}) {
+        read $conn, $body, $len;
+    }
+
+    if ($method eq 'POST' && $path eq '/run') {
+        handle_run($conn, $body, $peer, $allowlist);
+    }
+    elsif ($method eq 'POST' && $path eq '/ping') {
+        handle_ping($conn, $body, $peer);
+    }
+    elsif ($method eq 'GET' && $path eq '/capabilities') {
+        handle_capabilities($conn, $peer, $allowlist);
+    }
+    else {
+        _send_raw($conn, 404, encode_json({ error => 'not found' }));
+    }
+}
+
+sub handle_run {
+    my ($conn, $body, $peer, $allowlist) = @_;
+
+    my $data = eval { decode_json($body) };
+    if ($@) {
+        _send_json($conn, { exit => -1, error => 'invalid JSON' });
+        return;
+    }
+
+    my $name  = $data->{script} // '';
+    my $args  = $data->{args}   // [];
+    my $reqid = $data->{reqid}  // '';
+
+    unless (ref $args eq 'ARRAY') {
+        _send_json($conn, { exit => -1, error => 'args must be an array', reqid => $reqid });
+        return;
+    }
+
+    my $script_path = Dispatcher::Agent::Config::validate_script($name, $allowlist);
+
+    unless ($script_path) {
+        Dispatcher::Log::log_action('WARNING', {
+            ACTION => 'deny',
+            SCRIPT => $name,
+            PEER   => $peer,
+            REQID  => $reqid,
+        });
+        _send_json($conn, {
+            script => $name,
+            exit   => -1,
+            error  => 'script not permitted',
+            reqid  => $reqid,
+        });
+        return;
+    }
+
+    my $result = Dispatcher::Agent::Runner::run_script($script_path, $args);
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION => 'run',
+        SCRIPT => $name,
+        EXIT   => $result->{exit},
+        PEER   => $peer,
+        REQID  => $reqid,
+    });
+
+    _send_json($conn, {
+        script => $name,
+        exit   => $result->{exit},
+        stdout => $result->{stdout},
+        stderr => $result->{stderr},
+        reqid  => $reqid,
+    });
+}
+
+sub handle_ping {
+    my ($conn, $body, $peer) = @_;
+
+    my $data  = eval { decode_json($body) } // {};
+    my $reqid = $data->{reqid} // '';
+
+    my $status = Dispatcher::Agent::Pairing::pairing_status();
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION => 'ping',
+        PEER   => $peer,
+        REQID  => $reqid,
+    });
+
+    _send_json($conn, {
+        status  => 'ok',
+        host    => hostname(),
+        version => $VERSION,
+        expiry  => $status->{expiry} // 'unknown',
+        reqid   => $reqid,
+    });
+}
+
+sub handle_capabilities {
+    my ($conn, $peer, $allowlist) = @_;
+
+    my @scripts;
+    for my $name (sort keys %$allowlist) {
+        my $path = $allowlist->{$name};
+        push @scripts, {
+            name       => $name,
+            path       => $path,
+            executable => (-x $path ? JSON::true : JSON::false),
+        };
+    }
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION  => 'capabilities',
+        PEER    => $peer,
+        SCRIPTS => scalar @scripts,
+    });
+
+    _send_json($conn, {
+        status  => 'ok',
+        host    => hostname(),
+        version => $VERSION,
+        scripts => \@scripts,
+    });
+}
+
+sub _send_json {
+    my ($conn, $data) = @_;
+    _send_raw($conn, 200, encode_json($data));
+}
+
+sub _send_raw {
+    my ($conn, $code, $body) = @_;
+    my %status_text = (200 => 'OK', 400 => 'Bad Request', 404 => 'Not Found');
+    my $text = $status_text{$code} // 'Error';
+    print $conn
+        "HTTP/1.0 $code $text\r\n",
+        "Content-Type: application/json\r\n",
+        "Content-Length: ", length($body), "\r\n",
+        "\r\n",
+        $body;
+}
+
+sub usage {
+    return <<'END';
+Usage: dispatcher-agent <mode> [options]
+
+Modes:
+  serve                          Start the agent server (default)
+  request-pairing --dispatcher <host>
+                                 Request pairing with a dispatcher host
+  pairing-status                 Show pairing/cert status
+  ping-self                      Validate local config and certs
+
+Options:
+  --config <path>                Path to agent.conf
+  --allowlist <path>             Path to scripts.conf
+  --port <n>                     Override pairing port (default 7444)
+END
+}

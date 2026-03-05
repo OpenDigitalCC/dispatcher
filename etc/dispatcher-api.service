@@ -1,0 +1,26 @@
+[Unit]
+Description=Dispatcher API - HTTP API server for remote script execution
+Documentation=file:/usr/local/lib/dispatcher/DEVELOPER.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dispatcher-api
+Restart=on-failure
+RestartSec=5
+
+# Run as dispatcher group so it can read certs and write to runtime dirs
+User=root
+Group=dispatcher
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/var/lib/dispatcher
+
+[Install]
+WantedBy=multi-user.target

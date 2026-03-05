@@ -1,0 +1,11 @@
+# Dispatcher agent script allowlist
+# /etc/dispatcher-agent/scripts.conf
+#
+# Format: script-name = /absolute/path/to/script
+# Names may contain letters, digits, and hyphens only.
+# Paths must be absolute. Scripts must be executable by the dispatcher-agent user.
+#
+# Example entries:
+# check-disk    = /opt/dispatcher-scripts/check-disk.sh
+# rotate-logs   = /opt/dispatcher-scripts/rotate-logs.sh
+# add-dns       = /opt/dispatcher-scripts/add-dns.sh
