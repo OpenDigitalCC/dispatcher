@@ -45,7 +45,8 @@ sub main {
         'list-requests' => \&mode_list_requests,
         'approve'       => \&mode_approve,
         'deny'          => \&mode_deny,
-        'setup-ca'      => \&mode_setup_ca,
+        'setup-ca'          => \&mode_setup_ca,
+        'setup-dispatcher'  => \&mode_setup_dispatcher,
         'list-agents'   => \&mode_list_agents,
     );
 
@@ -226,6 +227,14 @@ sub mode_setup_ca {
     print "Keep ca.key secure - it never leaves this host.\n";
 }
 
+sub mode_setup_dispatcher {
+    print "Generating dispatcher certificate...\n";
+    my $result = Dispatcher::CA::generate_dispatcher_cert(ca_dir => '/etc/dispatcher');
+    print "Dispatcher cert created:\n";
+    print "  Key:  $result->{key}\n";
+    print "  Cert: $result->{cert}\n";
+}
+
 sub _format_run_results {
     my ($results) = @_;
     for my $r (@$results) {
@@ -340,6 +349,7 @@ Modes:
   approve <reqid>            Approve a pairing request
   deny <reqid>               Deny a pairing request
   setup-ca                   One-time CA initialisation
+  setup-dispatcher           Generate dispatcher key and certificate
   list-agents                List all registered (paired) agents
 
 Options:
