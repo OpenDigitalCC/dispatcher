@@ -91,6 +91,8 @@ for d in "${SHIP_DIRS[@]}"; do
     cp -r "$d" "$STAGE/"
 done
 
+chmod 755 "$STAGE/install.sh"
+
 # --- stamp version in the three binaries ---
 
 info "Stamping version $VERSION in binaries..."
