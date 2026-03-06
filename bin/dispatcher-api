@@ -9,7 +9,7 @@ use Dispatcher::Log qw();
 use Dispatcher::API qw();
 use Getopt::Long    qw(GetOptions);
 
-our $VERSION = '0.1';
+our $VERSION = 'UNINSTALLED';
 
 my $CONFIG_PATH = '/etc/dispatcher/dispatcher.conf';
 

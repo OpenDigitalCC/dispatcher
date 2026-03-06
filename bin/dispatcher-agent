@@ -15,7 +15,7 @@ use POSIX                      qw(SIGTERM WNOHANG strftime);
 use Sys::Hostname              qw(hostname);
 use Getopt::Long               qw(GetOptions);
 
-our $VERSION = '0.1';
+our $VERSION = 'UNINSTALLED';
 
 my $CONFIG_PATH    = '/etc/dispatcher-agent/agent.conf';
 my $ALLOWLIST_PATH = '/etc/dispatcher-agent/scripts.conf';

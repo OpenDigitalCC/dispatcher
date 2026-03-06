@@ -16,7 +16,7 @@ use JSON                qw(encode_json decode_json);
 use Getopt::Long        qw(GetOptions :config pass_through);
 use Sys::Hostname       qw(hostname);
 
-our $VERSION = '0.1';
+our $VERSION = 'UNINSTALLED';
 
 my $CONFIG_PATH = '/etc/dispatcher/dispatcher.conf';
 my $PAIR_PORT   = 7444;
