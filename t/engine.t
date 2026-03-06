@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use Test::More tests => 24;
+use Test::More tests => 21;
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 

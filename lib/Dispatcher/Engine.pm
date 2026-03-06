@@ -162,6 +162,30 @@ sub ping_all {
         my $result = eval { decode_json($raw) }
             // { host => $pipes{$pid}{host}, status => 'error',
                  error => 'no response from child' };
+
+        # Trigger cert renewal if cert is past half-life
+        if (($result->{status} // '') eq 'ok' && $result->{expiry}) {
+            my $cert_days = $config->{cert_days} // 365;
+            if (_renewal_due($result->{expiry}, $cert_days)) {
+                my ($rhost, $rport) = parse_host($pipes{$pid}{host}, $port);
+                eval {
+                    _renew_one(
+                        host   => $rhost,
+                        port   => $rport,
+                        config => $config,
+                        reqid  => gen_reqid(),
+                    );
+                };
+                if ($@) {
+                    Dispatcher::Log::log_action('ERR', {
+                        ACTION => 'renew',
+                        TARGET => "$rhost:$rport",
+                        ERROR  => $@,
+                    });
+                }
+            }
+        }
+
         push @results, $result;
         delete $pipes{$pid};
     }
@@ -427,6 +451,104 @@ sub _build_ua {
         timeout => $config->{timeout} // 60,
     );
     return $ua;
+}
+
+# Returns true if the cert should be renewed.
+# Renewal is due when remaining validity is less than half of cert_days.
+# Returns false (safe default) if the expiry string cannot be parsed.
+sub _renewal_due {
+    my ($expiry_str, $cert_days) = @_;
+    return 0 unless $expiry_str;
+
+    require Time::Piece;
+    my $expiry_epoch = eval {
+        Time::Piece->strptime($expiry_str, '%b %d %H:%M:%S %Y %Z')->epoch;
+    };
+    return 0 unless $expiry_epoch;
+
+    my $remaining  = $expiry_epoch - time();
+    my $half_life  = ($cert_days / 2) * 86400;
+    return $remaining < $half_life ? 1 : 0;
+}
+
+# Perform cert renewal for a single agent over the existing mTLS connection.
+# POSTs /renew to get a CSR, signs it, POSTs /renew-complete to deliver.
+# Updates the registry expiry on success. Dies on any failure.
+sub _renew_one {
+    my (%opts) = @_;
+    my $host   = $opts{host};
+    my $port   = $opts{port};
+    my $config = $opts{config};
+    my $reqid  = $opts{reqid};
+
+    require Dispatcher::CA;
+    require Dispatcher::Registry;
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION => 'renew',
+        TARGET => "$host:$port",
+        REQID  => $reqid,
+        STATUS => 'starting',
+    });
+
+    my $ua = _build_ua($config);
+
+    # Request CSR from agent
+    my $resp = $ua->post(
+        "https://$host:$port/renew",
+        'Content-Type' => 'application/json',
+        Content        => encode_json({ reqid => $reqid }),
+    );
+    die "renew request failed: " . $resp->status_line unless $resp->is_success;
+
+    my $data = eval { decode_json($resp->content) }
+        or die "invalid JSON in renew response";
+    my $csr_pem = $data->{csr} or die "no CSR in renew response";
+
+    # Sign the CSR
+    my $cert_pem = Dispatcher::CA::sign_csr(
+        csr_pem => $csr_pem,
+        ca_dir  => $config->{ca_dir} // '/etc/dispatcher',
+        days    => $config->{cert_days} // 365,
+    );
+    my $ca_pem = Dispatcher::CA::read_ca_cert(
+        ca_dir => $config->{ca_dir} // '/etc/dispatcher',
+    );
+
+    # Deliver new cert
+    my $resp2 = $ua->post(
+        "https://$host:$port/renew-complete",
+        'Content-Type' => 'application/json',
+        Content        => encode_json({
+            cert  => $cert_pem,
+            ca    => $ca_pem,
+            reqid => $reqid,
+        }),
+    );
+    die "renew-complete failed: " . $resp2->status_line unless $resp2->is_success;
+
+    # Extract new expiry and update registry
+    my $expiry = _extract_expiry($cert_pem) // 'unknown';
+    Dispatcher::Registry::update_expiry(hostname => $host, expiry => $expiry);
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION => 'renew-complete',
+        TARGET => "$host:$port",
+        REQID  => $reqid,
+        EXPIRY => $expiry,
+    });
+}
+
+# Extract notAfter date string from a PEM cert via openssl subprocess.
+sub _extract_expiry {
+    my ($cert_pem) = @_;
+    require File::Temp;
+    my ($fh, $path) = File::Temp::tempfile(UNLINK => 1);
+    print $fh $cert_pem;
+    close $fh;
+    my $out = `openssl x509 -noout -enddate -in "$path" 2>/dev/null`;
+    chomp $out;
+    return $out =~ /^notAfter=(.+)$/ ? $1 : undef;
 }
 
 1;
