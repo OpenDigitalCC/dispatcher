@@ -124,7 +124,7 @@ c = {
     'version': '$VERSION',
     'hashes': [{'alg': 'SHA-256', 'content': '$hash'}],
     'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
-    'purl': 'pkg:generic/cloudient/dispatcher-$bin@$VERSION'
+    'purl': 'pkg:generic/opendigital/dispatcher-$bin@$VERSION'
 }
 print(json.dumps(c))
 ")
@@ -152,7 +152,7 @@ c = {
     'version': '$VERSION',
     'hashes': [{'alg': 'SHA-256', 'content': '$hash'}],
     'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
-    'purl': 'pkg:generic/cloudient/$name@$VERSION'
+    'purl': 'pkg:generic/opendigital/$name@$VERSION'
 }
 print(json.dumps(c))
 ")
@@ -253,7 +253,7 @@ sbom = {
             'description': 'Perl mTLS remote script execution system',
             'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
             'externalReferences': [
-                {'type': 'vcs', 'url': 'https://github.com/cloudient/dispatcher'},
+                {'type': 'vcs', 'url': 'https://github.com/OpenDigitalCC/dispatcher'},
             ]
         }
     },
