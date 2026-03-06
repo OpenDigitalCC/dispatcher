@@ -1,7 +1,7 @@
 ---
 title: Dispatcher and agent - Developer document
 subtitle: Purpose, contents, protocol, logging, security model and extending
-brand: odcc
+brand: cloudient
 ---
 
 # Dispatcher - Developer Documentation
@@ -345,8 +345,8 @@ Record format:
 
 ```json
 {
-  "hostname": "agent-host-01",
-  "ip":       "192.0.2.10",
+  "hostname": "sjm-explore",
+  "ip":       "192.168.125.125",
   "paired":   "2026-03-05T14:30:00Z",
   "expiry":   "Jun  7 16:28:00 2027 GMT",
   "reqid":    "1a15334d0001"
@@ -847,6 +847,13 @@ Auth options
   in `ps` output when set via env). `--username` defaults to `$ENV{USER}`.
   Source IP is hardcoded to `127.0.0.1` for CLI calls.
 
+Testability
+: `main()` is called as `main() unless caller`. This means the file can be
+  `do`'d by test files without triggering execution - the standard Perl idiom
+  for making a script's functions testable without a separate library. The
+  `dispatcher-cli.t` test relies on this to load `_parse_run_args` and
+  `_format_*` functions without running the CLI.
+
 Arg parsing for `run`
 : `_parse_run_args()` splits `@ARGV` on `--`. Everything after `--` becomes
   script args; before `--`, the last element is the script name and the rest
@@ -969,7 +976,7 @@ Capabilities response (`GET /capabilities`):
 
 ```json
 {
-  "status": "ok", "host": "agent-host-01", "version": "0.1",
+  "status": "ok", "host": "sjm-explore", "version": "0.1",
   "tags": { "env": "prod", "role": "db" },
   "scripts": [
     { "name": "backup-mysql", "path": "/opt/dispatcher-scripts/backup-mysql.sh", "executable": true }
@@ -998,7 +1005,7 @@ Cert delivery (`POST /renew-complete`, dispatcher → agent):
 Pairing request (agent → dispatcher, port 7444, `POST /pair`):
 
 ```json
-{ "hostname": "agent-host-01", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "nonce": "a3f4c2b1..." }
+{ "hostname": "sjm-explore", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "nonce": "a3f4c2b1..." }
 ```
 
 Pairing response:
@@ -1012,13 +1019,13 @@ API endpoints (caller → dispatcher-api, port 7445):
 `POST /ping` request:
 
 ```json
-{ "hosts": ["agent-host-01", "prod-db-01"], "username": "stuart", "token": "..." }
+{ "hosts": ["sjm-explore", "prod-db-01"], "username": "stuart", "token": "..." }
 ```
 
 `POST /run` request:
 
 ```json
-{ "hosts": ["agent-host-01"], "script": "backup-mysql", "args": ["--db", "myapp"], "username": "stuart", "token": "..." }
+{ "hosts": ["sjm-explore"], "script": "backup-mysql", "args": ["--db", "myapp"], "username": "stuart", "token": "..." }
 ```
 
 `GET /discovery` response:
@@ -1027,7 +1034,7 @@ API endpoints (caller → dispatcher-api, port 7445):
 {
   "ok": true,
   "hosts": {
-    "agent-host-01": {
+    "sjm-explore": {
       "status": "ok", "version": "0.1", "rtt": "68ms",
       "tags": { "env": "prod", "role": "db" },
       "scripts": [{ "name": "backup-mysql", "path": "/opt/scripts/backup-mysql.sh", "executable": true }]
@@ -1039,7 +1046,7 @@ API endpoints (caller → dispatcher-api, port 7445):
 Lock conflict response (409):
 
 ```json
-{ "ok": false, "error": "locked", "code": 4, "conflicts": ["agent-host-01:backup-mysql"] }
+{ "ok": false, "error": "locked", "code": 4, "conflicts": ["sjm-explore:backup-mysql"] }
 ```
 
 
@@ -1053,24 +1060,24 @@ Dispatcher examples:
 ```
 dispatcher[1234]: ACTION=dispatch HOSTS=prod-db-01 REQID=a3f9b2c10001 SCRIPT=backup-mysql
 dispatcher[1234]: ACTION=run EXIT=0 REQID=a3f9b2c10001 RTT=87ms SCRIPT=backup-mysql TARGET=prod-db-01:7443
-dispatcher[1234]: ACTION=pair-approve AGENT=agent-host-01 REQID=fa5e74630001
+dispatcher[1234]: ACTION=pair-approve AGENT=sjm-explore REQID=fa5e74630001
 dispatcher[1234]: ACTION=auth AUTHACTION=run IP=127.0.0.1 RESULT=pass USER=stuart
-dispatcher[1234]: ACTION=unpair AGENT=agent-host-01 EXPIRY="Jun  7 16:28:00 2027 GMT"
-dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=agent-host-01:7443
-dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=agent-host-01:7443
-dispatcher[1234]: ACTION=lock-acquire HOST=agent-host-01 SCRIPT=backup-mysql
+dispatcher[1234]: ACTION=unpair AGENT=sjm-explore EXPIRY="Jun  7 16:28:00 2027 GMT"
+dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=sjm-explore:7443
+dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=sjm-explore:7443
+dispatcher[1234]: ACTION=lock-acquire HOST=sjm-explore SCRIPT=backup-mysql
 ```
 
 Agent examples:
 
 ```
 dispatcher-agent[5678]: ACTION=start PORT=7443
-dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.0.2.11 REQID=a3f9b2c10001 SCRIPT=backup-mysql
-dispatcher-agent[5678]: ACTION=deny PEER=192.0.2.11 REQID=b1c2d3e40001 SCRIPT=not-in-allowlist
-dispatcher-agent[5678]: ACTION=ping PEER=192.0.2.11 REQID=b7c3d1e40001
-dispatcher-agent[5678]: ACTION=capabilities PEER=192.0.2.11 SCRIPTS=3
-dispatcher-agent[5678]: ACTION=renew PEER=192.0.2.11 REQID=c1d2e3f40001 STATUS=csr-generated
-dispatcher-agent[5678]: ACTION=renew-complete PEER=192.0.2.11 REQID=c1d2e3f40001 STATUS=cert-stored
+dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.168.125.189 REQID=a3f9b2c10001 SCRIPT=backup-mysql
+dispatcher-agent[5678]: ACTION=deny PEER=192.168.125.189 REQID=b1c2d3e40001 SCRIPT=not-in-allowlist
+dispatcher-agent[5678]: ACTION=ping PEER=192.168.125.189 REQID=b7c3d1e40001
+dispatcher-agent[5678]: ACTION=capabilities PEER=192.168.125.189 SCRIPTS=3
+dispatcher-agent[5678]: ACTION=renew PEER=192.168.125.189 REQID=c1d2e3f40001 STATUS=csr-generated
+dispatcher-agent[5678]: ACTION=renew-complete PEER=192.168.125.189 REQID=c1d2e3f40001 STATUS=cert-stored
 ```
 
 API examples:
@@ -1210,6 +1217,28 @@ Interactive pairing prompt buffering (fixed)
   `local $| = 1` (autoflush) at the start of `run_pairing_mode` when
   interactive mode is detected.
 
+`handle_connection` missing `$config` argument (fixed)
+: When agent-side auth hook support was added, `$config` was added to
+  `handle_run`'s signature but `handle_connection` - which sits between
+  `mode_serve` and `handle_run` - was not updated to receive and forward it.
+  This caused a compile-time error (`Global symbol "$config" requires explicit
+  package name`) when `dispatcher-agent request-pairing` was run. Fixed by
+  passing `$config` at the `handle_connection` call site in `mode_serve` and
+  adding it to `handle_connection`'s parameter list.
+
+`_renewal_due`, `_renew_one`, `_extract_expiry` lost from `Engine.pm` (fixed)
+: These private functions were inadvertently removed from `Engine.pm` during
+  an edit session. Their absence caused `renewal.t` to fail with
+  `Undefined subroutine &Dispatcher::Engine::_renewal_due` and also silently
+  disabled automatic cert renewal in `ping_all`. Restored in full.
+
+`_renewal_due` test assertions inverted (fixed)
+: `renewal.t` subtest `_renewal_due: respects cert_days configuration` used
+  200 days remaining and asserted it was due with cert_days=365 (half-life
+  182.5 days). Since 200 > 182.5, the cert is not yet past half-life and the
+  assertion was wrong. Corrected: 200 days remaining is not due with
+  cert_days=365 (200 > 182.5) and is due with cert_days=730 (200 < 365).
+
 
 ## Adding a New Script to an Agent
 
@@ -1229,8 +1258,8 @@ echo "my-script = /opt/dispatcher-scripts/my-script.sh" \
 sudo systemctl kill --signal=HUP dispatcher-agent
 
 # Verify discovery sees the new script
-sudo dispatcher ping agent-host-01
-sudo dispatcher run agent-host-01 my-script
+sudo dispatcher ping sjm-explore
+sudo dispatcher run sjm-explore my-script
 ```
 
 Scripts receive positional arguments exactly as passed. They should exit 0 on
