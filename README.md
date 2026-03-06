@@ -1,7 +1,7 @@
 ---
 title: Dispatcher
 subtitle: Perl machine-to-machine remote script execution over mTLS
-brand: cloudient
+brand: odcc
 ---
 
 # Dispatcher

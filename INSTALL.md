@@ -1,7 +1,7 @@
 ---
 title: Dispatcher - Installation and Operations
 subtitle: Platform requirements, setup, configuration, and operational reference
-brand: cloudient
+brand: odcc
 ---
 
 # Dispatcher - Installation and Operations
@@ -211,7 +211,7 @@ sudo dispatcher-agent request-pairing --dispatcher <dispatcher-hostname>
 The agent connects and waits. A prompt appears in the pairing mode terminal:
 
 ```
-Pairing request from sjm-explore (192.168.125.125) - ID: 00c9845e0001
+Pairing request from agent-host-01 (192.0.2.10) - ID: 00c9845e0001
   Received: 2026-03-05T18:38:09Z
 Accept, Deny, or Skip? [a/d/s]:
 ```
@@ -222,8 +222,8 @@ stop pairing mode.
 If multiple requests arrive simultaneously they are numbered:
 
 ```
-1. sjm-explore (192.168.125.125) - ID: 00c9845e0001 - 2026-03-05T18:38:09Z
-2. prod-db-01  (192.168.125.200) - ID: 1a4f2e330001 - 2026-03-05T18:38:22Z
+1. agent-host-01 (192.0.2.10) - ID: 00c9845e0001 - 2026-03-05T18:38:09Z
+2. prod-db-01  (192.0.2.12) - ID: 1a4f2e330001 - 2026-03-05T18:38:22Z
 Command (a1/d1/a2/d2/list/quit):
 ```
 
@@ -382,12 +382,12 @@ The API server listens on port 7445. All bodies are JSON with
 # Ping
 curl -s -X POST http://localhost:7445/ping \
   -H 'Content-Type: application/json' \
-  -d '{"hosts":["sjm-explore"]}' | python3 -m json.tool
+  -d '{"hosts":["agent-host-01"]}' | python3 -m json.tool
 
 # Run
 curl -s -X POST http://localhost:7445/run \
   -H 'Content-Type: application/json' \
-  -d '{"hosts":["sjm-explore"],"script":"backup-mysql","args":["--db","myapp"]}' \
+  -d '{"hosts":["agent-host-01"],"script":"backup-mysql","args":["--db","myapp"]}' \
   | python3 -m json.tool
 
 # Discovery
