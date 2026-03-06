@@ -1,7 +1,7 @@
 ---
 title: Dispatcher
 subtitle: Perl machine-to-machine remote script execution over mTLS
-brand: odcc
+brand: cloudient
 ---
 
 # Dispatcher
@@ -141,3 +141,13 @@ Alpine Linux
   `DOCKER.md`.
 
 All dependencies are system packages on both platforms. No CPAN required.
+
+
+## Licence
+
+Released under the GNU Affero General Public License v3.0 (AGPL-3.0-only).
+See `LICENCE` for the full text.
+
+The AGPL extends the GPL copyleft requirement to cover network use: if you
+run a modified version of dispatcher as a service, you must make the modified
+source available to users of that service.

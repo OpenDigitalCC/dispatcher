@@ -1,7 +1,7 @@
 ---
 title: Dispatcher and agent - Developer document
 subtitle: Purpose, contents, protocol, logging, security model and extending
-brand: odcc
+brand: cloudient
 ---
 
 # Dispatcher - Developer Documentation
@@ -345,8 +345,8 @@ Record format:
 
 ```json
 {
-  "hostname": "agent-host-01",
-  "ip":       "192.0.2.10",
+  "hostname": "sjm-explore",
+  "ip":       "192.168.125.125",
   "paired":   "2026-03-05T14:30:00Z",
   "expiry":   "Jun  7 16:28:00 2027 GMT",
   "reqid":    "1a15334d0001"
@@ -969,7 +969,7 @@ Capabilities response (`GET /capabilities`):
 
 ```json
 {
-  "status": "ok", "host": "agent-host-01", "version": "0.1",
+  "status": "ok", "host": "sjm-explore", "version": "0.1",
   "tags": { "env": "prod", "role": "db" },
   "scripts": [
     { "name": "backup-mysql", "path": "/opt/dispatcher-scripts/backup-mysql.sh", "executable": true }
@@ -998,7 +998,7 @@ Cert delivery (`POST /renew-complete`, dispatcher → agent):
 Pairing request (agent → dispatcher, port 7444, `POST /pair`):
 
 ```json
-{ "hostname": "agent-host-01", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "nonce": "a3f4c2b1..." }
+{ "hostname": "sjm-explore", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "nonce": "a3f4c2b1..." }
 ```
 
 Pairing response:
@@ -1012,13 +1012,13 @@ API endpoints (caller → dispatcher-api, port 7445):
 `POST /ping` request:
 
 ```json
-{ "hosts": ["agent-host-01", "prod-db-01"], "username": "stuart", "token": "..." }
+{ "hosts": ["sjm-explore", "prod-db-01"], "username": "stuart", "token": "..." }
 ```
 
 `POST /run` request:
 
 ```json
-{ "hosts": ["agent-host-01"], "script": "backup-mysql", "args": ["--db", "myapp"], "username": "stuart", "token": "..." }
+{ "hosts": ["sjm-explore"], "script": "backup-mysql", "args": ["--db", "myapp"], "username": "stuart", "token": "..." }
 ```
 
 `GET /discovery` response:
@@ -1027,7 +1027,7 @@ API endpoints (caller → dispatcher-api, port 7445):
 {
   "ok": true,
   "hosts": {
-    "agent-host-01": {
+    "sjm-explore": {
       "status": "ok", "version": "0.1", "rtt": "68ms",
       "tags": { "env": "prod", "role": "db" },
       "scripts": [{ "name": "backup-mysql", "path": "/opt/scripts/backup-mysql.sh", "executable": true }]
@@ -1039,7 +1039,7 @@ API endpoints (caller → dispatcher-api, port 7445):
 Lock conflict response (409):
 
 ```json
-{ "ok": false, "error": "locked", "code": 4, "conflicts": ["agent-host-01:backup-mysql"] }
+{ "ok": false, "error": "locked", "code": 4, "conflicts": ["sjm-explore:backup-mysql"] }
 ```
 
 
@@ -1053,24 +1053,24 @@ Dispatcher examples:
 ```
 dispatcher[1234]: ACTION=dispatch HOSTS=prod-db-01 REQID=a3f9b2c10001 SCRIPT=backup-mysql
 dispatcher[1234]: ACTION=run EXIT=0 REQID=a3f9b2c10001 RTT=87ms SCRIPT=backup-mysql TARGET=prod-db-01:7443
-dispatcher[1234]: ACTION=pair-approve AGENT=agent-host-01 REQID=fa5e74630001
+dispatcher[1234]: ACTION=pair-approve AGENT=sjm-explore REQID=fa5e74630001
 dispatcher[1234]: ACTION=auth AUTHACTION=run IP=127.0.0.1 RESULT=pass USER=stuart
-dispatcher[1234]: ACTION=unpair AGENT=agent-host-01 EXPIRY="Jun  7 16:28:00 2027 GMT"
-dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=agent-host-01:7443
-dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=agent-host-01:7443
-dispatcher[1234]: ACTION=lock-acquire HOST=agent-host-01 SCRIPT=backup-mysql
+dispatcher[1234]: ACTION=unpair AGENT=sjm-explore EXPIRY="Jun  7 16:28:00 2027 GMT"
+dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=sjm-explore:7443
+dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=sjm-explore:7443
+dispatcher[1234]: ACTION=lock-acquire HOST=sjm-explore SCRIPT=backup-mysql
 ```
 
 Agent examples:
 
 ```
 dispatcher-agent[5678]: ACTION=start PORT=7443
-dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.0.2.11 REQID=a3f9b2c10001 SCRIPT=backup-mysql
-dispatcher-agent[5678]: ACTION=deny PEER=192.0.2.11 REQID=b1c2d3e40001 SCRIPT=not-in-allowlist
-dispatcher-agent[5678]: ACTION=ping PEER=192.0.2.11 REQID=b7c3d1e40001
-dispatcher-agent[5678]: ACTION=capabilities PEER=192.0.2.11 SCRIPTS=3
-dispatcher-agent[5678]: ACTION=renew PEER=192.0.2.11 REQID=c1d2e3f40001 STATUS=csr-generated
-dispatcher-agent[5678]: ACTION=renew-complete PEER=192.0.2.11 REQID=c1d2e3f40001 STATUS=cert-stored
+dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.168.125.189 REQID=a3f9b2c10001 SCRIPT=backup-mysql
+dispatcher-agent[5678]: ACTION=deny PEER=192.168.125.189 REQID=b1c2d3e40001 SCRIPT=not-in-allowlist
+dispatcher-agent[5678]: ACTION=ping PEER=192.168.125.189 REQID=b7c3d1e40001
+dispatcher-agent[5678]: ACTION=capabilities PEER=192.168.125.189 SCRIPTS=3
+dispatcher-agent[5678]: ACTION=renew PEER=192.168.125.189 REQID=c1d2e3f40001 STATUS=csr-generated
+dispatcher-agent[5678]: ACTION=renew-complete PEER=192.168.125.189 REQID=c1d2e3f40001 STATUS=cert-stored
 ```
 
 API examples:
@@ -1229,8 +1229,8 @@ echo "my-script = /opt/dispatcher-scripts/my-script.sh" \
 sudo systemctl kill --signal=HUP dispatcher-agent
 
 # Verify discovery sees the new script
-sudo dispatcher ping agent-host-01
-sudo dispatcher run agent-host-01 my-script
+sudo dispatcher ping sjm-explore
+sudo dispatcher run sjm-explore my-script
 ```
 
 Scripts receive positional arguments exactly as passed. They should exit 0 on
@@ -1313,3 +1313,119 @@ Both roles also use core Perl modules (`Sys::Syslog`, `File::Temp`, `File::Path`
 `File::Basename`, `Getopt::Long`, `Sys::Hostname`, `POSIX`, `Time::HiRes`,
 `Time::Piece`, `IO::Select`, `Fcntl`, `IPC::Open2`, `Carp`) which are in the
 `perl` package on both Debian and Alpine and present on any standard installation.
+
+
+## Releasing
+
+### Version management
+
+The version is stored in a single `VERSION` file in the repository root using
+semver (`n.n.n`). It is the only authoritative source of the version.
+
+Module files (`lib/`) carry no version strings. The three binaries
+(`bin/dispatcher`, `bin/dispatcher-agent`, `bin/dispatcher-api`) carry the
+sentinel value `UNINSTALLED` in their `our $VERSION` declaration in the source
+tree. This value is replaced at two points:
+
+- `make-release.sh` - stamps the release version into the staged copies of the
+  binaries inside the tarball. The working tree is never modified.
+- `install.sh` - stamps the version from the `VERSION` file into the installed
+  binaries after copying them to `/usr/local/bin/`. If installed from a dev
+  checkout without a release tarball, `UNINSTALLED` is preserved.
+
+This means `dispatcher --version`, agent ping responses, and API health checks
+all report the version of the release that was installed, or `UNINSTALLED` if
+run directly from the source tree.
+
+### Version conventions
+
+Patch (`0.1.x`)
+: Auto-incremented by `make-release.sh` after each successful release. The
+  `VERSION` file is updated and left uncommitted, ready for the release commit.
+
+Minor (`0.x.0`)
+: Manual bump in `VERSION` for significant feature additions. Edit the file
+  before running `make-release.sh`.
+
+Major (`x.0.0`)
+: Manual bump in `VERSION` for breaking changes. Edit the file before running
+  `make-release.sh`.
+
+### Release process
+
+```bash
+# 1. Ensure working tree is clean - all work committed
+git status
+
+# 2. If bumping minor or major, edit VERSION manually first and commit it
+#    For a patch release, VERSION is already at the right value from the
+#    previous release's auto-bump
+
+# 3. Run the release script
+./make-release.sh
+```
+
+`make-release.sh` will:
+
+- Validate `VERSION` is semver and the working tree is clean
+- Stage all shipped files into a temp directory
+- Stamp the version into the three staged binaries
+- Generate `sbom.json` with SHA-256 hashes of all source components
+- Create `dispatcher-<version>.tar.gz` and a `.sha256` checksum file
+- Create an annotated git tag `v<version>`
+- Auto-increment the patch version in `VERSION`
+
+```bash
+# 4. Review the SBOM, then commit sbom.json and the bumped VERSION together
+git add sbom.json VERSION
+git commit -m "release: <version>"
+
+# 5. Push the tag
+git push origin v<version>
+
+# 6. Publish the tarball and checksum
+```
+
+The clean-tree check at step 3 is the guard against accidental double-releases:
+`make-release.sh` blocks until `sbom.json` and the bumped `VERSION` are
+committed, making it impossible to release the same version twice or skip a
+version without a deliberate commit.
+
+### What is shipped
+
+The tarball contains:
+
+```
+bin/dispatcher
+bin/dispatcher-agent
+bin/dispatcher-api
+lib/
+etc/
+t/
+install.sh
+VERSION
+LICENCE
+README.md
+INSTALL.md
+DOCKER.md
+SECURITY.md
+DEVELOPER.md
+BACKGROUND.md
+sbom.json
+```
+
+Not shipped: `.git/`, `make-release.sh` (development tooling), editor and IDE
+configuration files.
+
+### SBOM
+
+`sbom.json` is generated by `make-release.sh` in CycloneDX 1.6 JSON format.
+It is committed to the repository as part of the release commit so it is
+available alongside the source at the tagged version.
+
+Source components (binaries and all `.pm` modules) are listed with SHA-256
+hashes of the staged files (i.e. with the version already stamped). Runtime
+dependencies are listed by name with `version: unknown` and external references
+to the Debian and Alpine package trackers, reflecting that dependency versions
+are resolved by the OS package manager at install time and are not fixed by the
+distribution.

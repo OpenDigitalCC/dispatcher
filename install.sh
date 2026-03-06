@@ -302,6 +302,8 @@ install_agent() {
     install -m 755 "$SOURCE_DIR/bin/dispatcher-agent" "$BIN_DIR/dispatcher-agent"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
         "$BIN_DIR/dispatcher-agent"
+    sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
+        "$BIN_DIR/dispatcher-agent"
 
     # Config directory - readable by agent group, not world
     mkdir -p "$AGENT_CONF_DIR"
@@ -350,6 +352,8 @@ install_dispatcher() {
 
     install -m 755 "$SOURCE_DIR/bin/dispatcher" "$BIN_DIR/dispatcher"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
+        "$BIN_DIR/dispatcher"
+    sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
         "$BIN_DIR/dispatcher"
 
     # Config directory
@@ -401,6 +405,8 @@ install_api() {
 
     install -m 755 "$SOURCE_DIR/bin/dispatcher-api" "$BIN_DIR/dispatcher-api"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
+        "$BIN_DIR/dispatcher-api"
+    sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
         "$BIN_DIR/dispatcher-api"
 
     install_service_unit "$API_SERVICE"
@@ -621,6 +627,13 @@ done
 check_root
 detect_platform
 detect_init
+
+# Read release version - present in distributed tarballs, absent in dev checkouts
+if [[ -f "$SOURCE_DIR/VERSION" ]]; then
+    RELEASE_VERSION=$(cat "$SOURCE_DIR/VERSION" | tr -d '[:space:]')
+else
+    RELEASE_VERSION="UNINSTALLED"
+fi
 
 if [[ "$DO_UNINSTALL" == true ]]; then
     uninstall
