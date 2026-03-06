@@ -4,7 +4,6 @@ subtitle: Purpose, contents, protocol, logging, security model and extending
 brand: cloudient
 ---
 
-
 # Dispatcher - Developer Documentation
 
 ## Purpose and Design Criteria
@@ -58,6 +57,14 @@ auth hook
   outcomes. No hook configured means unconditional pass. The hook is the
   intended policy engine for per-token, per-script, and per-argument access
   control; dispatcher deliberately does not implement config-based ACLs.
+
+token forwarding pipeline
+: Tokens and usernames are forwarded from the dispatcher through to the agent
+  and into the script's stdin context. This supports multi-hop token validation:
+  the dispatcher hook, the agent hook, and the script itself can all
+  independently verify that the token is still valid and authorised for the
+  stated purpose. Each hop trusts the CA for identity but verifies authority
+  independently via its own token validation.
 
 HTTP REST API
 : An optional API server (`dispatcher-api`) exposes the same run, ping, and
@@ -120,10 +127,12 @@ t/
   registry.t              Tests for Dispatcher::Registry
   renewal.t               Tests for cert renewal functions
 
-install.sh                Installer: --agent | --dispatcher | --api | --uninstall
-README.md                 User-facing install, test, and configuration guide
+install.sh                Installer: --agent | --dispatcher | --api | --uninstall | --run-tests
+README.md                 Project overview and quick start
+INSTALL.md                Full installation, configuration, and operational reference
+DOCKER.md                 Docker deployment guide (Alpine containers, entrypoints, pairing)
+SECURITY.md               Security model, trust boundaries, file permissions
 DEVELOPER.md              This file
-TODO.md                   Outstanding work items with implementation context
 ```
 
 
@@ -393,7 +402,10 @@ ping result.
 Functions:
 
 `dispatch_all(%opts)`
-: Required: `hosts` (arrayref), `script`, `config`. Optional: `args`, `reqid`, `port`.
+: Required: `hosts` (arrayref), `script`, `config`. Optional: `args`, `reqid`,
+  `port`, `username`, `token`. `username` and `token` are forwarded to the
+  agent in the run request body and from there into the script's stdin context,
+  enabling downstream token validation.
   Returns arrayref of `{ host, script, exit, stdout, stderr, reqid, rtt }`.
 
 `ping_all(%opts)`
@@ -437,7 +449,10 @@ Private functions (not part of public API but documented for extension):
 ### `Dispatcher::Auth`
 
 Auth hook runner. Called before every `run` and `ping` operation from both
-the CLI and the API. If no hook is configured, all requests pass unconditionally.
+the CLI and the API. Also called by the agent's `handle_run` when
+`config->{auth_hook}` is set - the same module serves both dispatcher-side
+and agent-side hook execution. If no hook is configured (dispatcher or agent),
+all requests pass unconditionally.
 
 The hook is an external executable called with request context as environment
 variables and a JSON object on stdin. Its exit code determines the outcome.
@@ -647,8 +662,10 @@ Functions:
 : Parses `agent.conf`. Returns hashref. Required keys: `port`, `cert`, `key`,
   `ca`. Parses `script_dirs` from a colon-separated string into an arrayref.
   If absent or empty, the `script_dirs` key is not present in the returned
-  hashref (no restriction). Parses `[tags]` section into `$config->{tags}`
-  hashref; other sections are silently ignored.
+  hashref (no restriction). Validates `auth_hook` if present: the path must
+  exist and be executable, otherwise dies. If absent or empty, the `auth_hook`
+  key is not present in the returned hashref. Parses `[tags]` section into
+  `$config->{tags}` hashref; other sections are silently ignored.
 
 `load_allowlist($path, $script_dirs)`
 : Parses `scripts.conf`. Returns hashref of `{ name => /absolute/path }`.
@@ -673,6 +690,9 @@ ca   = /etc/dispatcher-agent/ca.crt
 # Optional: restrict scripts to approved directories
 # script_dirs = /opt/dispatcher-scripts:/usr/local/lib/dispatcher-scripts
 
+# Optional: agent-side auth hook for independent token validation
+# auth_hook = /etc/dispatcher-agent/auth-hook
+
 [tags]
 env  = prod
 role = db
@@ -690,20 +710,42 @@ backup-mysql  = /opt/dispatcher-scripts/backup-mysql.sh
 
 ### `Dispatcher::Agent::Runner`
 
-Script execution. Forks a child, redirects stdout and stderr to pipes, calls
-`exec { $path } $path, @args` (no shell). The parent reads both pipes to
-completion then waits for the child.
+Script execution. Forks a child, redirects stdin, stdout, and stderr to pipes,
+calls `exec { $path } $path, @args` (no shell). The parent writes the request
+context as JSON to the script's stdin pipe, then reads both output pipes to
+completion and waits for the child.
 
 Using `exec { $path } $path, @args` (the two-argument form with a block) means
 the PATH is not searched, no shell is invoked, arguments are passed directly to
 `execve()`, and shell metacharacters in arguments have no effect.
 
+JSON stdin
+: The full request context is serialised as a JSON object and piped to the
+  script's stdin before closing the write end. The script may read and parse
+  it or ignore it entirely. A script that does not want stdin should add
+  `exec 0</dev/null` at the top of its body - this redirects stdin before the
+  script's own read calls and discards the JSON cleanly without blocking.
+
 Functions:
 
-`run_script($script_path, $args_arrayref)`
+`run_script($script_path, $args_arrayref, $context)`
 : Executes the script, returns `{ stdout => '', stderr => '', exit => N }`.
-  Exit code 126 if the process was killed by a signal. Exit code -1 with an
-  error in `stderr` if `fork` or `pipe` failed.
+  `$context` is an optional hashref; if provided it is serialised as JSON and
+  written to the script's stdin. If `undef`, stdin is closed immediately
+  (empty). Exit code 126 if the process was killed by a signal or exec failed.
+  Exit code -1 with an error in `stderr` if `fork` or `pipe` failed.
+
+Context hashref fields:
+
+```
+script      Script name as requested
+args        Arrayref of positional arguments
+reqid       Request ID
+peer_ip     Dispatcher's IP address
+username    Username from the dispatcher request (may be empty)
+token       Auth token from the dispatcher request (may be empty)
+timestamp   ISO 8601 UTC timestamp of the request
+```
 
 
 ### `Dispatcher::Agent::Pairing`
@@ -826,8 +868,8 @@ Modes:
 : Starts the `IO::Socket::SSL` server. Forks one child per connection. The
   child calls `handle_connection()` and exits. The parent closes its copy with
   `SSL_no_shutdown => 1` and reaps children with `waitpid -1, WNOHANG`.
-  SIGHUP reloads both config and allowlist without restart; tag changes and
-  `script_dirs` changes take effect on reload.
+  SIGHUP reloads both config and allowlist without restart; tag changes,
+  `script_dirs` changes, and `auth_hook` changes take effect on reload.
 
 `request-pairing`
 : Performs a preflight writability check on `/etc/dispatcher-agent` before
@@ -845,8 +887,13 @@ Modes:
 Endpoints handled in `handle_connection`:
 
 `POST /run`
-: Validates script name against allowlist (and `script_dirs` if configured),
-  executes via `Agent::Runner::run_script`, returns
+: Extracts `script`, `args`, `reqid`, `username`, and `token` from the request
+  body. Validates the script name against the allowlist (and `script_dirs` if
+  configured). If `config->{auth_hook}` is set, calls `Dispatcher::Auth::check`
+  with the full request context including `username` and `token` - this is the
+  agent-side auth hook, independent of the dispatcher's own hook. On pass,
+  builds a `$context` hashref (script, args, reqid, peer_ip, username, token,
+  timestamp) and passes it to `Agent::Runner::run_script`. Returns
   `{ script, exit, stdout, stderr, reqid }`.
 
 `POST /ping`
@@ -887,8 +934,18 @@ Agent endpoints (dispatcher → agent, mTLS on port 7443):
 Run request (`POST /run`):
 
 ```json
-{ "script": "backup-mysql", "args": ["--db", "myapp"], "reqid": "a3f9b2c10001" }
+{
+  "script":   "backup-mysql",
+  "args":     ["--db", "myapp"],
+  "reqid":    "a3f9b2c10001",
+  "username": "stuart",
+  "token":    "tok123"
+}
 ```
+
+`username` and `token` are forwarded from the dispatcher request (CLI flag,
+env var, or API body). The agent does not validate them directly - it passes
+them to its own auth hook (if configured) and into the script's stdin context.
 
 Run response:
 
@@ -1179,6 +1236,11 @@ sudo dispatcher run sjm-explore my-script
 Scripts receive positional arguments exactly as passed. They should exit 0 on
 success, non-zero on failure. stdout and stderr are both captured and returned.
 
+Scripts also receive the full request context (script, args, reqid, peer_ip,
+username, token, timestamp) as a JSON object on stdin. Scripts that do not
+need this should add `exec 0</dev/null` at the top to avoid blocking on an
+unread stdin pipe.
+
 
 ## Extending the System
 
@@ -1209,6 +1271,14 @@ Adding agent tags
   The dispatcher does not interpret them. Tag-based filtering or routing belongs
   in the auth hook or in tooling that consumes the API.
 
+Adding an agent-side auth hook
+: Set `auth_hook` in `agent.conf` to an executable path. The agent calls
+  `Dispatcher::Auth::check` in `handle_run` after allowlist validation.
+  The hook receives the same context as the dispatcher hook, including the
+  forwarded `username` and `token`. This enables independent token validation
+  on the agent - for example, verifying the token against a central validation
+  service without trusting the dispatcher's prior check.
+
 Changing cert lifetime
 : Set `cert_days` in `dispatcher.conf`. All new certs (pairing and renewal)
   will use the new value. Existing certs are unaffected until their next
@@ -1223,21 +1293,23 @@ Changing cert lifetime
 Agent role
 
 ```
-libio-socket-ssl-perl    IO::Socket::SSL   TLS server and client sockets
-libjson-perl             JSON              encode_json / decode_json
-openssl                  (binary)          Key, CSR, and cert operations
+Debian                   Alpine                   Module / binary
+libio-socket-ssl-perl    perl-io-socket-ssl        IO::Socket::SSL
+libjson-perl             perl-json                 JSON
+openssl                  openssl                   (binary) key, CSR, cert ops
 ```
 
 Dispatcher role
 
 ```
-libwww-perl              LWP::UserAgent    HTTP client for run/ping/capabilities
-libio-socket-ssl-perl    IO::Socket::SSL   TLS for pairing server and API
-libjson-perl             JSON              encode_json / decode_json
-openssl                  (binary)          CA and cert operations
+Debian                   Alpine                   Module / binary
+libwww-perl              perl-libwww               LWP::UserAgent
+libio-socket-ssl-perl    perl-io-socket-ssl        IO::Socket::SSL
+libjson-perl             perl-json                 JSON
+openssl                  openssl                   (binary) CA and cert ops
 ```
 
 Both roles also use core Perl modules (`Sys::Syslog`, `File::Temp`, `File::Path`,
 `File::Basename`, `Getopt::Long`, `Sys::Hostname`, `POSIX`, `Time::HiRes`,
-`Time::Piece`, `IO::Select`, `Fcntl`, `IPC::Open2`, `Carp`) which are in
-`perl-base` or `perl` and present on any Debian system.
+`Time::Piece`, `IO::Select`, `Fcntl`, `IPC::Open2`, `Carp`) which are in the
+`perl` package on both Debian and Alpine and present on any standard installation.
