@@ -138,12 +138,12 @@ subtest '_renewal_due: unparseable expiry returns not due (safe default)' => sub
 subtest '_renewal_due: respects cert_days configuration' => sub {
     require Dispatcher::Engine;
     # 200 days remaining
-    # cert_days=365: half-life=182.5 -> due
-    # cert_days=730: half-life=365   -> not due
+    # cert_days=365: half-life=182.5 days -> not due (200 > 182.5)
+    # cert_days=730: half-life=365.0 days -> due     (200 < 365)
     my $future = time() + (200 * 86400);
     my $expiry = _epoch_to_openssl($future);
-    ok  Dispatcher::Engine::_renewal_due($expiry, 365), 'due with cert_days=365';
-    ok !Dispatcher::Engine::_renewal_due($expiry, 730), 'not due with cert_days=730';
+    ok !Dispatcher::Engine::_renewal_due($expiry, 365), 'not due with cert_days=365';
+    ok  Dispatcher::Engine::_renewal_due($expiry, 730), 'due with cert_days=730';
 };
 
 # Format an epoch as an OpenSSL notAfter string: "Jun  7 16:28:00 2028 GMT"
