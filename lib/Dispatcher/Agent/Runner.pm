@@ -2,19 +2,31 @@ package Dispatcher::Agent::Runner;
 
 use strict;
 use warnings;
+use JSON  qw(encode_json);
 use POSIX qw(WIFEXITED WEXITSTATUS);
 
 our $VERSION = '0.1';
 
-# Execute a script with no shell, capture stdout/stderr/exit
+# Execute a script with no shell, capture stdout/stderr/exit.
+# Pipes full request context as JSON to the script's stdin.
+#
+# Arguments:
+#   $script_path  - absolute path to executable (caller does allowlist check)
+#   $args         - arrayref of positional arguments (may be empty)
+#   $context      - optional hashref piped as JSON to stdin
+#                   Keys: script, args, reqid, peer_ip, username, token, timestamp
+#                   If undef, stdin is closed immediately (empty).
+#
 # Returns hashref: { stdout => '', stderr => '', exit => N }
-# script_path must be an absolute path (caller is responsible for allowlist check)
-# args is an arrayref (may be empty)
+#   exit  0+    script exit code
+#   exit  126   killed by signal or exec failed
+#   exit  -1    fork or pipe failure (error in stderr)
 sub run_script {
-    my ($script_path, $args) = @_;
+    my ($script_path, $args, $context) = @_;
     $args //= [];
 
-    # Pipes for stdout and stderr
+    # Pipes for stdin (JSON context), stdout, and stderr
+    pipe my $stdin_r,  my $stdin_w  or return _error("pipe(stdin): $!");
     pipe my $stdout_r, my $stdout_w or return _error("pipe(stdout): $!");
     pipe my $stderr_r, my $stderr_w or return _error("pipe(stderr): $!");
 
@@ -23,10 +35,13 @@ sub run_script {
 
     if ($pid == 0) {
         # Child
+        close $stdin_w;
         close $stdout_r;
         close $stderr_r;
+        open STDIN,  '<&', $stdin_r  or POSIX::_exit(127);
         open STDOUT, '>&', $stdout_w or POSIX::_exit(127);
         open STDERR, '>&', $stderr_w or POSIX::_exit(127);
+        close $stdin_r;
         close $stdout_w;
         close $stderr_w;
 
@@ -36,8 +51,15 @@ sub run_script {
     }
 
     # Parent
+    close $stdin_r;
     close $stdout_w;
     close $stderr_w;
+
+    # Write context JSON to script stdin, then close to signal EOF
+    if ($context) {
+        print $stdin_w encode_json($context);
+    }
+    close $stdin_w;
 
     my $stdout = _slurp($stdout_r);
     my $stderr = _slurp($stderr_r);

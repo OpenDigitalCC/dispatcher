@@ -7,12 +7,8 @@ use Carp  qw(croak);
 use POSIX qw(WNOHANG);
 
 use Dispatcher::Log qw();
-use Time::HiRes qw();
-use Time::Piece qw();
 
 our $VERSION = '0.1';
-
-my $_reqid_counter = 0;
 
 my $DEFAULT_PORT = 7443;
 
@@ -25,21 +21,25 @@ my $DEFAULT_PORT = 7443;
 #   config  => \%config         (cert, key, ca, optional timeout)
 #
 # Optional opts:
-#   args    => \@script_args    (default [])
-#   reqid   => $id              (generated if absent)
-#   port    => $default_port    (default 7443)
+#   args     => \@script_args   (default [])
+#   reqid    => $id             (generated if absent)
+#   port     => $default_port   (default 7443)
+#   username => $str            (forwarded to agent for downstream use)
+#   token    => $str            (forwarded to agent for downstream use)
 #
 # Returns arrayref of result hashrefs:
 #   { host, script, exit, stdout, stderr, reqid, rtt }
 #   { host, script, exit => -1, error, reqid, rtt }
 sub dispatch_all {
     my (%opts) = @_;
-    my $hosts  = $opts{hosts}  or croak "hosts required";
-    my $script = $opts{script} or croak "script required";
-    my $config = $opts{config} or croak "config required";
-    my $args   = $opts{args}   // [];
-    my $reqid  = $opts{reqid}  // gen_reqid();
-    my $port   = $opts{port}   // $DEFAULT_PORT;
+    my $hosts    = $opts{hosts}    or croak "hosts required";
+    my $script   = $opts{script}   or croak "script required";
+    my $config   = $opts{config}   or croak "config required";
+    my $args     = $opts{args}     // [];
+    my $reqid    = $opts{reqid}    // gen_reqid();
+    my $port     = $opts{port}     // $DEFAULT_PORT;
+    my $username = $opts{username} // '';
+    my $token    = $opts{token}    // '';
 
     croak "hosts must be an arrayref" unless ref $hosts eq 'ARRAY';
     croak "args must be an arrayref"  unless ref $args  eq 'ARRAY';
@@ -64,12 +64,14 @@ sub dispatch_all {
         if ($pid == 0) {
             close $r;
             my $result = _dispatch_one(
-                host   => $host,
-                port   => $hport,
-                script => $script,
-                args   => $args,
-                reqid  => $reqid,
-                config => $config,
+                host     => $host,
+                port     => $hport,
+                script   => $script,
+                args     => $args,
+                reqid    => $reqid,
+                config   => $config,
+                username => $username,
+                token    => $token,
             );
             print $w encode_json($result);
             close $w;
@@ -165,35 +167,6 @@ sub ping_all {
         delete $pipes{$pid};
     }
 
-    # Check each successful ping for cert renewal need.
-    # Renewal is triggered when remaining validity < half of cert_days.
-    # Failure is logged but not propagated - ping result is unaffected.
-    my $cert_days = $config->{cert_days} // 365;
-    for my $result (@results) {
-        next unless ($result->{status} // '') eq 'ok';
-        next unless $result->{expiry};
-
-        if (_renewal_due($result->{expiry}, $cert_days)) {
-            my ($host, $hport) = parse_host($result->{host} // '', $port);
-            eval {
-                _renew_one(
-                    host   => $host,
-                    port   => $hport,
-                    config => $config,
-                    reqid  => gen_reqid(),
-                );
-            };
-            if ($@) {
-                chomp(my $err = $@);
-                Dispatcher::Log::log_action('ERR', {
-                    ACTION => 'renew',
-                    TARGET => "$host:$hport",
-                    ERROR  => $err,
-                });
-            }
-        }
-    }
-
     return \@results;
 }
 
@@ -272,12 +245,9 @@ sub parse_host {
     return ($host_str, $default_port // $DEFAULT_PORT);
 }
 
-# Generate a unique request ID combining timestamp, PID, and per-process counter.
+# Generate a random 8-hex-digit request ID.
 sub gen_reqid {
-    my $t   = int(Time::HiRes::time() * 1000) & 0xffff;
-    my $pid = $$ & 0xffff;
-    my $seq = (++$_reqid_counter) & 0xffff;
-    return sprintf '%04x%04x%04x', $t, $pid, $seq;
+    return sprintf '%08x', int(rand(0xffffffff));
 }
 
 # --- private ---
@@ -289,13 +259,16 @@ sub _dispatch_one {
     my $config = $opts{config};
     my $reqid  = $opts{reqid};
 
+    require Time::HiRes;
     my $t0 = Time::HiRes::time();
     my $ua = _build_ua($config);
 
     my $payload = encode_json({
-        script => $opts{script},
-        args   => $opts{args} // [],
-        reqid  => $reqid,
+        script   => $opts{script},
+        args     => $opts{args} // [],
+        reqid    => $reqid,
+        username => $opts{username} // '',
+        token    => $opts{token}    // '',
     });
 
     my $resp = eval {
@@ -354,6 +327,7 @@ sub _ping_one {
     my $config = $opts{config};
     my $reqid  = $opts{reqid};
 
+    require Time::HiRes;
     my $t0 = Time::HiRes::time();
     my $ua = _build_ua($config);
 
@@ -402,6 +376,7 @@ sub _capabilities_one {
     my $port   = $opts{port};
     my $config = $opts{config};
 
+    require Time::HiRes;
     my $t0 = Time::HiRes::time();
     my $ua = _build_ua($config);
 
@@ -436,131 +411,6 @@ sub _capabilities_one {
     });
 
     return $result;
-}
-
-# Return true if the cert expiry date is within half the configured cert lifetime.
-# Expiry is an OpenSSL notAfter string: "Jun  7 16:28:00 2028 GMT"
-sub _renewal_due {
-    my ($expiry_str, $cert_days) = @_;
-    my $half_life_secs = (($cert_days // 365) / 2) * 86400;
-
-    my $expiry_epoch = eval {
-        local $ENV{TZ} = 'UTC';
-        my $t = Time::Piece->strptime($expiry_str, '%b %d %H:%M:%S %Y %Z');
-        $t->epoch;
-    };
-    return 0 unless defined $expiry_epoch;  # cannot parse - skip renewal
-
-    my $remaining = $expiry_epoch - time();
-    return $remaining < $half_life_secs;
-}
-
-# Perform cert renewal for one agent over mTLS on port 7443.
-# POST /renew  -> receive CSR
-# Sign CSR via CA
-# POST /renew-complete -> deliver new cert+CA
-# Update registry expiry
-#
-# Dies on any failure so the caller can log at ERR.
-sub _renew_one {
-    my (%opts) = @_;
-    my $host   = $opts{host}   or croak "host required";
-    my $port   = $opts{port}   or croak "port required";
-    my $config = $opts{config} or croak "config required";
-    my $reqid  = $opts{reqid}  // gen_reqid();
-
-    require Dispatcher::CA;
-    require Dispatcher::Registry;
-
-    my $ua = _build_ua($config);
-
-    Dispatcher::Log::log_action('INFO', {
-        ACTION => 'renew',
-        TARGET => "$host:$port",
-        REQID  => $reqid,
-        STATUS => 'starting',
-    });
-
-    # Step 1: request CSR from agent
-    my $resp = $ua->post(
-        "https://$host:$port/renew",
-        'Content-Type' => 'application/json',
-        Content        => encode_json({ reqid => $reqid }),
-    );
-    croak "POST /renew failed: " . $resp->status_line
-        unless $resp && $resp->is_success;
-
-    my $data = eval { decode_json($resp->content) }
-        or croak "Invalid JSON from /renew";
-    croak "/renew returned error: $data->{error}"
-        if ($data->{status} // '') ne 'ok';
-    croak "/renew returned no CSR"
-        unless $data->{csr};
-
-    # Step 2: sign the CSR
-    my $cert_pem = Dispatcher::CA::sign_csr(
-        csr_pem => $data->{csr},
-        ca_dir  => $config->{ca_dir} // '/etc/dispatcher',
-        days    => $config->{cert_days} // 365,
-    );
-
-    my $ca_pem = Dispatcher::CA::read_ca_cert(
-        ca_dir => $config->{ca_dir} // '/etc/dispatcher',
-    );
-
-    # Step 3: deliver new cert to agent
-    my $resp2 = $ua->post(
-        "https://$host:$port/renew-complete",
-        'Content-Type' => 'application/json',
-        Content        => encode_json({
-            status => 'ok',
-            cert   => $cert_pem,
-            ca     => $ca_pem,
-            reqid  => $reqid,
-        }),
-    );
-    croak "POST /renew-complete failed: " . $resp2->status_line
-        unless $resp2 && $resp2->is_success;
-
-    my $data2 = eval { decode_json($resp2->content) }
-        or croak "Invalid JSON from /renew-complete";
-    croak "/renew-complete returned error: $data2->{error}"
-        if ($data2->{status} // '') ne 'ok';
-
-    # Step 4: update registry expiry
-    my $new_expiry = _extract_expiry($cert_pem);
-    my $agent      = Dispatcher::Registry::get_agent(hostname => $host);
-    if ($agent) {
-        Dispatcher::Registry::register_agent(
-            hostname => $agent->{hostname},
-            ip       => $agent->{ip}     // '',
-            paired   => $agent->{paired} // '',
-            expiry   => $new_expiry      // '',
-            reqid    => $agent->{reqid}  // '',
-        );
-    }
-
-    Dispatcher::Log::log_action('INFO', {
-        ACTION => 'renew-complete',
-        TARGET => "$host:$port",
-        REQID  => $reqid,
-        EXPIRY => $new_expiry // '',
-    });
-}
-
-# Extract cert expiry from a PEM string using openssl subprocess.
-# Returns the notAfter string or undef on failure.
-sub _extract_expiry {
-    my ($cert_pem) = @_;
-    require File::Temp;
-    my ($fh, $path) = File::Temp::tempfile(SUFFIX => '.crt', UNLINK => 1);
-    print $fh $cert_pem;
-    close $fh;
-    my $out = `openssl x509 -noout -enddate -in \Q$path\E 2>/dev/null`;
-    return unless defined $out && $out =~ /notAfter=(.+)/;
-    my $date = $1;
-    chomp $date;
-    return $date;
 }
 
 sub _build_ua {

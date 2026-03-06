@@ -8,9 +8,10 @@ use lib "$Bin/../lib";
 use Dispatcher::Agent::Config  qw();
 use Dispatcher::Agent::Runner  qw();
 use Dispatcher::Agent::Pairing qw();
+use Dispatcher::Auth           qw();
 use Dispatcher::Log            qw();
 use JSON                       qw(encode_json decode_json);
-use POSIX                      qw(SIGTERM WNOHANG);
+use POSIX                      qw(SIGTERM WNOHANG strftime);
 use Sys::Hostname              qw(hostname);
 use Getopt::Long               qw(GetOptions);
 
@@ -56,13 +57,11 @@ sub mode_serve {
     my ($opts) = @_;
 
     my $config    = Dispatcher::Agent::Config::load_config($CONFIG_PATH);
-    my $allowlist = Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH, $config->{script_dirs});
+    my $allowlist = Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH);
 
     $SIG{HUP} = sub {
-        warn "Reloading config and allowlist...\n";
-        $config    = eval { Dispatcher::Agent::Config::load_config($CONFIG_PATH) }
-                     // do { warn "Config reload failed: $@\n"; $config };
-        $allowlist = eval { Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH, $config->{script_dirs}) };
+        warn "Reloading allowlist...\n";
+        $allowlist = eval { Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH) };
         warn "Allowlist reload failed: $@\n" if $@;
     };
 
@@ -94,7 +93,7 @@ sub mode_serve {
         if ($pid == 0) {
             # Child: close server socket, handle connection, exit
             $server->close(SSL_no_shutdown => 1);
-            handle_connection($conn, $peer, $allowlist, $config);
+            handle_connection($conn, $peer, $allowlist);
             $conn->close;
             exit 0;
         }
@@ -109,14 +108,6 @@ sub mode_request_pairing {
 
     my $dispatcher = $opts->{dispatcher}
         or die "--dispatcher <host> required for request-pairing\n";
-
-    # Preflight: check cert directory is writable before making any network
-    # connection. Avoids a stale pairing request being left in the dispatcher
-    # queue if the agent cannot write the received certs.
-    my $cert_dir = '/etc/dispatcher-agent';
-    unless (-w $cert_dir) {
-        die "Cannot write to $cert_dir - re-run with sudo\n";
-    }
 
     my $host = hostname();
 
@@ -194,7 +185,7 @@ sub mode_ping_self {
 # Reads raw HTTP/1.0 request from IO::Socket::SSL, dispatches, sends response.
 
 sub handle_connection {
-    my ($conn, $peer, $allowlist, $config) = @_;
+    my ($conn, $peer, $allowlist) = @_;
 
     # Read request line
     my $request_line = <$conn>;
@@ -231,13 +222,7 @@ sub handle_connection {
         handle_ping($conn, $body, $peer);
     }
     elsif ($method eq 'GET' && $path eq '/capabilities') {
-        handle_capabilities($conn, $peer, $allowlist, $config);
-    }
-    elsif ($method eq 'POST' && $path eq '/renew') {
-        handle_renew($conn, $body, $peer);
-    }
-    elsif ($method eq 'POST' && $path eq '/renew-complete') {
-        handle_renew_complete($conn, $body, $peer);
+        handle_capabilities($conn, $peer, $allowlist);
     }
     else {
         _send_raw($conn, 404, encode_json({ error => 'not found' }));
@@ -253,9 +238,11 @@ sub handle_run {
         return;
     }
 
-    my $name  = $data->{script} // '';
-    my $args  = $data->{args}   // [];
-    my $reqid = $data->{reqid}  // '';
+    my $name     = $data->{script}   // '';
+    my $args     = $data->{args}     // [];
+    my $reqid    = $data->{reqid}    // '';
+    my $username = $data->{username} // '';
+    my $token    = $data->{token}    // '';
 
     unless (ref $args eq 'ARRAY') {
         _send_json($conn, { exit => -1, error => 'args must be an array', reqid => $reqid });
@@ -282,7 +269,46 @@ sub handle_run {
         return;
     }
 
-    my $result = Dispatcher::Agent::Runner::run_script($script_path, $args);
+    # Agent auth hook - called after allowlist validation
+    if ($config->{auth_hook}) {
+        my $auth = Dispatcher::Auth::check(
+            action    => 'run',
+            config    => $config,
+            script    => $name,
+            args      => $args,
+            username  => $username,
+            token     => $token,
+            source_ip => $peer,
+        );
+        unless ($auth->{ok}) {
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION => 'deny',
+                REASON => $auth->{reason},
+                SCRIPT => $name,
+                PEER   => $peer,
+                REQID  => $reqid,
+            });
+            _send_json($conn, {
+                script => $name,
+                exit   => -1,
+                error  => 'not authorised: ' . $auth->{reason},
+                reqid  => $reqid,
+            });
+            return;
+        }
+    }
+
+    my $context = {
+        script    => $name,
+        args      => $args,
+        reqid     => $reqid,
+        peer_ip   => $peer,
+        username  => $username,
+        token     => $token,
+        timestamp => POSIX::strftime('%Y-%m-%dT%H:%M:%SZ', gmtime),
+    };
+
+    my $result = Dispatcher::Agent::Runner::run_script($script_path, $args, $context);
 
     Dispatcher::Log::log_action('INFO', {
         ACTION => 'run',
@@ -325,7 +351,7 @@ sub handle_ping {
 }
 
 sub handle_capabilities {
-    my ($conn, $peer, $allowlist, $config) = @_;
+    my ($conn, $peer, $allowlist) = @_;
 
     my @scripts;
     for my $name (sort keys %$allowlist) {
@@ -347,116 +373,8 @@ sub handle_capabilities {
         status  => 'ok',
         host    => hostname(),
         version => $VERSION,
-        tags    => ($config->{tags} // {}),
         scripts => \@scripts,
     });
-}
-
-sub handle_renew {
-    my ($conn, $body, $peer) = @_;
-
-    my $data  = eval { decode_json($body) } // {};
-    my $reqid = $data->{reqid} // '';
-
-    my $config = eval { Dispatcher::Agent::Config::load_config($CONFIG_PATH) };
-    if ($@) {
-        Dispatcher::Log::log_action('ERR', {
-            ACTION => 'renew',
-            PEER   => $peer,
-            REQID  => $reqid,
-            ERROR  => 'cannot load config',
-        });
-        _send_json($conn, { status => 'error', error => 'cannot load config', reqid => $reqid });
-        return;
-    }
-
-    require Sys::Hostname;
-    my $hostname = Sys::Hostname::hostname();
-    my $key_path = $config->{key};
-
-    my $result = eval {
-        Dispatcher::Agent::Pairing::generate_csr_only(
-            hostname => $hostname,
-            key_path => $key_path,
-        );
-    };
-    if ($@) {
-        chomp(my $err = $@);
-        Dispatcher::Log::log_action('ERR', {
-            ACTION => 'renew',
-            PEER   => $peer,
-            REQID  => $reqid,
-            ERROR  => $err,
-        });
-        _send_json($conn, { status => 'error', error => $err, reqid => $reqid });
-        return;
-    }
-
-    Dispatcher::Log::log_action('INFO', {
-        ACTION => 'renew',
-        PEER   => $peer,
-        REQID  => $reqid,
-        STATUS => 'csr-generated',
-    });
-
-    _send_json($conn, {
-        status => 'ok',
-        csr    => $result->{csr_pem},
-        reqid  => $reqid,
-    });
-}
-
-sub handle_renew_complete {
-    my ($conn, $body, $peer) = @_;
-
-    my $data  = eval { decode_json($body) } // {};
-    my $reqid = $data->{reqid} // '';
-
-    unless ($data->{cert} && $data->{ca}) {
-        _send_json($conn, { status => 'error', error => 'cert and ca required', reqid => $reqid });
-        return;
-    }
-
-    my $config = eval { Dispatcher::Agent::Config::load_config($CONFIG_PATH) };
-    if ($@) {
-        _send_json($conn, { status => 'error', error => 'cannot load config', reqid => $reqid });
-        return;
-    }
-
-    eval {
-        Dispatcher::Agent::Pairing::store_certs(
-            cert_pem => $data->{cert},
-            ca_pem   => $data->{ca},
-            key_pem  => _slurp($config->{key}),
-        );
-    };
-    if ($@) {
-        chomp(my $err = $@);
-        Dispatcher::Log::log_action('ERR', {
-            ACTION => 'renew-complete',
-            PEER   => $peer,
-            REQID  => $reqid,
-            ERROR  => $err,
-        });
-        _send_json($conn, { status => 'error', error => $err, reqid => $reqid });
-        return;
-    }
-
-    Dispatcher::Log::log_action('INFO', {
-        ACTION => 'renew-complete',
-        PEER   => $peer,
-        REQID  => $reqid,
-        STATUS => 'cert-stored',
-    });
-
-    _send_json($conn, { status => 'ok', reqid => $reqid });
-}
-
-sub _slurp {
-    my ($path) = @_;
-    open my $fh, '<', $path or die "Cannot read '$path': $!";
-    local $/;
-    return scalar <$fh>;
 }
 
 sub _send_json {

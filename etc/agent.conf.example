@@ -10,13 +10,21 @@ ca   = /etc/dispatcher-agent/ca.crt
 # Colon-separated list of absolute directory paths.
 # If set, any script path in scripts.conf not under an approved directory
 # is rejected at load time and re-validated at execution time.
-# If not set, any absolute path in scripts.conf is accepted.
 #
 # script_dirs = /opt/dispatcher-scripts:/usr/local/lib/dispatcher-scripts
 
+# Agent-side auth hook (optional).
+# Called before every run request, after allowlist validation.
+# Receives full request context including username and token, enabling
+# independent downstream token validation separate from the dispatcher's
+# own auth hook.
+# Hook must be executable. Exit 0 = authorised, 1/2/3 = denied.
+# See /etc/dispatcher/auth-hook.example for the hook interface.
+#
+# auth_hook = /etc/dispatcher-agent/auth-hook
+
 # Agent tags - reported in /capabilities response and dispatcher discovery.
 # Use to group and filter agents by environment, role, location, etc.
-# The dispatcher does not interpret tags - they are for operator use.
 #
 # [tags]
 # env  = prod

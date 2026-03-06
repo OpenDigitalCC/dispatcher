@@ -295,4 +295,64 @@ subtest 'validate_script: no script_dirs means no restriction at execution time'
     is $r, '/anywhere/script.sh', 'path returned when no script_dirs';
 };
 
+# --- auth_hook ---
+
+subtest 'load_config: auth_hook accepted when executable' => sub {
+    my ($fh, $hook_path) = tempfile(UNLINK => 1, SUFFIX => '.sh');
+    print $fh "#!/bin/bash\nexit 0\n";
+    close $fh;
+    chmod 0755, $hook_path;
+
+    my $path = write_temp(<<"END");
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+auth_hook = $hook_path
+END
+    my $c = eval { Dispatcher::Agent::Config::load_config($path) };
+    ok !$@,                              'no error for executable hook';
+    is $c->{auth_hook}, $hook_path,      'auth_hook path stored';
+};
+
+subtest 'load_config: auth_hook absent leaves key undefined' => sub {
+    my $path = write_temp(<<'END');
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+END
+    my $c = Dispatcher::Agent::Config::load_config($path);
+    ok !exists $c->{auth_hook}, 'auth_hook absent when not configured';
+};
+
+subtest 'load_config: non-executable auth_hook dies' => sub {
+    my ($fh, $hook_path) = tempfile(UNLINK => 1, SUFFIX => '.sh');
+    print $fh "#!/bin/bash\nexit 0\n";
+    close $fh;
+    chmod 0644, $hook_path;   # not executable
+
+    my $path = write_temp(<<"END");
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+auth_hook = $hook_path
+END
+    eval { Dispatcher::Agent::Config::load_config($path) };
+    like $@, qr/not executable/, 'dies for non-executable hook';
+};
+
+subtest 'load_config: missing auth_hook path dies' => sub {
+    my $path = write_temp(<<'END');
+port = 7443
+cert = /etc/dispatcher-agent/agent.crt
+key  = /etc/dispatcher-agent/agent.key
+ca   = /etc/dispatcher-agent/ca.crt
+auth_hook = /nonexistent/hook.sh
+END
+    eval { Dispatcher::Agent::Config::load_config($path) };
+    like $@, qr/not executable/, 'dies for missing hook file';
+};
+
 done_testing;

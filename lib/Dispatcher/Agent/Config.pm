@@ -67,6 +67,15 @@ sub _validate_config {
     else {
         delete $config->{script_dirs};   # absent = no restriction
     }
+
+    # Validate auth_hook if present
+    if (defined $config->{auth_hook} && length $config->{auth_hook}) {
+        croak "auth_hook '$config->{auth_hook}' is not executable in '$path'"
+            unless -f $config->{auth_hook} && -x $config->{auth_hook};
+    }
+    else {
+        delete $config->{auth_hook};   # absent = no hook
+    }
 }
 
 # Load and parse scripts.conf allowlist

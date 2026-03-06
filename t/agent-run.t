@@ -85,4 +85,73 @@ subtest 'run_script: large output handled' => sub {
     is scalar @lines, 10000, '10000 lines captured';
 };
 
+# --- JSON context on stdin ---
+
+subtest 'run_script: context JSON piped to stdin' => sub {
+    my $s = make_script('cat');   # echo stdin to stdout
+    my $context = {
+        script    => 'test-script',
+        args      => ['--db', 'myapp'],
+        reqid     => 'abc1230001',
+        peer_ip   => '10.0.0.1',
+        username  => 'stuart',
+        token     => 'tok123',
+        timestamp => '2026-03-06T12:00:00Z',
+    };
+    my $r = Dispatcher::Agent::Runner::run_script($s, [], $context);
+    is   $r->{exit}, 0, 'exit 0';
+    like $r->{stdout}, qr/"script"\s*:\s*"test-script"/, 'script in JSON';
+    like $r->{stdout}, qr/"username"\s*:\s*"stuart"/,    'username in JSON';
+    like $r->{stdout}, qr/"token"\s*:\s*"tok123"/,       'token in JSON';
+    like $r->{stdout}, qr/"peer_ip"\s*:\s*"10\.0\.0\.1"/, 'peer_ip in JSON';
+};
+
+subtest 'run_script: args array preserved in context JSON' => sub {
+    my $s = make_script('cat');
+    my $context = {
+        script    => 'test',
+        args      => ['--db', 'myapp'],
+        reqid     => 'x',
+        peer_ip   => '127.0.0.1',
+        username  => '',
+        token     => '',
+        timestamp => '2026-03-06T12:00:00Z',
+    };
+    my $r = Dispatcher::Agent::Runner::run_script($s, [], $context);
+    like $r->{stdout}, qr/"args"/, 'args key present in JSON';
+    like $r->{stdout}, qr/myapp/,  'args value present in JSON';
+};
+
+subtest 'run_script: no context means empty stdin' => sub {
+    # Script exits non-zero if it reads anything from stdin
+    my $s = make_script('read -t 0.1 line && exit 1; exit 0');
+    my $r = Dispatcher::Agent::Runner::run_script($s, [], undef);
+    is $r->{exit}, 0, 'no context: stdin empty, script exits 0';
+};
+
+subtest 'run_script: script can ignore stdin via redirect' => sub {
+    my $s = make_script('exec 0</dev/null; echo done');
+    my $context = {
+        script    => 'test',
+        args      => [],
+        reqid     => 'x',
+        peer_ip   => '127.0.0.1',
+        username  => '',
+        token     => '',
+        timestamp => '2026-03-06T12:00:00Z',
+    };
+    my $r = Dispatcher::Agent::Runner::run_script($s, [], $context);
+    is   $r->{exit},   0,      'exit 0 after redirecting stdin away';
+    like $r->{stdout}, qr/done/, 'script ran to completion';
+};
+
+subtest 'run_script: positional args unchanged when context present' => sub {
+    my $s = make_script('echo "arg=$1"');
+    my $context = { script => 'test', args => [], reqid => 'x',
+                    peer_ip => '127.0.0.1', username => '', token => '',
+                    timestamp => '2026-03-06T12:00:00Z' };
+    my $r = Dispatcher::Agent::Runner::run_script($s, ['myvalue'], $context);
+    like $r->{stdout}, qr/arg=myvalue/, 'positional arg passed with context present';
+};
+
 done_testing;
