@@ -8,7 +8,6 @@ use POSIX qw(WNOHANG);
 
 use Dispatcher::Log qw();
 
-our $VERSION = '0.1';
 
 my $DEFAULT_PORT = 7443;
 

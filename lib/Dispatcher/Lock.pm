@@ -8,7 +8,6 @@ use Carp   qw(croak);
 
 use Dispatcher::Log qw();
 
-our $VERSION = '0.1';
 
 my $LOCK_DIR = '/var/lib/dispatcher/locks';
 

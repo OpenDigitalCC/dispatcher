@@ -6,7 +6,6 @@ use File::Temp qw(tempfile tempdir);
 use File::Basename qw(dirname);
 use Carp qw(croak);
 
-our $VERSION = '0.1';
 
 # Generate a private key and CSR using openssl
 # Returns hashref: { key_pem => '...', csr_pem => '...' }

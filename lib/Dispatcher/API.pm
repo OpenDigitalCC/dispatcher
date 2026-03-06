@@ -13,7 +13,6 @@ use Dispatcher::Auth     qw();
 use Dispatcher::Lock     qw();
 use Dispatcher::Registry qw();
 
-our $VERSION = '0.1';
 
 # Start the API server. Blocks until SIGTERM or SIGINT.
 #

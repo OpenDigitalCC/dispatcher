@@ -6,7 +6,6 @@ use File::Temp  qw(tempfile tempdir);
 use File::Path  qw(make_path);
 use Carp        qw(croak);
 
-our $VERSION = '0.1';
 
 my $CA_DIR   = '/etc/dispatcher';
 my $CA_KEY   = "$CA_DIR/ca.key";

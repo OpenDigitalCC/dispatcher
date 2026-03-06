@@ -8,7 +8,6 @@ use POSIX qw(strftime);
 
 use Dispatcher::Log qw();
 
-our $VERSION = '0.1';
 
 # Exit codes returned by auth hooks
 use constant {

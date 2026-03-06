@@ -8,7 +8,6 @@ use Sys::Syslog qw(openlog syslog closelog);
 use constant { _LOG_INFO => 6, _LOG_WARNING => 4, _LOG_ERR => 3, _LOG_DAEMON => 24 };
 use Carp qw(croak);
 
-our $VERSION = '0.1';
 
 my $ident = 'dispatcher';
 my $opened = 0;

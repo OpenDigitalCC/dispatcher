@@ -4,7 +4,6 @@ use strict;
 use warnings;
 use Carp qw(croak);
 
-our $VERSION = '0.1';
 
 # Load and validate agent.conf
 # Returns hashref of config values or dies with error

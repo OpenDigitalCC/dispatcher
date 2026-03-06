@@ -9,7 +9,6 @@ use POSIX       qw(strftime);
 use Carp        qw(croak);
 use Time::HiRes qw();
 
-our $VERSION = '0.1';
 
 my $_reqid_counter = 0;
 

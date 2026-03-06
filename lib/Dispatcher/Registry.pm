@@ -8,7 +8,6 @@ use File::Temp qw(tempfile);
 use File::Basename qw(dirname);
 use Carp      qw(croak);
 
-our $VERSION = '0.1';
 
 my $REGISTRY_DIR = '/var/lib/dispatcher/agents';
 

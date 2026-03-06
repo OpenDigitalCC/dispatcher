@@ -3,7 +3,6 @@ package Dispatcher::Output;
 use strict;
 use warnings;
 
-our $VERSION = '0.1';
 
 # Format run results for human-readable terminal output.
 #

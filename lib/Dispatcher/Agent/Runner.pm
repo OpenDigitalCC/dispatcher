@@ -5,7 +5,6 @@ use warnings;
 use JSON  qw(encode_json);
 use POSIX qw(WIFEXITED WEXITSTATUS);
 
-our $VERSION = '0.1';
 
 # Execute a script with no shell, capture stdout/stderr/exit.
 # Pipes full request context as JSON to the script's stdin.
