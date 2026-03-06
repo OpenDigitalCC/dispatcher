@@ -91,11 +91,10 @@ for d in "${SHIP_DIRS[@]}"; do
     cp -r "$d" "$STAGE/"
 done
 
-chmod 755 "$STAGE/install.sh"
-
 # --- stamp version in the three binaries ---
 
 info "Stamping version $VERSION in binaries..."
+chmod 755 "$STAGE/install.sh"
 for bin in dispatcher dispatcher-agent dispatcher-api; do
     sed -i "s/our \$VERSION = .*/our \$VERSION = '$VERSION';/" \
         "$STAGE/bin/$bin"
@@ -316,9 +315,17 @@ echo ""
 echo "  1. Review sbom.json and commit it alongside the bumped VERSION:"
 echo "       git add sbom.json VERSION && git commit -m 'release: $VERSION'"
 echo ""
-echo "  2. Push tag:"
-echo "       git push origin $TAG"
+echo "  2. Push commits and tag:"
+echo "       git push && git push origin $TAG"
 echo ""
-echo "  3. Publish tarball and checksum."
+echo "  3. Create a GitHub release at:"
+echo "       https://github.com/OpenDigitalCC/dispatcher/releases/new"
+echo "       Tag:    $TAG"
+echo "       Title:  Dispatcher $VERSION"
+echo "       Assets: $TARBALL"
+echo "               ${TARBALL}.sha256"
+echo ""
+echo "  4. Verify the release:"
+echo "       https://github.com/OpenDigitalCC/dispatcher/releases/tag/$TAG"
 echo ""
 echo "================================================================"
