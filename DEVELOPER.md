@@ -345,8 +345,8 @@ Record format:
 
 ```json
 {
-  "hostname": "sjm-explore",
-  "ip":       "192.168.125.125",
+  "hostname": "agent-host-01",
+  "ip":       "192.0.2.10",
   "paired":   "2026-03-05T14:30:00Z",
   "expiry":   "Jun  7 16:28:00 2027 GMT",
   "reqid":    "1a15334d0001"
@@ -969,7 +969,7 @@ Capabilities response (`GET /capabilities`):
 
 ```json
 {
-  "status": "ok", "host": "sjm-explore", "version": "0.1",
+  "status": "ok", "host": "agent-host-01", "version": "0.1",
   "tags": { "env": "prod", "role": "db" },
   "scripts": [
     { "name": "backup-mysql", "path": "/opt/dispatcher-scripts/backup-mysql.sh", "executable": true }
@@ -998,7 +998,7 @@ Cert delivery (`POST /renew-complete`, dispatcher → agent):
 Pairing request (agent → dispatcher, port 7444, `POST /pair`):
 
 ```json
-{ "hostname": "sjm-explore", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "nonce": "a3f4c2b1..." }
+{ "hostname": "agent-host-01", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "nonce": "a3f4c2b1..." }
 ```
 
 Pairing response:
@@ -1012,13 +1012,13 @@ API endpoints (caller → dispatcher-api, port 7445):
 `POST /ping` request:
 
 ```json
-{ "hosts": ["sjm-explore", "prod-db-01"], "username": "stuart", "token": "..." }
+{ "hosts": ["agent-host-01", "prod-db-01"], "username": "stuart", "token": "..." }
 ```
 
 `POST /run` request:
 
 ```json
-{ "hosts": ["sjm-explore"], "script": "backup-mysql", "args": ["--db", "myapp"], "username": "stuart", "token": "..." }
+{ "hosts": ["agent-host-01"], "script": "backup-mysql", "args": ["--db", "myapp"], "username": "stuart", "token": "..." }
 ```
 
 `GET /discovery` response:
@@ -1027,7 +1027,7 @@ API endpoints (caller → dispatcher-api, port 7445):
 {
   "ok": true,
   "hosts": {
-    "sjm-explore": {
+    "agent-host-01": {
       "status": "ok", "version": "0.1", "rtt": "68ms",
       "tags": { "env": "prod", "role": "db" },
       "scripts": [{ "name": "backup-mysql", "path": "/opt/scripts/backup-mysql.sh", "executable": true }]
@@ -1039,7 +1039,7 @@ API endpoints (caller → dispatcher-api, port 7445):
 Lock conflict response (409):
 
 ```json
-{ "ok": false, "error": "locked", "code": 4, "conflicts": ["sjm-explore:backup-mysql"] }
+{ "ok": false, "error": "locked", "code": 4, "conflicts": ["agent-host-01:backup-mysql"] }
 ```
 
 
@@ -1053,24 +1053,24 @@ Dispatcher examples:
 ```
 dispatcher[1234]: ACTION=dispatch HOSTS=prod-db-01 REQID=a3f9b2c10001 SCRIPT=backup-mysql
 dispatcher[1234]: ACTION=run EXIT=0 REQID=a3f9b2c10001 RTT=87ms SCRIPT=backup-mysql TARGET=prod-db-01:7443
-dispatcher[1234]: ACTION=pair-approve AGENT=sjm-explore REQID=fa5e74630001
+dispatcher[1234]: ACTION=pair-approve AGENT=agent-host-01 REQID=fa5e74630001
 dispatcher[1234]: ACTION=auth AUTHACTION=run IP=127.0.0.1 RESULT=pass USER=stuart
-dispatcher[1234]: ACTION=unpair AGENT=sjm-explore EXPIRY="Jun  7 16:28:00 2027 GMT"
-dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=sjm-explore:7443
-dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=sjm-explore:7443
-dispatcher[1234]: ACTION=lock-acquire HOST=sjm-explore SCRIPT=backup-mysql
+dispatcher[1234]: ACTION=unpair AGENT=agent-host-01 EXPIRY="Jun  7 16:28:00 2027 GMT"
+dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=agent-host-01:7443
+dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=agent-host-01:7443
+dispatcher[1234]: ACTION=lock-acquire HOST=agent-host-01 SCRIPT=backup-mysql
 ```
 
 Agent examples:
 
 ```
 dispatcher-agent[5678]: ACTION=start PORT=7443
-dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.168.125.189 REQID=a3f9b2c10001 SCRIPT=backup-mysql
-dispatcher-agent[5678]: ACTION=deny PEER=192.168.125.189 REQID=b1c2d3e40001 SCRIPT=not-in-allowlist
-dispatcher-agent[5678]: ACTION=ping PEER=192.168.125.189 REQID=b7c3d1e40001
-dispatcher-agent[5678]: ACTION=capabilities PEER=192.168.125.189 SCRIPTS=3
-dispatcher-agent[5678]: ACTION=renew PEER=192.168.125.189 REQID=c1d2e3f40001 STATUS=csr-generated
-dispatcher-agent[5678]: ACTION=renew-complete PEER=192.168.125.189 REQID=c1d2e3f40001 STATUS=cert-stored
+dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.0.2.11 REQID=a3f9b2c10001 SCRIPT=backup-mysql
+dispatcher-agent[5678]: ACTION=deny PEER=192.0.2.11 REQID=b1c2d3e40001 SCRIPT=not-in-allowlist
+dispatcher-agent[5678]: ACTION=ping PEER=192.0.2.11 REQID=b7c3d1e40001
+dispatcher-agent[5678]: ACTION=capabilities PEER=192.0.2.11 SCRIPTS=3
+dispatcher-agent[5678]: ACTION=renew PEER=192.0.2.11 REQID=c1d2e3f40001 STATUS=csr-generated
+dispatcher-agent[5678]: ACTION=renew-complete PEER=192.0.2.11 REQID=c1d2e3f40001 STATUS=cert-stored
 ```
 
 API examples:
@@ -1229,8 +1229,8 @@ echo "my-script = /opt/dispatcher-scripts/my-script.sh" \
 sudo systemctl kill --signal=HUP dispatcher-agent
 
 # Verify discovery sees the new script
-sudo dispatcher ping sjm-explore
-sudo dispatcher run sjm-explore my-script
+sudo dispatcher ping agent-host-01
+sudo dispatcher run agent-host-01 my-script
 ```
 
 Scripts receive positional arguments exactly as passed. They should exit 0 on
