@@ -287,6 +287,15 @@ else
     info "Tagged: $TAG"
 fi
 
+# --- bump patch version for next release ---
+
+MAJOR=$(echo "$VERSION" | cut -d. -f1)
+MINOR=$(echo "$VERSION" | cut -d. -f2)
+PATCH=$(echo "$VERSION" | cut -d. -f3)
+NEXT_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+echo "$NEXT_VERSION" > VERSION
+info "VERSION bumped to $NEXT_VERSION for next release."
+
 # --- summary ---
 
 echo ""
@@ -298,11 +307,12 @@ echo "  Tarball:   $TARBALL"
 echo "  Checksum:  ${TARBALL}.sha256"
 echo "  SBOM:      sbom.json"
 echo "  Tag:       $TAG  ($COMMIT)"
+echo "  Next ver:  $NEXT_VERSION"
 echo ""
 echo "Next steps:"
 echo ""
-echo "  1. Review sbom.json and commit it:"
-echo "       git add sbom.json && git commit -m 'sbom: release $VERSION'"
+echo "  1. Review sbom.json and commit it alongside the bumped VERSION:"
+echo "       git add sbom.json VERSION && git commit -m 'release: $VERSION'"
 echo ""
 echo "  2. Push tag:"
 echo "       git push origin $TAG"
