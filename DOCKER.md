@@ -1,7 +1,7 @@
 ---
 title: Dispatcher - Docker Deployment
 subtitle: Running dispatcher and agents in Alpine Linux containers
-brand: cloudient
+brand: odcc
 ---
 
 # Dispatcher - Docker Deployment

@@ -1,7 +1,7 @@
 ---
 title: Dispatcher - Security Model
 subtitle: Trust boundaries, threat model, file permissions, and operational guidance
-brand: cloudient
+brand: odcc
 ---
 
 # Dispatcher - Security Model

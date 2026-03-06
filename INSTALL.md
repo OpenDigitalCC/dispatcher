@@ -1,7 +1,7 @@
 ---
 title: Dispatcher - Installation and Operations
 subtitle: Platform requirements, setup, configuration, and operational reference
-brand: cloudient
+brand: odcc
 ---
 
 # Dispatcher - Installation and Operations
