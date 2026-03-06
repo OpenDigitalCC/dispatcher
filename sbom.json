@@ -1,0 +1,401 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:a6e9190a-03c3-4819-85da-369fa766d7f7",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-03-06T09:26:59Z",
+    "tools": [
+      {
+        "name": "make-release.sh",
+        "version": "0.1.2"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "dispatcher",
+      "version": "0.1.2",
+      "description": "Perl mTLS remote script execution system",
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/OpenDigitalCC/dispatcher"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "file",
+      "name": "dispatcher",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "89eefcf77b262397e3e1851bfdf27f6a9990f542752660ea6c44c10e489e5155"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/dispatcher-dispatcher@0.1.2"
+    },
+    {
+      "type": "file",
+      "name": "dispatcher-agent",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9d0222df5381183fc7c5bd5118dfa4840f344569f2ee6b664e2ba06670aa3f06"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/dispatcher-dispatcher-agent@0.1.2"
+    },
+    {
+      "type": "file",
+      "name": "dispatcher-api",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ba5a671c4bc1c05c6518a4ba4f73d8a9019cc98da6f529388b0a25e6d521ecd4"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/dispatcher-dispatcher-api@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Agent::Config",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "81146fe56db04a8c67c32fc93604e73ae5ac2985ae90929b76575634ab4a8a34"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Agent::Config@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Agent::Pairing",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "301d5a53af54e6efb55951b4b221f01d695f22597a70f123677bc08c49fd0a09"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Agent::Pairing@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Agent::Runner",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "90de09d604a21914c1c992225119a94e749c0b0fccbad7069b7d9eabab21b8c4"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Agent::Runner@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::API",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "14a8e7e20113c03bd133543427df291881805cc9d56597c1395c7cc28c7db32d"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::API@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Auth",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2f541d24655ce9cae13721b9048470d7e857aed0e08a2d87df08d25a8e6e419b"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Auth@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::CA",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0ff3d7bb4b0eb0656667a0ff89894321734e67cd0b5a2d50234f600d3fde5685"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::CA@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Engine",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "233ce0aeb353a69287a9c1f1b6229f8c98f9c0499fb2fa83415c148b44f2b710"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Engine@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Lock",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "b3c2deeebe24828b65cfe1f14bf91e0c1f3538f86aa76485efef49080e812140"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Lock@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Log",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "33622851397cd2135ae9b8860b36599daeb693953f002d705c745b0df1c4d3ba"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Log@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Output",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5980ddd7fbbbea005103206049099f5c89354a89d906fff437defb5d388a5a54"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Output@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Pairing",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1aa8337fef86938749f778395473a4d9b72f76a79dac09c48c98fbf7b5cd8fd6"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Pairing@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "Dispatcher::Registry",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a69b086cdeb4b504d4b3612cdd6ec6811664cf9372578a9786008b324ca07e39"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "AGPL-3.0-only"
+          }
+        }
+      ],
+      "purl": "pkg:generic/opendigital/Dispatcher::Registry@0.1.2"
+    },
+    {
+      "type": "library",
+      "name": "IO::Socket::SSL",
+      "version": "unknown",
+      "description": "TLS sockets. Debian: libio-socket-ssl-perl, Alpine: perl-io-socket-ssl",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://packages.debian.org/trixie/libio-socket-ssl-perl"
+        },
+        {
+          "type": "distribution",
+          "url": "https://pkgs.alpinelinux.org/package/edge/main/x86_64/perl-io-socket-ssl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "JSON",
+      "version": "unknown",
+      "description": "JSON encode/decode. Debian: libjson-perl, Alpine: perl-json",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://packages.debian.org/trixie/libjson-perl"
+        },
+        {
+          "type": "distribution",
+          "url": "https://pkgs.alpinelinux.org/package/edge/main/x86_64/perl-json"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "LWP::UserAgent",
+      "version": "unknown",
+      "description": "HTTP client. Debian: libwww-perl, Alpine: perl-libwww",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://packages.debian.org/trixie/libwww-perl"
+        },
+        {
+          "type": "distribution",
+          "url": "https://pkgs.alpinelinux.org/package/edge/main/x86_64/perl-libwww"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "perl",
+      "version": "unknown",
+      "description": "Perl runtime and core modules. Debian: perl, Alpine: perl",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://packages.debian.org/trixie/perl"
+        },
+        {
+          "type": "distribution",
+          "url": "https://pkgs.alpinelinux.org/package/edge/main/x86_64/perl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "openssl",
+      "version": "unknown",
+      "description": "Key, CSR, and certificate operations. Debian: openssl, Alpine: openssl",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://packages.debian.org/trixie/openssl"
+        },
+        {
+          "type": "distribution",
+          "url": "https://pkgs.alpinelinux.org/package/edge/main/x86_64/openssl"
+        }
+      ]
+    }
+  ]
+}
