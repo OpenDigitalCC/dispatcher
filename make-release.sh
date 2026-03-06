@@ -82,7 +82,8 @@ mkdir -p "$STAGE"
 
 for f in "${SHIP_FILES[@]}"; do
     [[ -f "$f" ]] || die "Expected file not found: $f"
-    cp "$f" "$STAGE/"
+    mkdir -p "$STAGE/$(dirname "$f")"
+    cp "$f" "$STAGE/$f"
 done
 
 for d in "${SHIP_DIRS[@]}"; do
