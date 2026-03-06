@@ -93,7 +93,7 @@ sub mode_serve {
         if ($pid == 0) {
             # Child: close server socket, handle connection, exit
             $server->close(SSL_no_shutdown => 1);
-            handle_connection($conn, $peer, $allowlist);
+            handle_connection($conn, $peer, $allowlist, $config);
             $conn->close;
             exit 0;
         }
@@ -185,7 +185,7 @@ sub mode_ping_self {
 # Reads raw HTTP/1.0 request from IO::Socket::SSL, dispatches, sends response.
 
 sub handle_connection {
-    my ($conn, $peer, $allowlist) = @_;
+    my ($conn, $peer, $allowlist, $config) = @_;
 
     # Read request line
     my $request_line = <$conn>;
