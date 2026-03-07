@@ -103,9 +103,25 @@ DISPATCHER_TOKEN=mytoken dispatcher run web-01 deploy-app
 dispatcher run web-01 deploy-app --json
 ```
 
-Output shows per-host status, exit code, round-trip time, stdout, and stderr.
+Output shows per-host status, exit code, round-trip time, request ID, stdout, and stderr.
 Exit code is 0 if all hosts succeeded, 1 if any host failed or returned
 a non-zero exit.
+
+The request ID (`req:`) in the output header matches the `REQID` field in
+syslog on both the dispatcher and agent. Use it to correlate CLI output with
+log entries:
+
+```bash
+grep REQID=a1b2c3d4 /var/log/syslog
+```
+
+The dispatcher waits up to `read_timeout` seconds (default 60) for each
+script to complete. Scripts that exceed this are reported as
+`read timeout after Ns`. Set `read_timeout` in `dispatcher.conf` to adjust:
+
+```
+read_timeout = 120
+```
 
 ---
 
