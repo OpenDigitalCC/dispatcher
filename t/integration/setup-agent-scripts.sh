@@ -107,8 +107,15 @@ append_if_missing "dispatcher-demonstrator" "$SCRIPT_DIR/dispatcher-demonstrator
 
 # --- reload allowlist ---
 
-if pgrep -f dispatcher-agent > /dev/null 2>&1; then
-    kill -HUP "$(pgrep -f dispatcher-agent | head -1)"
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active dispatcher-agent >/dev/null 2>&1; then
+    systemctl reload dispatcher-agent 2>/dev/null \
+        || systemctl kill --signal=HUP dispatcher-agent
+    echo "Sent HUP to dispatcher-agent via systemctl - allowlist reloaded"
+elif pgrep -x dispatcher-agent > /dev/null 2>&1; then
+    pkill -HUP -x dispatcher-agent
+    echo "Sent SIGHUP to dispatcher-agent - allowlist reloaded"
+elif pgrep -f 'dispatcher-agent serve' > /dev/null 2>&1; then
+    pkill -HUP -f 'dispatcher-agent serve'
     echo "Sent SIGHUP to dispatcher-agent - allowlist reloaded"
 else
     echo "WARNING: dispatcher-agent not running - start it before testing"

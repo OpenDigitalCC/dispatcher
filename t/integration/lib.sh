@@ -68,7 +68,18 @@ summary() {
     return 0
 }
 
-# --- agent discovery and reachability ---
+# _list_agent_hostnames: extract hostnames from "dispatcher list-agents" output.
+# Skips the header and separator lines.
+_list_agent_hostnames() {
+    sudo "$DISPATCHER" list-agents 2>/dev/null \
+        | awk 'NR > 2 && /^[A-Za-z0-9]/ { print $1 }'
+}
+
+# _ping_agent <hostname>: returns 0 if agent responds to dispatcher ping.
+_ping_agent() {
+    local agent="$1"
+    sudo "$DISPATCHER" ping "$agent" > /dev/null 2>&1
+}
 
 # discover_agents: ping all registered agents, populate AGENTS, AGENT1, AGENT2.
 # Called once by run-tests.sh before any test file runs.
@@ -107,24 +118,6 @@ discover_agents() {
 
     printf '\n%d of %d agents reachable: %s\n\n' \
         "${#AGENTS[@]}" "${#all_agents[@]}" "${AGENTS[*]:-none}"
-}
-
-# Auto-discover if running standalone (AGENT1 not set by parent runner)
-if [ -z "${AGENT1:-}" ]; then
-    discover_agents
-fi
-
-# _list_agent_hostnames: extract hostnames from "dispatcher list-agents" output.
-# Skips the header and separator lines.
-_list_agent_hostnames() {
-    sudo "$DISPATCHER" list-agents 2>/dev/null \
-        | awk 'NR > 2 && /^[A-Za-z0-9]/ { print $1 }'
-}
-
-# _ping_agent <hostname>: returns 0 if agent responds to dispatcher ping.
-_ping_agent() {
-    local agent="$1"
-    sudo "$DISPATCHER" ping "$agent" > /dev/null 2>&1
 }
 
 # require_agents <n>: skip this test file entirely if fewer than n agents
@@ -273,3 +266,11 @@ run_dispatcher() {
 elapsed_seconds() {
     echo $(( $(date +%s) - $1 ))
 }
+
+# --- agent discovery and reachability ---
+
+# Auto-discover if running standalone (AGENT1 not set by parent runner).
+# Placed at end of file so all helper functions are defined before this runs.
+if [ -z "${AGENT1:-}" ]; then
+    discover_agents
+fi
