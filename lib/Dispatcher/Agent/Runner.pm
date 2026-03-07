@@ -2,7 +2,6 @@ package Dispatcher::Agent::Runner;
 
 use strict;
 use warnings;
-use Encode qw(encode decode);
 use JSON   qw(encode_json);
 use POSIX  qw(WIFEXITED WEXITSTATUS);
 
