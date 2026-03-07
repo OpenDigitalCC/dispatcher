@@ -9,7 +9,7 @@
 # Scripts needed: args-echo, context-dump.
 
 set -uo pipefail
-source "$(dirname "$0")/lib.sh"
+source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
 
 require_agents 1
 

@@ -8,21 +8,21 @@
 #   - failure reason is reported per-host, not swallowed
 #   - timeout is bounded (test will fail if dispatcher hangs)
 #
-# Prerequisites:
-#   - Both agents running at test start
-#   - You can reach both agents via the dispatcher
-#   - env-dump script installed on both agents
+# Uses a DNS-invalid hostname to simulate an unreachable host without
+# needing to take a real agent offline.
 #
-# NOTE: This test uses a fake hostname to simulate an unreachable host.
-# It does NOT require taking a real agent offline.
+# Requires: 1 reachable agent minimum. Multi-host tests require 2.
 
 set -uo pipefail
-source "$(dirname "$0")/lib.sh"
+source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
+
+require_agents 1
 
 FAKE_HOST="no-such-host-xyz.invalid"
 TIMEOUT_LIMIT=30   # seconds - dispatcher should not hang longer than this
 
 # ============================================================
+assert_agents_reachable
 describe "Single unreachable host"
 # ============================================================
 
@@ -32,7 +32,6 @@ ELAPSED=$(elapsed_seconds "$START")
 
 assert_exit 1 "$RC" "dispatcher exits non-zero for unreachable host"
 
-# Should report some kind of connection error, not just silence
 if [ -n "$OUT$ERR" ]; then
     pass "some output produced (not silent failure)"
 else
@@ -46,17 +45,16 @@ else
 fi
 
 # ============================================================
+assert_agents_reachable
 describe "Unreachable host mixed with reachable host - results"
 # ============================================================
 
 START=$(date +%s)
-run_dispatcher run "$FAKE_HOST" "$AGENT_DEBIAN" env-dump
+run_dispatcher run "$FAKE_HOST" "$AGENT1" env-dump
 ELAPSED=$(elapsed_seconds "$START")
 
 assert_exit 1 "$RC" "dispatcher exits non-zero (mixed success/fail)"
-
-# The Debian agent result should appear despite the fake host failing
-assert_contains "$OUT$ERR" "$AGENT_DEBIAN" "reachable host appears in output"
+assert_contains "$OUT$ERR" "$AGENT1" "reachable host appears in output"
 
 if [ "$ELAPSED" -le "$TIMEOUT_LIMIT" ]; then
     pass "completed within ${TIMEOUT_LIMIT}s (took ${ELAPSED}s)"
@@ -65,16 +63,16 @@ else
 fi
 
 # ============================================================
+assert_agents_reachable
 describe "Unreachable host mixed with reachable host - JSON"
 # ============================================================
 
-run_dispatcher run "$FAKE_HOST" "$AGENT_DEBIAN" env-dump --json
+run_dispatcher run "$FAKE_HOST" "$AGENT1" env-dump --json
 
 assert_exit 1 "$RC" "dispatcher exits non-zero"
 assert_json_valid "$OUT" "output is valid JSON"
 
-# Both hosts should appear as entries in results
-if echo "$OUT" | grep -qF "$AGENT_DEBIAN"; then
+if echo "$OUT" | grep -qF "$AGENT1"; then
     pass "reachable host present in JSON results"
 else
     fail "reachable host present in JSON results" "output: $OUT"
@@ -84,48 +82,52 @@ if echo "$OUT" | grep -qF "$FAKE_HOST"; then
     pass "unreachable host present in JSON results"
 else
     fail "unreachable host present in JSON results" \
-        "unreachable host may have been silently dropped from output: $OUT"
+        "unreachable host may have been silently dropped: $OUT"
 fi
 
 # ============================================================
-describe "Unreachable host does not suppress reachable host's stdout"
+assert_agents_reachable
+describe "Unreachable host does not suppress reachable host stdout"
 # ============================================================
 
-# Run env-dump on both - the Debian agent should return real env output
-run_dispatcher run "$FAKE_HOST" "$AGENT_DEBIAN" env-dump
+run_dispatcher run "$FAKE_HOST" "$AGENT1" env-dump
 
-# env-dump outputs KEY=VALUE lines - PATH should always appear
 assert_contains "$OUT$ERR" "PATH=" "env-dump output from reachable host visible"
 
 # ============================================================
-describe "Two reachable hosts - both succeed, exit 0"
-# ============================================================
-
-run_dispatcher run "$AGENT_DEBIAN" "$AGENT_OPENWRT" env-dump
-
-assert_exit 0 "$RC" "exit 0 when all hosts succeed"
-assert_contains "$OUT" "$AGENT_DEBIAN"  "Debian result present"
-assert_contains "$OUT" "$AGENT_OPENWRT" "OpenWrt result present"
-
-# ============================================================
+assert_agents_reachable
 describe "One host returns non-zero exit code"
 # ============================================================
 
-# exit-code script exits with the code passed as argument
-run_dispatcher run "$AGENT_DEBIAN" exit-code -- 42
+run_dispatcher run "$AGENT1" exit-code -- 42
 
 assert_exit 1 "$RC" "dispatcher exits non-zero when script returns non-zero"
 assert_contains "$OUT$ERR" "42" "exit code 42 visible in output"
 
 # ============================================================
-describe "Non-zero exit on one host does not hide the other host's output"
-# ============================================================
+if [ "${#AGENTS[@]}" -ge 2 ]; then
+    assert_agents_reachable
+    describe "Two reachable agents - both succeed, exit 0"
+    # ============================================================
 
-run_dispatcher run "$AGENT_DEBIAN" "$AGENT_OPENWRT" exit-code -- 1
+    run_dispatcher run "$AGENT1" "$AGENT2" env-dump
 
-assert_exit 1 "$RC" "dispatcher exits non-zero"
-# Both hosts should appear in output even though both failed
-assert_contains "$OUT$ERR" "$AGENT_DEBIAN"  "Debian appears in output"
-assert_contains "$OUT$ERR" "$AGENT_OPENWRT" "OpenWrt appears in output"
+    assert_exit 0 "$RC" "exit 0 when all hosts succeed"
+    assert_contains "$OUT" "$AGENT1" "first agent result present"
+    assert_contains "$OUT" "$AGENT2" "second agent result present"
+
+    # ============================================================
+    assert_agents_reachable
+    describe "Non-zero exit on one host does not hide the other host's output"
+    # ============================================================
+
+    run_dispatcher run "$AGENT1" "$AGENT2" exit-code -- 1
+
+    assert_exit 1 "$RC" "dispatcher exits non-zero"
+    assert_contains "$OUT$ERR" "$AGENT1" "first agent appears in output"
+    assert_contains "$OUT$ERR" "$AGENT2" "second agent appears in output"
+else
+    skip "Two-agent tests" "only 1 agent reachable"
+fi
 
 summary

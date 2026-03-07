@@ -17,6 +17,7 @@
 # entire file if fewer than n agents are reachable.
 
 DISPATCHER="${DISPATCHER:-dispatcher}"
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- counters ---
 

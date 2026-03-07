@@ -17,7 +17,8 @@
 #   DISPATCHER   dispatcher binary name or path (default: dispatcher)
 
 set -uo pipefail
-cd "$(dirname "$0")"
+SUITE_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SUITE_DIR"
 
 source ./lib.sh
 
