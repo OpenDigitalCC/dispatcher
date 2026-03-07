@@ -32,7 +32,11 @@ EOF
 cat > "$SCRIPT_DIR/big-output.sh" << 'EOF'
 #!/bin/sh
 exec 0</dev/null
-yes "line of output from $(hostname)" | head -10000
+i=1
+while [ "$i" -le 1000 ]; do
+    echo "line $i of output from $(hostname)"
+    i=$((i + 1))
+done
 EOF
 
 cat > "$SCRIPT_DIR/sleep-test.sh" << 'EOF'

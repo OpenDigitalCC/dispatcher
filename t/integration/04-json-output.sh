@@ -4,16 +4,15 @@
 # Verifies --json output structure is correct and complete for all modes.
 # An API consumer or monitoring tool depends on this being stable and parseable.
 #
-# Prerequisites: env-dump, args-echo, exit-code scripts on both agents.
+# Requires: 1 reachable agent minimum. Multi-host JSON tests require 2.
+# Scripts needed: env-dump, args-echo, exit-code.
 
 set -uo pipefail
 source "$(dirname "$0")/lib.sh"
 
-# python3 is used for JSON validation and field extraction
-# (more reliable than grep for nested structures)
+require_agents 1
 
 json_get() {
-    # json_get <json> <field>  - extracts top-level field value
     python3 -c "
 import sys, json
 data = json.loads(sys.argv[1])
@@ -23,7 +22,6 @@ print(val if not isinstance(val, (list,dict)) else json.dumps(val))
 }
 
 json_result_field() {
-    # json_result_field <json> <index> <field>
     python3 -c "
 import sys, json
 data = json.loads(sys.argv[1])
@@ -38,35 +36,30 @@ else:
 }
 
 # ============================================================
+assert_agents_reachable
 describe "run --json: top-level structure"
 # ============================================================
 
-run_dispatcher run "$AGENT_DEBIAN" env-dump --json
+run_dispatcher run "$AGENT1" env-dump --json
 
 assert_exit 0 "$RC" "clean exit"
 assert_json_valid "$OUT" "valid JSON"
 
 OK=$(json_get "$OUT" "ok")
-if [ "$OK" = "1" ]; then
-    pass "top-level 'ok' is 1"
-else
-    fail "top-level 'ok' is 1" "got: $OK"
-fi
+[ "$OK" = "1" ] && pass "top-level 'ok' is 1" \
+                || fail "top-level 'ok' is 1" "got: $OK"
 
 RESULTS=$(json_get "$OUT" "results")
-if [ "$RESULTS" != "__MISSING__" ]; then
-    pass "top-level 'results' field present"
-else
-    fail "top-level 'results' field present" "output: $OUT"
-fi
+[ "$RESULTS" != "__MISSING__" ] && pass "top-level 'results' field present" \
+                                 || fail "top-level 'results' field present" "output: $OUT"
 
 # ============================================================
+assert_agents_reachable
 describe "run --json: per-host result fields"
 # ============================================================
 
-run_dispatcher run "$AGENT_DEBIAN" env-dump --json
+run_dispatcher run "$AGENT1" env-dump --json
 
-# Check all expected fields in the first result
 for field in host exit stdout stderr reqid rtt; do
     VAL=$(json_result_field "$OUT" 0 "$field")
     if [ "$VAL" != "__MISSING__" ]; then
@@ -77,10 +70,11 @@ for field in host exit stdout stderr reqid rtt; do
 done
 
 # ============================================================
+assert_agents_reachable
 describe "run --json: field types and values on success"
 # ============================================================
 
-run_dispatcher run "$AGENT_DEBIAN" env-dump --json
+run_dispatcher run "$AGENT1" env-dump --json
 
 HOST=$(json_result_field "$OUT" 0 "host")
 EXIT=$(json_result_field "$OUT" 0 "exit")
@@ -88,103 +82,89 @@ STDOUT=$(json_result_field "$OUT" 0 "stdout")
 REQID=$(json_result_field "$OUT" 0 "reqid")
 RTT=$(json_result_field "$OUT" 0 "rtt")
 
-if [ "$HOST" = "$AGENT_DEBIAN" ]; then
-    pass "host field matches agent name"
-else
-    fail "host field matches agent name" "got: $HOST"
-fi
+[ "$HOST" = "$AGENT1" ] && pass "host field matches agent name" \
+                         || fail "host field matches agent name" "got: $HOST"
 
-if [ "$EXIT" = "0" ]; then
-    pass "exit field is 0 on success"
-else
-    fail "exit field is 0 on success" "got: $EXIT"
-fi
+[ "$EXIT" = "0" ] && pass "exit field is 0 on success" \
+                   || fail "exit field is 0 on success" "got: $EXIT"
 
-if echo "$STDOUT" | grep -q "PATH="; then
-    pass "stdout field contains script output"
-else
-    fail "stdout field contains script output" "stdout: $STDOUT"
-fi
+echo "$STDOUT" | grep -q "PATH=" \
+    && pass "stdout field contains script output" \
+    || fail "stdout field contains script output" "stdout: $STDOUT"
 
-if [ -n "$REQID" ] && [ ${#REQID} -ge 8 ]; then
-    pass "reqid field is non-empty (len ${#REQID})"
-else
-    fail "reqid field is non-empty" "got: $REQID"
-fi
+[ -n "$REQID" ] && [ ${#REQID} -ge 8 ] \
+    && pass "reqid field is non-empty (len ${#REQID})" \
+    || fail "reqid field is non-empty" "got: $REQID"
 
-if echo "$RTT" | grep -qE '^[0-9]+(\.[0-9]+)?ms$'; then
-    pass "rtt field looks like a duration: $RTT"
-else
-    fail "rtt field looks like a duration" "got: $RTT"
-fi
+echo "$RTT" | grep -qE '^[0-9]+(\.[0-9]+)?ms$' \
+    && pass "rtt field looks like a duration: $RTT" \
+    || fail "rtt field looks like a duration" "got: $RTT"
 
 # ============================================================
+assert_agents_reachable
 describe "run --json: non-zero exit code reported correctly"
 # ============================================================
 
-run_dispatcher run "$AGENT_DEBIAN" exit-code -- 42 --json
+run_dispatcher run "$AGENT1" exit-code --json -- 42
 
 assert_exit 1 "$RC" "dispatcher exits non-zero"
 assert_json_valid "$OUT" "valid JSON even on failure"
 
 EXIT=$(json_result_field "$OUT" 0 "exit")
-if [ "$EXIT" = "42" ]; then
-    pass "exit code 42 in JSON result"
-else
-    fail "exit code 42 in JSON result" "got: $EXIT"
-fi
+[ "$EXIT" = "42" ] && pass "exit code 42 in JSON result" \
+                    || fail "exit code 42 in JSON result" "got: $EXIT"
 
 # ============================================================
+assert_agents_reachable
 describe "run --json: script not permitted"
 # ============================================================
 
-run_dispatcher run "$AGENT_DEBIAN" nonexistent-script-xyz --json
+run_dispatcher run "$AGENT1" nonexistent-script-xyz --json
 
 assert_exit 1 "$RC" "dispatcher exits non-zero"
 assert_json_valid "$OUT" "valid JSON on denial"
 
 ERROR=$(json_result_field "$OUT" 0 "error")
-if echo "$ERROR" | grep -qi "not permitted"; then
-    pass "error field contains 'not permitted'"
-else
-    fail "error field contains 'not permitted'" "got: $ERROR"
-fi
+echo "$ERROR" | grep -qi "not permitted" \
+    && pass "error field contains 'not permitted'" \
+    || fail "error field contains 'not permitted'" "got: $ERROR"
 
 EXIT=$(json_result_field "$OUT" 0 "exit")
-if [ "$EXIT" = "-1" ]; then
-    pass "exit is -1 for denied script"
+[ "$EXIT" = "-1" ] && pass "exit is -1 for denied script" \
+                    || fail "exit is -1 for denied script" "got: $EXIT"
+
+# ============================================================
+if [ "${#AGENTS[@]}" -ge 2 ]; then
+    assert_agents_reachable
+    describe "run --json: multi-host - both results present"
+    # ============================================================
+
+    run_dispatcher run "$AGENT1" "$AGENT2" env-dump --json
+
+    assert_exit 0 "$RC" "clean exit"
+    assert_json_valid "$OUT" "valid JSON"
+
+    if echo "$OUT" | grep -qF "$AGENT1" && echo "$OUT" | grep -qF "$AGENT2"; then
+        pass "both agents in results"
+    else
+        fail "both agents in results" "output: $OUT"
+    fi
+
+    RESULT_COUNT=$(python3 -c \
+        "import sys,json; print(len(json.loads(sys.argv[1]).get('results',[])))" \
+        "$OUT" 2>/dev/null)
+    [ "$RESULT_COUNT" = "2" ] && pass "results array has 2 entries" \
+                               || fail "results array has 2 entries" "got: $RESULT_COUNT"
 else
-    fail "exit is -1 for denied script" "got: $EXIT"
+    skip "Multi-host JSON test" "only 1 agent reachable"
 fi
 
 # ============================================================
-describe "run --json: multi-host - both results present"
-# ============================================================
-
-run_dispatcher run "$AGENT_DEBIAN" "$AGENT_OPENWRT" env-dump --json
-
-assert_exit 0 "$RC" "clean exit"
-assert_json_valid "$OUT" "valid JSON"
-
-# Both hosts should appear
-if echo "$OUT" | grep -qF "$AGENT_DEBIAN" && echo "$OUT" | grep -qF "$AGENT_OPENWRT"; then
-    pass "both agents in results"
-else
-    fail "both agents in results" "output: $OUT"
-fi
-
-RESULT_COUNT=$(python3 -c "import sys,json; print(len(json.loads(sys.argv[1]).get('results',[])))" "$OUT" 2>/dev/null)
-if [ "$RESULT_COUNT" = "2" ]; then
-    pass "results array has 2 entries"
-else
-    fail "results array has 2 entries" "got: $RESULT_COUNT"
-fi
-
-# ============================================================
+assert_agents_reachable
 describe "ping --json: structure"
 # ============================================================
 
-run_dispatcher ping "$AGENT_DEBIAN" --json
+run_dispatcher ping "$AGENT1" --json
 
 assert_exit 0 "$RC" "clean exit"
 assert_json_valid "$OUT" "valid JSON"

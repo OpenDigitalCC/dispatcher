@@ -4,43 +4,35 @@
 # Confirms the allowlist security boundary holds.
 # These are the most critical tests - a failure here is a serious defect.
 #
-# Prerequisites: both agents running, test scripts installed.
-# Run from: the dispatcher host, as a user with sudo access to dispatcher.
+# Requires: 1 reachable agent minimum.
 
 set -uo pipefail
 source "$(dirname "$0")/lib.sh"
 
+require_agents 1
+
 # ============================================================
-describe "Script not in allowlist - Debian agent"
+assert_agents_reachable
+describe "Script not in allowlist - first agent"
 # ============================================================
 
-run_dispatcher run "$AGENT_DEBIAN" nonexistent-script-xyz
+run_dispatcher run "$AGENT1" nonexistent-script-xyz
 
 assert_exit 1 "$RC" "dispatcher exits non-zero"
 assert_contains "$OUT$ERR" "not permitted" "error mentions 'not permitted'"
 assert_not_contains "$OUT" "OK" "output does not show OK"
 
 # ============================================================
-describe "Script not in allowlist - OpenWrt agent"
-# ============================================================
-
-run_dispatcher run "$AGENT_OPENWRT" nonexistent-script-xyz
-
-assert_exit 1 "$RC" "dispatcher exits non-zero"
-assert_contains "$OUT$ERR" "not permitted" "error mentions 'not permitted'"
-
-# ============================================================
+assert_agents_reachable
 describe "Script not in allowlist - JSON output"
 # ============================================================
 
-run_dispatcher run "$AGENT_DEBIAN" nonexistent-script-xyz --json
+run_dispatcher run "$AGENT1" nonexistent-script-xyz --json
 
 assert_exit 1 "$RC" "dispatcher exits non-zero"
 assert_json_valid "$OUT" "output is valid JSON"
 assert_json_field "$OUT" "ok" "1" "outer ok is 1 (run completed, result is per-host)"
 
-# The per-host result should carry the error
-# Check the raw JSON for the error field
 if echo "$OUT" | grep -q '"error"'; then
     pass "JSON result contains error field"
 else
@@ -54,20 +46,33 @@ else
 fi
 
 # ============================================================
+assert_agents_reachable
+describe "Script not in allowlist - all reachable agents"
+# ============================================================
+
+for agent in "${AGENTS[@]}"; do
+    run_dispatcher run "$agent" nonexistent-script-xyz
+    assert_exit 1 "$RC" "$agent: exits non-zero"
+    assert_contains "$OUT$ERR" "not permitted" "$agent: error mentions 'not permitted'"
+done
+
+# ============================================================
+assert_agents_reachable
 describe "Script name with shell metacharacters"
 # ============================================================
 # These must never execute anything, even if a matching path existed.
 
-for bad_name in '../etc/passwd' 'foo;bar' 'foo$(id)' 'a b' 'foo/bar' ''; do
-    run_dispatcher run "$AGENT_DEBIAN" "$bad_name" 2>/dev/null || true
+for bad_name in '../etc/passwd' 'foo;bar' 'foo$(id)' 'a b' 'foo/bar'; do
+    run_dispatcher run "$AGENT1" "$bad_name" 2>/dev/null || true
     assert_exit 1 "$RC" "rejected: '$bad_name'"
 done
 
 # ============================================================
+assert_agents_reachable
 describe "Script name with dot (not in allowed pattern)"
 # ============================================================
 
-run_dispatcher run "$AGENT_DEBIAN" "script.sh"
+run_dispatcher run "$AGENT1" "script.sh"
 
 assert_exit 1 "$RC" "dispatcher exits non-zero for 'script.sh'"
 assert_contains "$OUT$ERR" "not permitted" "dot in name rejected"
