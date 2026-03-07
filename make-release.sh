@@ -62,11 +62,11 @@ SHIP_FILES=(
     VERSION
     LICENCE
     README.md
-    INSTALL.md
-    DOCKER.md
-    SECURITY.md
-    DEVELOPER.md
-    BACKGROUND.md
+    docs/INSTALL.md
+    docs/DOCKER.md
+    docs/SECURITY.md
+    docs/DEVELOPER.md
+    docs/BACKGROUND.md
 )
 
 SHIP_DIRS=(
