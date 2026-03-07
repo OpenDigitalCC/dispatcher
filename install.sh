@@ -118,7 +118,14 @@ detect_platform() {
 create_system_group() {
     local group="$1"
 
-    if getent group "$group" &>/dev/null; then
+    local group_exists=false
+    if command -v getent &>/dev/null; then
+        getent group "$group" &>/dev/null && group_exists=true
+    else
+        grep -q "^${group}:" /etc/group 2>/dev/null && group_exists=true
+    fi
+
+    if [[ "$group_exists" == true ]]; then
         info "Group '$group' already exists."
         return
     fi
@@ -654,8 +661,8 @@ print_next_steps_agent() {
     local svc_note=""
     if [[ "$HAS_SYSTEMD" == true ]]; then
         svc_note="  5. Enable and start:
-       sudo systemctl enable $AGENT_SERVICE
-       sudo systemctl start  $AGENT_SERVICE"
+       $SUDO_CMD systemctl enable $AGENT_SERVICE
+       $SUDO_CMD systemctl start  $AGENT_SERVICE"
     elif [[ "$HAS_PROCD" == true ]]; then
         svc_note="  5. Enable and start:
        /etc/init.d/dispatcher-agent enable
@@ -714,8 +721,12 @@ print_next_steps_dispatcher() {
     echo "       $SUDO_CMD dispatcher setup-dispatcher"
     echo ""
     echo "  3. Add yourself to the dispatcher group for CLI access without sudo:"
-    echo "       $SUDO_CMD usermod -aG $DISPATCHER_GROUP \$USER"
-    echo "       # log out and back in for the group to take effect"
+    if [[ "$PKG_MGR" == openwrt* ]]; then
+        echo "       # Edit /etc/group and add your username to the $DISPATCHER_GROUP entry"
+    else
+        echo "       $SUDO_CMD usermod -aG $DISPATCHER_GROUP \$USER"
+        echo "       # log out and back in for the group to take effect"
+    fi
     echo ""
     echo "  4. Accept pairing requests from agents:"
     echo "       $SUDO_CMD dispatcher pairing-mode"
@@ -737,8 +748,8 @@ print_next_steps_api() {
     local svc_note=""
     if [[ "$HAS_SYSTEMD" == true ]]; then
         svc_note="  1. Enable and start the API service:
-       sudo systemctl enable $API_SERVICE
-       sudo systemctl start  $API_SERVICE"
+       $SUDO_CMD systemctl enable $API_SERVICE
+       $SUDO_CMD systemctl start  $API_SERVICE"
     else
         svc_note="  1. Start the API server:
        dispatcher-api"
