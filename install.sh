@@ -399,6 +399,23 @@ install_lib() {
     cp -r "$SOURCE_DIR/lib/." "$LIB_DIR/"
     find "$LIB_DIR" -name '*.pm' -exec chmod 644 {} \;
     find "$LIB_DIR" -type d   -exec chmod 755 {} \;
+
+    # OpenWRT ships JSON::PP but not JSON. Install a thin shim so all
+    # modules can use 'use JSON' unchanged on all platforms.
+    if [[ "$PKG_MGR" == openwrt* ]]; then
+        info "OpenWRT: installing JSON shim (delegates to JSON::PP)..."
+        cat > "$LIB_DIR/JSON.pm" << 'EOF'
+package JSON;
+use JSON::PP qw(encode_json decode_json);
+use Exporter 'import';
+our @EXPORT    = qw(encode_json decode_json);
+our @EXPORT_OK = qw(encode_json decode_json);
+use constant true  => JSON::PP::true;
+use constant false => JSON::PP::false;
+1;
+EOF
+        chmod 644 "$LIB_DIR/JSON.pm"
+    fi
 }
 
 # --- test runner ---

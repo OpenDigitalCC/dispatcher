@@ -91,11 +91,13 @@ sub mode_run {
     }
 
     my $results = Dispatcher::Engine::dispatch_all(
-        hosts  => $hosts,
-        script => $script,
-        args   => $script_args,
-        config => $config,
-        port   => $opts->{port},
+        hosts    => $hosts,
+        script   => $script,
+        args     => $script_args,
+        config   => $config,
+        port     => $opts->{port},
+        username => $username,
+        token    => $token,
     );
 
     if ($opts->{json}) {

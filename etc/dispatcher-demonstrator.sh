@@ -183,7 +183,7 @@ case "$CMD" in
         echo "uptime:    $(uptime)"
         echo "whoami:    $(_whoami)"
         echo ""
-        echo "Note: run with -- \"\\$(uptime)\" to send the dispatcher's uptime instead."
+        echo "Note: run with -- \"\$(uptime)\" to send the dispatcher's uptime instead."
         ;;
 
     *)
