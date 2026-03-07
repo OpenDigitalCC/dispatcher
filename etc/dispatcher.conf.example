@@ -10,8 +10,9 @@ ca   = /etc/dispatcher/ca.crt
 # production use. Comment out to disable auth entirely.
 auth_hook = /etc/dispatcher/auth-hook
 
-# Request timeout in seconds (default: 60)
-# timeout = 60
+# Read timeout in seconds: maximum time to wait for a script to complete (default: 60).
+# Scripts that exceed this will be reported as a timeout failure.
+# read_timeout = 60
 
 # Cert lifetime in days for newly signed agent certs (default: 365).
 # Agents are automatically renewed when remaining validity drops below

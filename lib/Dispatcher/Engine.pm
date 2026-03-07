@@ -305,7 +305,11 @@ sub _dispatch_one {
     my $rtt = sprintf '%.0fms', (Time::HiRes::time() - $t0) * 1000;
 
     if ($@ || !$resp || !$resp->is_success) {
-        my $err = $@ || ($resp ? $resp->status_line : 'no response');
+        my $raw_err = $@ || ($resp ? $resp->status_line : 'no response');
+        my $timeout = $config->{read_timeout} // $config->{timeout} // 60;
+        my $err = ($raw_err =~ /timeout|read timeout|500/i)
+            ? "read timeout after ${timeout}s"
+            : $raw_err;
         Dispatcher::Log::log_action('ERR', {
             ACTION => 'run',
             SCRIPT => $opts{script},
@@ -448,7 +452,7 @@ sub _build_ua {
             SSL_verify_mode => 0x01,
             verify_hostname => 0,   # verified by CA, not hostname
         },
-        timeout => $config->{timeout} // 60,
+        timeout => $config->{read_timeout} // $config->{timeout} // 60,
     );
     return $ua;
 }

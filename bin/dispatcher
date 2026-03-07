@@ -248,9 +248,10 @@ sub _format_run_results {
         my $host   = $r->{host}  // '?';
         my $exit   = $r->{exit}  // -1;
         my $rtt    = $r->{rtt}   // '';
+        my $reqid  = $r->{reqid} // '';
         my $status = $exit == 0 ? 'OK' : 'FAIL';
 
-        printf "==> %s  [%s  exit:%d  %s]\n", $host, $status, $exit, $rtt;
+        printf "==> %s  [%s  exit:%d  %s  req:%s]\n", $host, $status, $exit, $rtt, $reqid;
 
         if ($r->{error}) {
             print "    ERROR: $r->{error}\n";

@@ -2,8 +2,9 @@ package Dispatcher::Agent::Runner;
 
 use strict;
 use warnings;
-use JSON  qw(encode_json);
-use POSIX qw(WIFEXITED WEXITSTATUS);
+use Encode qw(encode decode);
+use JSON   qw(encode_json);
+use POSIX  qw(WIFEXITED WEXITSTATUS);
 
 
 # Execute a script with no shell, capture stdout/stderr/exit.
@@ -40,6 +41,9 @@ sub run_script {
         open STDIN,  '<&', $stdin_r  or POSIX::_exit(127);
         open STDOUT, '>&', $stdout_w or POSIX::_exit(127);
         open STDERR, '>&', $stderr_w or POSIX::_exit(127);
+        binmode STDIN,  ':utf8';
+        binmode STDOUT, ':utf8';
+        binmode STDERR, ':utf8';
         close $stdin_r;
         close $stdout_w;
         close $stderr_w;
@@ -56,12 +60,13 @@ sub run_script {
 
     # Write context JSON to script stdin, then close to signal EOF
     if ($context) {
+        binmode $stdin_w, ':utf8';
         print $stdin_w encode_json($context);
     }
     close $stdin_w;
 
-    my $stdout = _slurp($stdout_r);
-    my $stderr = _slurp($stderr_r);
+    my $stdout = _slurp_utf8($stdout_r);
+    my $stderr = _slurp_utf8($stderr_r);
     close $stdout_r;
     close $stderr_r;
 
@@ -77,6 +82,13 @@ sub run_script {
 
 sub _slurp {
     my ($fh) = @_;
+    local $/;
+    return scalar <$fh> // '';
+}
+
+sub _slurp_utf8 {
+    my ($fh) = @_;
+    binmode $fh, ':utf8';
     local $/;
     return scalar <$fh> // '';
 }
