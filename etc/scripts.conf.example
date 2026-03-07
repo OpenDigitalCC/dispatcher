@@ -1,11 +1,20 @@
-# Dispatcher agent script allowlist
+# dispatcher-agent script allowlist
 # /etc/dispatcher-agent/scripts.conf
 #
-# Format: script-name = /absolute/path/to/script
-# Names may contain letters, digits, and hyphens only.
-# Paths must be absolute. Scripts must be executable by the dispatcher-agent user.
+# One entry per line: <name>  <absolute-path>
+# The name is what the dispatcher passes as the script argument.
+# The path must be executable and owned by root.
 #
-# Example entries:
-# check-disk    = /opt/dispatcher-scripts/check-disk.sh
-# rotate-logs   = /opt/dispatcher-scripts/rotate-logs.sh
-# add-dns       = /opt/dispatcher-scripts/add-dns.sh
+# Example:
+#   backup-mysql    /opt/dispatcher-scripts/backup-mysql.sh
+#   deploy-app      /opt/dispatcher-scripts/deploy-app.sh
+
+# --- Demonstrator (evaluation and examples) ---
+#
+# The dispatcher-demonstrator script illustrates core dispatcher capabilities:
+# stdout/stderr capture, exit code propagation, argument passing, JSON context,
+# and agent-side information. Run the script directly on the agent host to see
+# available subcommands and the dispatcher invocations that exercise them.
+#
+# Uncomment to enable:
+# dispatcher-demonstrator  /opt/dispatcher-scripts/dispatcher-demonstrator.sh

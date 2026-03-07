@@ -372,26 +372,6 @@ install_lib() {
     cp -r "$SOURCE_DIR/lib/." "$LIB_DIR/"
     find "$LIB_DIR" -name '*.pm' -exec chmod 644 {} \;
     find "$LIB_DIR" -type d   -exec chmod 755 {} \;
-
-    # OpenWrt provides JSON::PP but not JSON. Install a shim so source files
-    # can use 'use JSON' unchanged on all platforms.
-    if [[ "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
-        info "Installing JSON shim for OpenWrt (delegates to JSON::PP)..."
-        cat > "$LIB_DIR/JSON.pm" << 'JSONSHIM'
-# JSON.pm - OpenWrt compatibility shim
-# Delegates to JSON::PP which is available on all OpenWrt releases.
-# Installed by install.sh on OpenWrt platforms only.
-package JSON;
-use JSON::PP ();
-our @ISA = ('JSON::PP');
-sub import {
-    my $class = shift;
-    JSON::PP->import(@_);
-}
-1;
-JSONSHIM
-        chmod 644 "$LIB_DIR/JSON.pm"
-    fi
 }
 
 # --- test runner ---
@@ -458,6 +438,13 @@ install_agent() {
     else
         info "Script directory already exists: $SCRIPTS_DIR"
     fi
+
+    # Install demonstrator script - disabled in scripts.conf by default,
+    # uncomment the entry to enable it for evaluating dispatcher capabilities
+    install -m 750 "$SOURCE_DIR/etc/dispatcher-demonstrator.sh" \
+        "$SCRIPTS_DIR/dispatcher-demonstrator.sh"
+    chown root:"$AGENT_GROUP" "$SCRIPTS_DIR/dispatcher-demonstrator.sh"
+    info "Demonstrator script installed at $SCRIPTS_DIR/dispatcher-demonstrator.sh"
 
     install_service_unit "$AGENT_SERVICE"
 
@@ -685,6 +672,12 @@ print_next_steps_dispatcher() {
     echo "  5. Run a script on a paired host:"
     echo "       dispatcher run <host> <script>"
     echo "       dispatcher ping <host>"
+    echo ""
+    echo "     Note: the agent must be running on the target host before"
+    echo "     ping or run will succeed. On the agent host:"
+    echo "       sudo systemctl start dispatcher-agent   # systemd"
+    echo "       /etc/init.d/dispatcher-agent start      # procd (OpenWrt)"
+    echo "       sudo dispatcher-agent serve             # manual / no init"
     echo ""
     echo "================================================================"
 }
