@@ -21,6 +21,16 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 die()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
+# --- arguments ---
+
+AUTO=0
+for arg in "$@"; do
+    case "$arg" in
+        --auto|--force) AUTO=1 ;;
+        *) die "Unknown argument: $arg" ;;
+    esac
+done
+
 # --- version ---
 
 VERSION_FILE="VERSION"
@@ -272,6 +282,14 @@ cp sbom.json "$STAGE/sbom.json"
 # --- create tarball ---
 
 info "Creating tarball: $TARBALL"
+
+# Remove previous release tarballs from the local filesystem (not from git)
+while IFS= read -r old; do
+    [[ "$old" == "$TARBALL" ]] && continue
+    rm -f "$old" "${old}.sha256"
+    info "Removed previous tarball: $old"
+done < <(find . -maxdepth 1 -name 'dispatcher-*.tar.gz' | sort)
+
 tar -czf "$TARBALL" -C "$STAGE_DIR" "$RELEASE_NAME"
 
 TARBALL_HASH=$(sha256sum "$TARBALL" | awk '{print $1}')
@@ -310,14 +328,26 @@ echo "  SBOM:      sbom.json"
 echo "  Tag:       $TAG  ($COMMIT)"
 echo "  Next ver:  $NEXT_VERSION"
 echo ""
-echo "Next steps:"
-echo ""
-echo "  1. Review sbom.json and commit everything for the release:"
-echo "       git add sbom.json VERSION"
-echo "       git add -f $TARBALL ${TARBALL}.sha256"
-echo "       git commit -m 'release: $VERSION'"
-echo ""
-echo "  2. Push commits and tag:"
-echo "       git push && git push origin $TAG"
-echo ""
+
+if [[ "$AUTO" -eq 1 ]]; then
+    info "Auto mode: committing and pushing..."
+    git add sbom.json VERSION
+    git add -f "$TARBALL" "${TARBALL}.sha256"
+    git commit -m "release: $VERSION"
+    git push
+    git push origin "$TAG"
+    info "Released and pushed."
+else
+    echo "Next steps:"
+    echo ""
+    echo "  1. Review sbom.json and commit everything for the release:"
+    echo "       git add sbom.json VERSION"
+    echo "       git add -f $TARBALL ${TARBALL}.sha256"
+    echo "       git commit -m 'release: $VERSION'"
+    echo ""
+    echo "  2. Push commits and tag:"
+    echo "       git push && git push origin $TAG"
+    echo ""
+fi
+
 echo "================================================================"
