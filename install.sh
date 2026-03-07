@@ -48,6 +48,18 @@ check_root() {
     [[ $EUID -eq 0 ]] || die "This script must be run as root (or via sudo)."
 }
 
+# Copy a file and set permissions. Replaces coreutils 'install' which is
+# absent on OpenWRT.
+safe_install() {
+    local mode="$1" src="$2" dst="$3"
+    cp "$src" "$dst" || return 1
+    chmod "$mode" "$dst"
+}
+
+# Prefix for suggested commands in next-steps output. Cleared on OpenWRT
+# since the installer runs as root and sudo is not available.
+SUDO_CMD="sudo"
+
 # Resolve the directory containing this script, following symlinks
 script_dir() {
     local src="${BASH_SOURCE[0]}"
@@ -84,6 +96,8 @@ detect_platform() {
             info "Platform: OpenWrt ${owrt_ver} (opkg)"
             warn "OpenWrt/opkg: ensure bash is installed before running this installer (opkg install bash)."
         fi
+        SUDO_CMD=""
+        mkdir -p "$BIN_DIR" "$LIB_DIR"
     elif command -v apk &>/dev/null; then
         PKG_MGR="apk"
         PKG_INSTALL_CMD="apk add"
@@ -110,7 +124,9 @@ create_system_group() {
     fi
 
     info "Creating system group '$group'..."
-    if [[ "$PKG_MGR" == "apk" || "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
+    if [[ "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
+        echo "${group}:x:9443:" >> /etc/group
+    elif [[ "$PKG_MGR" == "apk" ]]; then
         addgroup -S "$group"
     else
         groupadd --system "$group"
@@ -128,7 +144,9 @@ create_system_user() {
     fi
 
     info "Creating system user '$user'..."
-    if [[ "$PKG_MGR" == "apk" || "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
+    if [[ "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
+        echo "${user}:x:9443:9443:${comment}:/var/run/${user}:/bin/false" >> /etc/passwd
+    elif [[ "$PKG_MGR" == "apk" ]]; then
         adduser -S -H -s /sbin/nologin -G "$group" -g "$comment" "$user"
     else
         useradd --system --no-create-home \
@@ -160,12 +178,12 @@ install_service_unit() {
     local unit="$1"
     if [[ "$HAS_SYSTEMD" == true ]]; then
         info "Installing systemd unit $unit..."
-        install -m 644 "$SOURCE_DIR/etc/$unit" "$SYSTEMD_DIR/$unit"
+        safe_install 644 "$SOURCE_DIR/etc/$unit" "$SYSTEMD_DIR/$unit"
         systemctl daemon-reload
     elif [[ "$HAS_PROCD" == true ]]; then
         local init_script="/etc/init.d/dispatcher-agent"
         info "Installing procd init script $init_script..."
-        install -m 755 "$SOURCE_DIR/etc/dispatcher-agent.init" "$init_script"
+        safe_install 755 "$SOURCE_DIR/etc/dispatcher-agent.init" "$init_script"
         "$init_script" enable
     fi
 }
@@ -347,17 +365,19 @@ check_perl_modules() {
     echo ""
     error "Install the missing packages and re-run this installer:"
     echo ""
-    echo "    sudo $PKG_INSTALL_CMD ${!missing_pkgs[*]}"
+    echo "    $SUDO_CMD $PKG_INSTALL_CMD ${!missing_pkgs[*]}"
     echo ""
     exit 1
 }
 
 check_openssl() {
     if ! command -v openssl &>/dev/null; then
+        local openssl_pkg="openssl"
+        [[ "$PKG_MGR" == openwrt* ]] && openssl_pkg="openssl-util"
         echo ""
         error "openssl not found. Install with:"
         echo ""
-        echo "    sudo $PKG_INSTALL_CMD openssl"
+        echo "    $SUDO_CMD $PKG_INSTALL_CMD $openssl_pkg"
         echo ""
         exit 1
     fi
@@ -392,6 +412,31 @@ run_tests() {
     fi
 }
 
+# --- OpenWRT firewall ---
+
+# On OpenWRT, inbound TCP 7443 must be opened via UCI so the rule survives
+# fw4 restarts and reboots. A uci-defaults script is written and optionally
+# run immediately. The script self-removes after running.
+install_openwrt_firewall() {
+    local uci_defaults="/etc/uci-defaults/99-dispatcher-agent"
+    cat > "$uci_defaults" << 'EOF'
+#!/bin/sh
+uci add firewall rule
+uci set firewall.@rule[-1].name="Allow-dispatcher-agent"
+uci set firewall.@rule[-1].src="wan"
+uci set firewall.@rule[-1].dest_port="7443"
+uci set firewall.@rule[-1].proto="tcp"
+uci set firewall.@rule[-1].target="ACCEPT"
+uci commit firewall
+fw4 restart
+rm -f /etc/uci-defaults/99-dispatcher-agent
+EOF
+    chmod 755 "$uci_defaults"
+    info "OpenWRT: applying firewall rule for port 7443..."
+    "$uci_defaults" && info "Firewall rule applied." \
+        || warn "Firewall rule queued in $uci_defaults - will apply on next boot."
+}
+
 # --- agent installation ---
 
 install_agent() {
@@ -400,7 +445,7 @@ install_agent() {
     create_system_group "$AGENT_GROUP"
     create_system_user "$AGENT_USER" "$AGENT_GROUP" "Dispatcher agent service user"
 
-    install -m 755 "$SOURCE_DIR/bin/dispatcher-agent" "$BIN_DIR/dispatcher-agent"
+    safe_install 755 "$SOURCE_DIR/bin/dispatcher-agent" "$BIN_DIR/dispatcher-agent"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
         "$BIN_DIR/dispatcher-agent"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
@@ -412,8 +457,7 @@ install_agent() {
     chown root:"$AGENT_GROUP" "$AGENT_CONF_DIR"
 
     if [[ ! -f "$AGENT_CONF_DIR/agent.conf" ]]; then
-        install -m 640 "$SOURCE_DIR/etc/agent.conf.example" \
-            "$AGENT_CONF_DIR/agent.conf"
+        safe_install 640 "$SOURCE_DIR/etc/agent.conf.example" "$AGENT_CONF_DIR/agent.conf"
         chown root:"$AGENT_GROUP" "$AGENT_CONF_DIR/agent.conf"
         warn "Agent config written to $AGENT_CONF_DIR/agent.conf - review before use."
     else
@@ -421,8 +465,7 @@ install_agent() {
     fi
 
     if [[ ! -f "$AGENT_CONF_DIR/scripts.conf" ]]; then
-        install -m 640 "$SOURCE_DIR/etc/scripts.conf.example" \
-            "$AGENT_CONF_DIR/scripts.conf"
+        safe_install 640 "$SOURCE_DIR/etc/scripts.conf.example" "$AGENT_CONF_DIR/scripts.conf"
         chown root:"$AGENT_GROUP" "$AGENT_CONF_DIR/scripts.conf"
         warn "Empty allowlist written to $AGENT_CONF_DIR/scripts.conf - add scripts before starting."
     else
@@ -441,12 +484,15 @@ install_agent() {
 
     # Install demonstrator script - disabled in scripts.conf by default,
     # uncomment the entry to enable it for evaluating dispatcher capabilities
-    install -m 750 "$SOURCE_DIR/etc/dispatcher-demonstrator.sh" \
-        "$SCRIPTS_DIR/dispatcher-demonstrator.sh"
+    safe_install 750 "$SOURCE_DIR/etc/dispatcher-demonstrator.sh" "$SCRIPTS_DIR/dispatcher-demonstrator.sh"
     chown root:"$AGENT_GROUP" "$SCRIPTS_DIR/dispatcher-demonstrator.sh"
     info "Demonstrator script installed at $SCRIPTS_DIR/dispatcher-demonstrator.sh"
 
     install_service_unit "$AGENT_SERVICE"
+
+    if [[ "$PKG_MGR" == openwrt* ]]; then
+        install_openwrt_firewall
+    fi
 
     info "dispatcher-agent installed at $BIN_DIR/dispatcher-agent"
 }
@@ -458,7 +504,7 @@ install_dispatcher() {
 
     create_system_group "$DISPATCHER_GROUP"
 
-    install -m 755 "$SOURCE_DIR/bin/dispatcher" "$BIN_DIR/dispatcher"
+    safe_install 755 "$SOURCE_DIR/bin/dispatcher" "$BIN_DIR/dispatcher"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
         "$BIN_DIR/dispatcher"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
@@ -486,8 +532,7 @@ install_dispatcher() {
 
     # Dispatcher config
     if [[ ! -f "$DISPATCHER_CONF_DIR/dispatcher.conf" ]]; then
-        install -m 640 "$SOURCE_DIR/etc/dispatcher.conf.example" \
-            "$DISPATCHER_CONF_DIR/dispatcher.conf"
+        safe_install 640 "$SOURCE_DIR/etc/dispatcher.conf.example" "$DISPATCHER_CONF_DIR/dispatcher.conf"
         chown root:"$DISPATCHER_GROUP" "$DISPATCHER_CONF_DIR/dispatcher.conf"
         warn "Dispatcher config written to $DISPATCHER_CONF_DIR/dispatcher.conf - review before use."
     else
@@ -496,8 +541,7 @@ install_dispatcher() {
 
     # Auth hook - install example only if not already present
     if [[ ! -f "$DISPATCHER_CONF_DIR/auth-hook" ]]; then
-        install -m 755 "$SOURCE_DIR/etc/auth-hook.example" \
-            "$DISPATCHER_CONF_DIR/auth-hook"
+        safe_install 755 "$SOURCE_DIR/etc/auth-hook.example" "$DISPATCHER_CONF_DIR/auth-hook"
         info "Auth hook installed at $DISPATCHER_CONF_DIR/auth-hook (always-authorise default)."
     else
         info "Auth hook already exists, not overwriting."
@@ -511,7 +555,7 @@ install_dispatcher() {
 install_api() {
     info "Installing dispatcher-api..."
 
-    install -m 755 "$SOURCE_DIR/bin/dispatcher-api" "$BIN_DIR/dispatcher-api"
+    safe_install 755 "$SOURCE_DIR/bin/dispatcher-api" "$BIN_DIR/dispatcher-api"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
         "$BIN_DIR/dispatcher-api"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
@@ -591,14 +635,14 @@ uninstall() {
     warn "  $SCRIPTS_DIR"
     warn ""
     warn "To remove completely:"
-    warn "  sudo rm -rf $AGENT_CONF_DIR $DISPATCHER_CONF_DIR"
-    warn "  sudo rm -rf /var/lib/dispatcher $SCRIPTS_DIR"
+    warn "  $SUDO_CMD rm -rf $AGENT_CONF_DIR $DISPATCHER_CONF_DIR"
+    warn "  $SUDO_CMD rm -rf /var/lib/dispatcher $SCRIPTS_DIR"
     if [[ "$PKG_MGR" == "apk" || "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
-        warn "  sudo deluser $AGENT_USER"
-        warn "  sudo delgroup $DISPATCHER_GROUP"
+        warn "  $SUDO_CMD deluser $AGENT_USER"
+        warn "  $SUDO_CMD delgroup $DISPATCHER_GROUP"
     else
-        warn "  sudo userdel $AGENT_USER"
-        warn "  sudo groupdel $DISPATCHER_GROUP"
+        warn "  $SUDO_CMD userdel $AGENT_USER"
+        warn "  $SUDO_CMD groupdel $DISPATCHER_GROUP"
     fi
 
     info "Uninstall complete."
@@ -626,22 +670,29 @@ print_next_steps_agent() {
     echo " dispatcher-agent installed"
     echo "================================================================"
     echo ""
+    if [[ "$PKG_MGR" == openwrt* ]]; then
+        echo "  Note: /usr/local/bin is not in the default PATH on OpenWrt."
+        echo "  Add it to your session or profile:"
+        echo "       export PATH=\$PATH:/usr/local/bin"
+        echo "  Or add to /etc/profile for persistence."
+        echo ""
+    fi
     echo "Next steps:"
     echo ""
     echo "  1. Edit the script allowlist:"
-    echo "       sudo \$EDITOR $AGENT_CONF_DIR/scripts.conf"
+    echo "	   $SUDO_CMD $EDITOR $AGENT_CONF_DIR/scripts.conf"
     echo ""
     echo "  2. Place scripts in $SCRIPTS_DIR:"
-    echo "       sudo cp your-script.sh $SCRIPTS_DIR/"
-    echo "       sudo chmod 750 $SCRIPTS_DIR/your-script.sh"
-    echo "       sudo chown root:$AGENT_GROUP $SCRIPTS_DIR/your-script.sh"
+    echo "       $SUDO_CMD cp your-script.sh $SCRIPTS_DIR/"
+    echo "       $SUDO_CMD chmod 750 $SCRIPTS_DIR/your-script.sh"
+    echo "       $SUDO_CMD chown root:$AGENT_GROUP $SCRIPTS_DIR/your-script.sh"
     echo ""
     echo "  3. Request pairing (while dispatcher host is in pairing-mode):"
-    echo "       sudo dispatcher-agent request-pairing --dispatcher <dispatcher-host>"
+    echo "       $SUDO_CMD dispatcher-agent request-pairing --dispatcher <dispatcher-host>"
     echo ""
     echo "  4. Once approved, verify:"
-    echo "       sudo dispatcher-agent pairing-status"
-    echo "       sudo dispatcher-agent ping-self"
+    echo "       $SUDO_CMD dispatcher-agent pairing-status"
+    echo "       $SUDO_CMD dispatcher-agent ping-self"
     echo ""
     echo -e "$svc_note"
     echo ""
@@ -657,17 +708,17 @@ print_next_steps_dispatcher() {
     echo "Next steps:"
     echo ""
     echo "  1. Initialise the CA (first time only):"
-    echo "       sudo dispatcher setup-ca"
+    echo "       $SUDO_CMD dispatcher setup-ca"
     echo ""
     echo "  2. Generate the dispatcher's own certificate:"
-    echo "       sudo dispatcher setup-dispatcher"
+    echo "       $SUDO_CMD dispatcher setup-dispatcher"
     echo ""
     echo "  3. Add yourself to the dispatcher group for CLI access without sudo:"
-    echo "       sudo usermod -aG $DISPATCHER_GROUP \$USER"
+    echo "       $SUDO_CMD usermod -aG $DISPATCHER_GROUP \$USER"
     echo "       # log out and back in for the group to take effect"
     echo ""
     echo "  4. Accept pairing requests from agents:"
-    echo "       sudo dispatcher pairing-mode"
+    echo "       $SUDO_CMD dispatcher pairing-mode"
     echo ""
     echo "  5. Run a script on a paired host:"
     echo "       dispatcher run <host> <script>"
@@ -675,9 +726,9 @@ print_next_steps_dispatcher() {
     echo ""
     echo "     Note: the agent must be running on the target host before"
     echo "     ping or run will succeed. On the agent host:"
-    echo "       sudo systemctl start dispatcher-agent   # systemd"
+    echo "       $SUDO_CMD systemctl start dispatcher-agent   # systemd"
     echo "       /etc/init.d/dispatcher-agent start      # procd (OpenWrt)"
-    echo "       sudo dispatcher-agent serve             # manual / no init"
+    echo "       $SUDO_CMD dispatcher-agent serve             # manual / no init"
     echo ""
     echo "================================================================"
 }

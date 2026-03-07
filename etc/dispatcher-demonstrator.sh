@@ -14,7 +14,7 @@
 #   sudo dispatcher run <agent> dispatcher-demonstrator -- exit-ok
 #   sudo dispatcher run <agent> dispatcher-demonstrator -- exit-fail
 #   sudo dispatcher run <agent> dispatcher-demonstrator -- args hello world
-#   sudo dispatcher run <agent> dispatcher-demonstrator -- args "$(date)" "from $(hostname)"
+#   sudo dispatcher run <agent> dispatcher-demonstrator -- args "$(date)" "from $(_hostname)"
 #   sudo dispatcher run <agent> dispatcher-demonstrator -- log-context
 #   sudo dispatcher run <agent> dispatcher-demonstrator -- log-fields
 #   sudo dispatcher run <agent> dispatcher-demonstrator -- log-fields -- --env prod
@@ -71,7 +71,7 @@ hostname):
   args             sudo dispatcher run <agent> dispatcher-demonstrator -- args hello world
                    Shows args arriving intact at the agent.
 
-  args (dynamic)   sudo dispatcher run <agent> dispatcher-demonstrator -- args "$(date)" "from $(hostname)"
+  args (dynamic)   sudo dispatcher run <agent> dispatcher-demonstrator -- args "$(date)" "from $(_hostname)"
                    Shows dynamic args evaluated on the dispatcher host,
                    arriving as static strings at the agent.
 
@@ -95,6 +95,25 @@ EOF
     exit 0
 }
 
+# --- portable command fallbacks ---
+# hostname and whoami may be absent on minimal systems (e.g. OpenWRT BusyBox)
+
+_hostname() {
+    if command -v hostname >/dev/null 2>&1; then
+        hostname
+    else
+        cat /proc/sys/kernel/hostname 2>/dev/null || echo "unknown"
+    fi
+}
+
+_whoami() {
+    if command -v whoami >/dev/null 2>&1; then
+        whoami
+    else
+        id -un 2>/dev/null || id -u 2>/dev/null || echo "unknown"
+    fi
+}
+
 # --- read stdin (JSON context from dispatcher) ---
 # Must be read before any subcommand runs. If stdin is a tty
 # (interactive), skip reading and show usage instead.
@@ -113,7 +132,7 @@ shift || true   # remaining $@ are the script args passed after --
 case "$CMD" in
 
     stdout)
-        echo "Hello from $(hostname) - this is stdout returned to the dispatcher."
+        echo "Hello from $(_hostname) - this is stdout returned to the dispatcher."
         ;;
 
     stderr)
@@ -142,7 +161,7 @@ case "$CMD" in
 
     log-context)
         echo "$CONTEXT" | logger -t "$SYSLOG_TAG"
-        echo "Full JSON context logged to syslog on $(hostname) under tag: $SYSLOG_TAG"
+        echo "Full JSON context logged to syslog on $(_hostname) under tag: $SYSLOG_TAG"
         ;;
 
     log-fields)
@@ -151,7 +170,7 @@ case "$CMD" in
         script=$(json_field "script"  "$CONTEXT")
 
         logger -t "$SYSLOG_TAG" "reqid=$reqid user=$user script=$script args=$*"
-        echo "Fields logged to syslog on $(hostname) under tag: $SYSLOG_TAG"
+        echo "Fields logged to syslog on $(_hostname) under tag: $SYSLOG_TAG"
         echo "  reqid:    $reqid"
         echo "  user:     $user"
         echo "  script:   $script"
@@ -159,10 +178,10 @@ case "$CMD" in
         ;;
 
     agent-info)
-        echo "hostname:  $(hostname)"
+        echo "hostname:  $(_hostname)"
         echo "platform:  $(uname -s -r -m)"
         echo "uptime:    $(uptime)"
-        echo "whoami:    $(whoami)"
+        echo "whoami:    $(_whoami)"
         echo ""
         echo "Note: run with -- \"\\$(uptime)\" to send the dispatcher's uptime instead."
         ;;

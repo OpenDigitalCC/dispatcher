@@ -1,13 +1,13 @@
 # dispatcher-agent script allowlist
 # /etc/dispatcher-agent/scripts.conf
 #
-# One entry per line: <name>  <absolute-path>
+# One entry per line: <name> = <absolute-path>
 # The name is what the dispatcher passes as the script argument.
 # The path must be executable and owned by root.
 #
 # Example:
-#   backup-mysql    /opt/dispatcher-scripts/backup-mysql.sh
-#   deploy-app      /opt/dispatcher-scripts/deploy-app.sh
+#   backup-mysql = /opt/dispatcher-scripts/backup-mysql.sh
+#   deploy-app   = /opt/dispatcher-scripts/deploy-app.sh
 
 # --- Demonstrator (evaluation and examples) ---
 #
@@ -17,4 +17,4 @@
 # available subcommands and the dispatcher invocations that exercise them.
 #
 # Uncomment to enable:
-# dispatcher-demonstrator  /opt/dispatcher-scripts/dispatcher-demonstrator.sh
+# dispatcher-demonstrator = /opt/dispatcher-scripts/dispatcher-demonstrator.sh
