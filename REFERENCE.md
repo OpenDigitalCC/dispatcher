@@ -1,4 +1,9 @@
-# Dispatcher - Command Reference
+---
+title: Dispatcher - Installation and Operations
+subtitle: Platform requirements, setup, configuration, and operational reference
+brand: odcc
+---
+
 
 This document is the authoritative reference for all `dispatcher` and
 `dispatcher-agent` commands. It covers every mode, option, and environment

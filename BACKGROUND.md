@@ -34,7 +34,7 @@ The obvious enterprise answer. Evaluated and rejected for this use case:
   infrastructure
 - Designed for configuration management, not lightweight task execution
 - Complexity disproportionate to the problem size
-- Cloudient's infrastructure philosophy: keep host systems minimal and clean;
+- Our infrastructure philosophy: keep host systems minimal and clean;
   avoid large dependency trees
 
 Fabric / Paramiko (Python SSH wrappers)
