@@ -9,7 +9,7 @@
 #   ./install.sh --uninstall    Remove installed files (preserves config/certs)
 #   ./install.sh --run-tests    Run test suite from the source directory
 #
-# Supported platforms: Debian/Ubuntu (apt), Alpine Linux (apk)
+# Supported platforms: Debian/Ubuntu (apt), Alpine Linux (apk), OpenWrt 25.x (apk), OpenWrt 23.x and older (opkg)
 
 set -euo pipefail
 
@@ -68,7 +68,23 @@ PKG_MGR=""
 PKG_INSTALL_CMD=""
 
 detect_platform() {
-    if command -v apk &>/dev/null; then
+    if [[ -f /etc/openwrt_release ]]; then
+        # shellcheck source=/dev/null
+        source /etc/openwrt_release
+        local owrt_ver="${DISTRIB_RELEASE:-0}"
+        local owrt_major="${owrt_ver%%.*}"
+        if command -v apk &>/dev/null && [[ "$owrt_major" -ge 24 ]] 2>/dev/null; then
+            PKG_MGR="openwrt"
+            PKG_INSTALL_CMD="apk add"
+            info "Platform: OpenWrt ${owrt_ver} (apk)"
+            warn "OpenWrt: ensure bash is installed before running this installer (apk add bash)."
+        else
+            PKG_MGR="openwrt-opkg"
+            PKG_INSTALL_CMD="opkg install"
+            info "Platform: OpenWrt ${owrt_ver} (opkg)"
+            warn "OpenWrt/opkg: ensure bash is installed before running this installer (opkg install bash)."
+        fi
+    elif command -v apk &>/dev/null; then
         PKG_MGR="apk"
         PKG_INSTALL_CMD="apk add"
         info "Platform: Alpine Linux (apk)"
@@ -77,7 +93,7 @@ detect_platform() {
         PKG_INSTALL_CMD="apt install"
         info "Platform: Debian/Ubuntu (apt)"
     else
-        die "Unsupported platform. Supported: Debian/Ubuntu (apt), Alpine Linux (apk).
+        die "Unsupported platform. Supported: Debian/Ubuntu (apt), Alpine Linux (apk), OpenWrt 25.x (apk), OpenWrt 23.x and older (opkg).
      For RPM-based systems, install dependencies manually and copy files directly.
      See DEVELOPER.md for file locations."
     fi
@@ -94,7 +110,7 @@ create_system_group() {
     fi
 
     info "Creating system group '$group'..."
-    if [[ "$PKG_MGR" == "apk" ]]; then
+    if [[ "$PKG_MGR" == "apk" || "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
         addgroup -S "$group"
     else
         groupadd --system "$group"
@@ -112,7 +128,7 @@ create_system_user() {
     fi
 
     info "Creating system user '$user'..."
-    if [[ "$PKG_MGR" == "apk" ]]; then
+    if [[ "$PKG_MGR" == "apk" || "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
         adduser -S -H -s /sbin/nologin -G "$group" -g "$comment" "$user"
     else
         useradd --system --no-create-home \
@@ -125,12 +141,15 @@ create_system_user() {
 # --- init system detection ---
 
 HAS_SYSTEMD=false
+HAS_PROCD=false
 
 detect_init() {
     if command -v systemctl &>/dev/null; then
         HAS_SYSTEMD=true
+    elif [[ -f /sbin/procd ]]; then
+        HAS_PROCD=true
     else
-        warn "systemctl not found - service files will not be installed."
+        warn "No supported init system found (systemd or procd) - service files will not be installed."
         warn "Start services manually once configured:"
         warn "  dispatcher-agent serve"
         warn "  dispatcher-api"
@@ -143,6 +162,11 @@ install_service_unit() {
         info "Installing systemd unit $unit..."
         install -m 644 "$SOURCE_DIR/etc/$unit" "$SYSTEMD_DIR/$unit"
         systemctl daemon-reload
+    elif [[ "$HAS_PROCD" == true ]]; then
+        local init_script="/etc/init.d/dispatcher-agent"
+        info "Installing procd init script $init_script..."
+        install -m 755 "$SOURCE_DIR/etc/dispatcher-agent.init" "$init_script"
+        "$init_script" enable
     fi
 }
 
@@ -211,11 +235,88 @@ check_perl_modules() {
         ["IPC::Open2"]="perl"
     )
 
-    info "Checking Perl module dependencies for role: $role"
+    # OpenWrt module => package (perlbase-* granular packaging; JSON::PP replaces JSON)
+    declare -A OPENWRT_AGENT_DEPS=(
+        ["IO::Socket::SSL"]="perl-io-socket-ssl"
+        ["JSON::PP"]="perlbase-json-pp"
+        ["File::Temp"]="perlbase-file"
+        ["File::Basename"]="perlbase-file"
+        ["File::Path"]="perlbase-file"
+        ["Sys::Syslog"]="perlbase-sys"
+        ["Sys::Hostname"]="perlbase-sys"
+        ["Getopt::Long"]="perlbase-getopt"
+        ["POSIX"]="perlbase-posix"
+        ["Time::HiRes"]="perlbase-time"
+        ["Time::Piece"]="perlbase-time"
+        ["Carp"]="perlbase-essential"
+        ["FindBin"]="perlbase-findbin"
+    )
+    declare -A OPENWRT_DISPATCHER_DEPS=(
+        ["LWP::UserAgent"]="perl-www"
+        ["IO::Socket::SSL"]="perl-io-socket-ssl"
+        ["JSON::PP"]="perlbase-json-pp"
+        ["File::Temp"]="perlbase-file"
+        ["File::Basename"]="perlbase-file"
+        ["File::Path"]="perlbase-file"
+        ["Sys::Syslog"]="perlbase-sys"
+        ["Sys::Hostname"]="perlbase-sys"
+        ["Getopt::Long"]="perlbase-getopt"
+        ["POSIX"]="perlbase-posix"
+        ["Time::HiRes"]="perlbase-time"
+        ["Time::Piece"]="perlbase-time"
+        ["IO::Select"]="perlbase-io"
+        ["Fcntl"]="perlbase-fcntl"
+        ["IPC::Open2"]="perlbase-ipc"
+        ["Carp"]="perlbase-essential"
+        ["FindBin"]="perlbase-findbin"
+    )
+
+    # OpenWrt/opkg module => package (23.x and older; IO::Socket::SSL from community feed)
+    # Note: perl-io-socket-ssl is not in the official opkg feed for older releases.
+    # It must be installed from the community packages feed before running this installer.
+    # See: https://openwrt.org/packages/pkgdata/perl-io-socket-ssl
+    declare -A OPKG_AGENT_DEPS=(
+        ["IO::Socket::SSL"]="perl-io-socket-ssl"
+        ["JSON::PP"]="perl-json"
+        ["File::Temp"]="perlbase-file"
+        ["File::Basename"]="perlbase-file"
+        ["File::Path"]="perlbase-file"
+        ["Sys::Syslog"]="perlbase-sys"
+        ["Sys::Hostname"]="perlbase-sys"
+        ["Getopt::Long"]="perlbase-getopt"
+        ["POSIX"]="perlbase-posix"
+        ["Time::HiRes"]="perlbase-time"
+        ["Time::Piece"]="perlbase-time"
+        ["Carp"]="perlbase-essential"
+        ["FindBin"]="perlbase-findbin"
+    )
+    declare -A OPKG_DISPATCHER_DEPS=(
+        ["LWP::UserAgent"]="perl-www"
+        ["IO::Socket::SSL"]="perl-io-socket-ssl"
+        ["JSON::PP"]="perl-json"
+        ["File::Temp"]="perlbase-file"
+        ["File::Basename"]="perlbase-file"
+        ["File::Path"]="perlbase-file"
+        ["Sys::Syslog"]="perlbase-sys"
+        ["Sys::Hostname"]="perlbase-sys"
+        ["Getopt::Long"]="perlbase-getopt"
+        ["POSIX"]="perlbase-posix"
+        ["Time::HiRes"]="perlbase-time"
+        ["Time::Piece"]="perlbase-time"
+        ["IO::Select"]="perlbase-io"
+        ["Fcntl"]="perlbase-fcntl"
+        ["IPC::Open2"]="perlbase-ipc"
+        ["Carp"]="perlbase-essential"
+        ["FindBin"]="perlbase-findbin"
+    )
 
     # Select the right map
     local map_name
-    if [[ "$PKG_MGR" == "apk" ]]; then
+    if [[ "$PKG_MGR" == "openwrt" ]]; then
+        [[ "$role" == "agent" ]] && map_name="OPENWRT_AGENT_DEPS" || map_name="OPENWRT_DISPATCHER_DEPS"
+    elif [[ "$PKG_MGR" == "openwrt-opkg" ]]; then
+        [[ "$role" == "agent" ]] && map_name="OPKG_AGENT_DEPS" || map_name="OPKG_DISPATCHER_DEPS"
+    elif [[ "$PKG_MGR" == "apk" ]]; then
         [[ "$role" == "agent" ]] && map_name="APK_AGENT_DEPS" || map_name="APK_DISPATCHER_DEPS"
     else
         [[ "$role" == "agent" ]] && map_name="DEB_AGENT_DEPS" || map_name="DEB_DISPATCHER_DEPS"
@@ -271,6 +372,26 @@ install_lib() {
     cp -r "$SOURCE_DIR/lib/." "$LIB_DIR/"
     find "$LIB_DIR" -name '*.pm' -exec chmod 644 {} \;
     find "$LIB_DIR" -type d   -exec chmod 755 {} \;
+
+    # OpenWrt provides JSON::PP but not JSON. Install a shim so source files
+    # can use 'use JSON' unchanged on all platforms.
+    if [[ "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
+        info "Installing JSON shim for OpenWrt (delegates to JSON::PP)..."
+        cat > "$LIB_DIR/JSON.pm" << 'JSONSHIM'
+# JSON.pm - OpenWrt compatibility shim
+# Delegates to JSON::PP which is available on all OpenWrt releases.
+# Installed by install.sh on OpenWrt platforms only.
+package JSON;
+use JSON::PP ();
+our @ISA = ('JSON::PP');
+sub import {
+    my $class = shift;
+    JSON::PP->import(@_);
+}
+1;
+JSONSHIM
+        chmod 644 "$LIB_DIR/JSON.pm"
+    fi
 }
 
 # --- test runner ---
@@ -428,6 +549,13 @@ uninstall() {
             info "Disabling $AGENT_SERVICE..."
             systemctl disable "$AGENT_SERVICE"
         fi
+    elif [[ "$HAS_PROCD" == true ]]; then
+        local init_script="/etc/init.d/dispatcher-agent"
+        if [[ -f "$init_script" ]]; then
+            info "Stopping and disabling procd service..."
+            "$init_script" stop  2>/dev/null || true
+            "$init_script" disable 2>/dev/null || true
+        fi
     fi
 
     local files=(
@@ -441,6 +569,8 @@ uninstall() {
             "$SYSTEMD_DIR/$AGENT_SERVICE"
             "$SYSTEMD_DIR/$API_SERVICE"
         )
+    elif [[ "$HAS_PROCD" == true ]]; then
+        files+=( "/etc/init.d/dispatcher-agent" )
     fi
 
     # Remove lock files (transient, not config)
@@ -476,7 +606,7 @@ uninstall() {
     warn "To remove completely:"
     warn "  sudo rm -rf $AGENT_CONF_DIR $DISPATCHER_CONF_DIR"
     warn "  sudo rm -rf /var/lib/dispatcher $SCRIPTS_DIR"
-    if [[ "$PKG_MGR" == "apk" ]]; then
+    if [[ "$PKG_MGR" == "apk" || "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
         warn "  sudo deluser $AGENT_USER"
         warn "  sudo delgroup $DISPATCHER_GROUP"
     else
@@ -495,6 +625,10 @@ print_next_steps_agent() {
         svc_note="  5. Enable and start:
        sudo systemctl enable $AGENT_SERVICE
        sudo systemctl start  $AGENT_SERVICE"
+    elif [[ "$HAS_PROCD" == true ]]; then
+        svc_note="  5. Enable and start:
+       /etc/init.d/dispatcher-agent enable
+       /etc/init.d/dispatcher-agent start"
     else
         svc_note="  5. Start the agent:
        dispatcher-agent serve"
@@ -613,7 +747,7 @@ for arg in "$@"; do
             echo "  --uninstall    Remove installed files (config, certs, and agent registry preserved)"
             echo "  --run-tests    Run test suite from source directory after installation"
             echo ""
-            echo "Supported platforms: Debian/Ubuntu (apt), Alpine Linux (apk)"
+            echo "Supported platforms: Debian/Ubuntu (apt), Alpine Linux (apk), OpenWrt 25.x (apk), OpenWrt 23.x and older (opkg)"
             exit 0
             ;;
         *)
