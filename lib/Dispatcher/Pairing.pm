@@ -341,6 +341,9 @@ sub _do_approve {
         chomp(my $err = $@);
         print "Approve failed: $err\n";
     }
+    else {
+        print "Waiting for next request... (Ctrl-C to exit pairing mode)\n";
+    }
 }
 
 # Deny a request by reqid, with error handling for interactive context.
@@ -355,6 +358,9 @@ sub _do_deny {
     if ($@) {
         chomp(my $err = $@);
         print "Deny failed: $err\n";
+    }
+    else {
+        print "Waiting for next request... (Ctrl-C to exit pairing mode)\n";
     }
 }
 

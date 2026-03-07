@@ -125,7 +125,13 @@ sub mode_request_pairing {
     );
 
     unless ($result->{ok}) {
-        die "Pairing failed: $result->{error}\n";
+        my $err = $result->{error} // 'unknown error';
+        if ($err =~ /IO::Socket::IP configuration failed|connect failed|connection refused/i) {
+            die "Pairing failed: could not connect to dispatcher at $dispatcher.\n"
+              . "Check the dispatcher address is correct and pairing mode is active:\n"
+              . "  sudo dispatcher pairing-mode\n";
+        }
+        die "Pairing failed: $err\n";
     }
 
     Dispatcher::Agent::Pairing::store_certs(

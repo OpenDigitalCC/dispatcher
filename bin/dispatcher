@@ -148,7 +148,14 @@ sub mode_ping {
 
 sub mode_list_agents {
     my ($opts) = @_;
-    my $agents = Dispatcher::Registry::list_agents();
+    my $agents = eval { Dispatcher::Registry::list_agents() };
+    if ($@) {
+        my $err = $@;
+        if ($err =~ /Permission denied/i) {
+            die "Cannot access agent registry: permission denied.\nTry: sudo dispatcher list-agents\n";
+        }
+        die $err;
+    }
 
     if (!@$agents) {
         print "No registered agents.\n";

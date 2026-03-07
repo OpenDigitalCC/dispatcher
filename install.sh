@@ -852,7 +852,7 @@ if [[ "$DO_RUN_TESTS" == true && -z "$ROLE" ]]; then
     exit 0
 fi
 
-[[ -n "$ROLE" ]] || die "Role must be specified. Use --agent, --dispatcher, or --api. See --help."
+[[ -n "$ROLE" ]] || die "Role must be specified. Use --agent, --dispatcher, --api, --uninstall, or --run-tests. See --help."
 
 check_openssl
 check_perl_modules "$ROLE"
