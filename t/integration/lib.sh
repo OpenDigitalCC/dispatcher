@@ -3,13 +3,20 @@
 #
 # Source this file at the top of each test script:
 #   source "$(dirname "$0")/lib.sh"
+#
+# Agent discovery:
+#   Agents are discovered from "dispatcher list-agents" at startup.
+#   No hostnames are hardcoded here or in any test file.
+#
+# Exported arrays (populated by discover_agents, called from run-tests.sh):
+#   AGENTS        all reachable agents at suite start
+#   AGENT1        first reachable agent  (or empty)
+#   AGENT2        second reachable agent (or empty)
+#
+# Each test script calls require_agents <n> near the top to skip the
+# entire file if fewer than n agents are reachable.
 
-# --- configuration ---
-# Override these by setting environment variables before running tests.
-
-AGENT_DEBIAN="${AGENT_DEBIAN:-sjm-explore}"
-AGENT_OPENWRT="${AGENT_OPENWRT:-OpenWrt}"
-DISPATCHER="${DISPATCHER:-dispatcher}"   # path or name if on PATH
+DISPATCHER="${DISPATCHER:-dispatcher}"
 
 # --- counters ---
 
@@ -59,6 +66,136 @@ summary() {
         return 1
     fi
     return 0
+}
+
+# --- agent discovery and reachability ---
+
+# discover_agents: ping all registered agents, populate AGENTS, AGENT1, AGENT2.
+# Called once by run-tests.sh before any test file runs.
+# Also called automatically when AGENT1 is unset (standalone test execution).
+# Exports results so sourced test scripts inherit them.
+discover_agents() {
+    printf 'Discovering agents from dispatcher list-agents...\n'
+
+    local all_agents=()
+    while IFS= read -r hostname; do
+        [ -n "$hostname" ] && all_agents+=("$hostname")
+    done < <(_list_agent_hostnames)
+
+    if [ "${#all_agents[@]}" -eq 0 ]; then
+        printf 'ERROR: No agents registered. Run "dispatcher list-agents" to check.\n' >&2
+        exit 1
+    fi
+
+    printf 'Registered agents: %s\n' "${all_agents[*]}"
+    printf 'Pinging to confirm reachability...\n'
+
+    AGENTS=()
+    for agent in "${all_agents[@]}"; do
+        if _ping_agent "$agent"; then
+            AGENTS+=("$agent")
+            printf '  %-30s  reachable\n' "$agent"
+        else
+            printf '  %-30s  UNREACHABLE - excluded\n' "$agent"
+        fi
+    done
+
+    AGENT1="${AGENTS[0]:-}"
+    AGENT2="${AGENTS[1]:-}"
+
+    export AGENT1 AGENT2 DISPATCHER
+
+    printf '\n%d of %d agents reachable: %s\n\n' \
+        "${#AGENTS[@]}" "${#all_agents[@]}" "${AGENTS[*]:-none}"
+}
+
+# Auto-discover if running standalone (AGENT1 not set by parent runner)
+if [ -z "${AGENT1:-}" ]; then
+    discover_agents
+fi
+
+# _list_agent_hostnames: extract hostnames from "dispatcher list-agents" output.
+# Skips the header and separator lines.
+_list_agent_hostnames() {
+    sudo "$DISPATCHER" list-agents 2>/dev/null \
+        | awk 'NR > 2 && /^[A-Za-z0-9]/ { print $1 }'
+}
+
+# _ping_agent <hostname>: returns 0 if agent responds to dispatcher ping.
+_ping_agent() {
+    local agent="$1"
+    sudo "$DISPATCHER" ping "$agent" > /dev/null 2>&1
+}
+
+# require_agents <n>: skip this test file entirely if fewer than n agents
+# are reachable. Call at the top of each test script after sourcing lib.sh.
+require_agents() {
+    local needed="$1"
+    local available="${#AGENTS[@]}"
+    if [ "$available" -lt "$needed" ]; then
+        _yellow "SKIP: this test requires $needed reachable agent(s), only $available available"
+        exit 0
+    fi
+}
+
+# check_agents_still_reachable: ping all AGENTS, populate AGENTS_LOST.
+# Returns 0 if all still reachable, 1 if any have gone away.
+check_agents_still_reachable() {
+    AGENTS_LOST=()
+    for agent in "${AGENTS[@]}"; do
+        if ! _ping_agent "$agent"; then
+            AGENTS_LOST+=("$agent")
+        fi
+    done
+    export AGENTS_LOST
+    [ "${#AGENTS_LOST[@]}" -eq 0 ]
+}
+
+# assert_agents_reachable: call before any describe block that dispatches to
+# live agents. If any have gone away since the suite started, reports the loss
+# and prompts whether to continue with the remaining agents.
+# In non-interactive mode, stops immediately.
+assert_agents_reachable() {
+    if ! check_agents_still_reachable; then
+        printf '\n'
+        _red "WARNING: agent(s) no longer reachable: ${AGENTS_LOST[*]}"
+        printf '\n'
+
+        if [ -t 0 ]; then
+            printf 'Continue testing with remaining agents? [y/N] '
+            read -r answer
+            if [[ ! "$answer" =~ ^[Yy] ]]; then
+                printf 'Stopping at user request.\n'
+                summary
+                exit 1
+            fi
+        else
+            printf 'Non-interactive mode - stopping on agent loss.\n'
+            summary
+            exit 1
+        fi
+
+        # Rebuild AGENTS without the lost ones
+        local remaining=()
+        for agent in "${AGENTS[@]}"; do
+            local lost=0
+            for gone in "${AGENTS_LOST[@]}"; do
+                [ "$agent" = "$gone" ] && lost=1
+            done
+            [ "$lost" -eq 0 ] && remaining+=("$agent")
+        done
+        AGENTS=("${remaining[@]}")
+        AGENT1="${AGENTS[0]:-}"
+        AGENT2="${AGENTS[1]:-}"
+        export AGENTS AGENT1 AGENT2
+
+        if [ "${#AGENTS[@]}" -eq 0 ]; then
+            printf 'No agents remaining. Stopping.\n'
+            summary
+            exit 1
+        fi
+        printf 'Continuing with: %s\n' "${AGENTS[*]}"
+    fi
 }
 
 # --- assertion helpers ---
@@ -122,12 +259,17 @@ assert_json_valid() {
 }
 
 # run_dispatcher <args...> - runs dispatcher, sets OUT, ERR, RC
+# Passes DISPATCHER_TOKEN explicitly so sudo does not strip it.
 run_dispatcher() {
-    OUT=$(sudo "$DISPATCHER" "$@" 2>/tmp/_disp_err); RC=$?
+    local token_env=""
+    if [ -n "${DISPATCHER_TOKEN:-}" ]; then
+        token_env="DISPATCHER_TOKEN=${DISPATCHER_TOKEN}"
+    fi
+    OUT=$(sudo env $token_env "$DISPATCHER" "$@" 2>/tmp/_disp_err); RC=$?
     ERR=$(cat /tmp/_disp_err)
 }
 
-# elapsed_seconds <start_seconds> - returns wall time since start
+# elapsed_seconds <start_seconds>
 elapsed_seconds() {
     echo $(( $(date +%s) - $1 ))
 }

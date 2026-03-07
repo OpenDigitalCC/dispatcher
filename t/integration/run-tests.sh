@@ -7,19 +7,19 @@
 #   sudo bash run-tests.sh [test-file ...]
 #
 # If no test files are given, runs all tests in order.
-# Individual tests can be run directly, e.g.:
+# Individual tests can be run directly from the suite directory, e.g.:
 #   sudo bash 02-argument-integrity.sh
 #
-# Environment variables (override defaults in lib.sh):
-#   AGENT_DEBIAN    hostname of the Debian agent   (default: sjm-explore)
-#   AGENT_OPENWRT   hostname of the OpenWrt agent  (default: OpenWrt)
-#   DISPATCHER      dispatcher binary name or path  (default: dispatcher)
+# Agents are discovered automatically from "dispatcher list-agents".
+# No hostnames need to be configured.
 #
-# Example with overrides:
-#   AGENT_DEBIAN=myhost sudo bash run-tests.sh
+# Environment variables:
+#   DISPATCHER   dispatcher binary name or path (default: dispatcher)
 
 set -uo pipefail
 cd "$(dirname "$0")"
+
+source ./lib.sh
 
 TESTS=(
     01-security-boundary.sh
@@ -34,24 +34,32 @@ if [ "$#" -gt 0 ]; then
     TESTS=("$@")
 fi
 
-PASS_FILES=0
-FAIL_FILES=0
-
 printf '\n'
 printf '=%.0s' {1..60}
 printf '\n'
 printf 'Dispatcher Integration Tests\n'
-printf '  AGENT_DEBIAN  = %s\n' "${AGENT_DEBIAN:-sjm-explore}"
-printf '  AGENT_OPENWRT = %s\n' "${AGENT_OPENWRT:-OpenWrt}"
-printf '  DISPATCHER    = %s\n' "${DISPATCHER:-dispatcher}"
+printf '  DISPATCHER = %s\n' "$DISPATCHER"
 printf '=%.0s' {1..60}
 printf '\n'
 
-# Verify dispatcher is reachable before starting
-if ! sudo "${DISPATCHER:-dispatcher}" list-agents > /dev/null 2>&1; then
-    printf '\nERROR: Cannot run "dispatcher list-agents" - is the dispatcher installed and are you root/sudo?\n'
+# Verify dispatcher binary is accessible
+if ! sudo "$DISPATCHER" list-agents > /dev/null 2>&1; then
+    printf '\nERROR: Cannot run "dispatcher list-agents"\n'
+    printf 'Check the dispatcher is installed and you have sudo access.\n'
     exit 1
 fi
+
+# Discover and ping all registered agents once before any tests run.
+# Populates AGENTS, AGENT1, AGENT2 which are exported to all test files.
+discover_agents
+
+if [ "${#AGENTS[@]}" -eq 0 ]; then
+    printf 'ERROR: No agents reachable. Cannot run tests.\n'
+    exit 1
+fi
+
+PASS_FILES=0
+FAIL_FILES=0
 
 for test_file in "${TESTS[@]}"; do
     printf '\n'
@@ -61,7 +69,11 @@ for test_file in "${TESTS[@]}"; do
     printf '#%.0s' {1..60}
     printf '\n'
 
-    if bash "$test_file"; then
+    # Source rather than bash so the AGENTS array is inherited.
+    # Each test file calls summary() which returns non-zero on failure.
+    # Reset per-file counters before sourcing.
+    _PASS=0; _FAIL=0; _SKIP=0
+    if ( source "$test_file" ); then
         PASS_FILES=$((PASS_FILES + 1))
     else
         FAIL_FILES=$((FAIL_FILES + 1))
