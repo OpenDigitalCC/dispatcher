@@ -687,7 +687,7 @@ print_next_steps_agent() {
     echo "Next steps:"
     echo ""
     echo "  1. Edit the script allowlist:"
-    echo "	   $SUDO_CMD $EDITOR $AGENT_CONF_DIR/scripts.conf"
+    echo "       $SUDO_CMD \${EDITOR:-vi} $AGENT_CONF_DIR/scripts.conf"
     echo ""
     echo "  2. Place scripts in $SCRIPTS_DIR:"
     echo "       $SUDO_CMD cp your-script.sh $SCRIPTS_DIR/"
