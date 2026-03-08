@@ -19,6 +19,10 @@ see DEVELOPER.md.
 dispatcher CLI, as HTTP endpoints with JSON request and response bodies. The
 auth hook and lock checking apply identically to CLI and API requests.
 
+Endpoints: `GET /`, `GET /health`, `POST /ping`, `POST /run`,
+`GET /discovery`, `POST /discovery`, `GET /openapi.json`,
+`GET /openapi-live.json`.
+
 The server listens on `api_port` (default 7445). TLS is enabled if `api_cert`
 and `api_key` are set in `dispatcher.conf`; plain HTTP is used otherwise.
 
