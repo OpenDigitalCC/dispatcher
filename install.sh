@@ -585,6 +585,15 @@ install_api() {
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
         "$BIN_DIR/dispatcher-api"
 
+    # Stamp version into the OpenAPI spec
+    local spec="$LIB_DIR/Dispatcher/openapi.json"
+    if [[ -f "$spec" ]]; then
+        sed -i "s|\"version\": \"[^\"]*\"|\"version\": \"$RELEASE_VERSION\"|" "$spec"
+        info "openapi.json version stamped: $RELEASE_VERSION"
+    else
+        warn "openapi.json not found at $spec - spec endpoint will return 404"
+    fi
+
     install_service_unit "$API_SERVICE"
 
     info "dispatcher-api installed at $BIN_DIR/dispatcher-api"

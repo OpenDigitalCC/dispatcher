@@ -158,7 +158,16 @@ sub _handle_connection {
     });
 
     # Route
-    if ($path eq '/health' && $method eq 'GET') {
+    if ($path eq '/' && $method eq 'GET') {
+        _handle_index($conn, $config);
+    }
+    elsif ($path eq '/openapi.json' && $method eq 'GET') {
+        _handle_openapi($conn, $config);
+    }
+    elsif ($path eq '/openapi-live.json' && $method eq 'GET') {
+        _handle_openapi_live($conn, $peer, $config);
+    }
+    elsif ($path eq '/health' && $method eq 'GET') {
         _handle_health($conn);
     }
     elsif ($path eq '/ping' && $method eq 'POST') {
@@ -341,6 +350,134 @@ sub _handle_discovery {
     }
 
     _send_json($conn, 200, { ok => JSON::true, hosts => \%by_host });
+}
+
+sub _handle_index {
+    my ($conn, $config) = @_;
+    _send_json($conn, 200, {
+        name      => 'dispatcher-api',
+        version   => $VERSION,
+        spec      => '/openapi.json',
+        live_spec => '/openapi-live.json',
+        endpoints => [
+            { method => 'GET',  path => '/health'           },
+            { method => 'POST', path => '/ping'              },
+            { method => 'POST', path => '/run'               },
+            { method => 'GET',  path => '/discovery'         },
+            { method => 'POST', path => '/discovery'         },
+            { method => 'GET',  path => '/openapi.json'      },
+            { method => 'GET',  path => '/openapi-live.json' },
+        ],
+    });
+}
+
+my $OPENAPI_PATH = '/usr/local/lib/dispatcher/Dispatcher/openapi.json';
+
+sub _handle_openapi {
+    my ($conn, $config) = @_;
+    unless (-f $OPENAPI_PATH) {
+        _send_error($conn, 404, 'not found', 'openapi.json not installed');
+        return;
+    }
+    open my $fh, '<', $OPENAPI_PATH
+        or do { _send_error($conn, 500, 'server error', "cannot read spec: $!"); return; };
+    local $/;
+    my $body = <$fh>;
+    close $fh;
+    print $conn
+        "HTTP/1.0 200 OK\r\n",
+        "Content-Type: application/json\r\n",
+        "Content-Length: ", length($body), "\r\n",
+        "\r\n",
+        $body;
+}
+
+sub _handle_openapi_live {
+    my ($conn, $peer, $config) = @_;
+
+    # Load the base spec from disk
+    unless (-f $OPENAPI_PATH) {
+        _send_error($conn, 404, 'not found', 'openapi.json not installed');
+        return;
+    }
+    my $spec = eval {
+        open my $fh, '<', $OPENAPI_PATH or die "cannot read: $!";
+        local $/;
+        decode_json(scalar <$fh>);
+    };
+    if ($@ || !$spec) {
+        _send_error($conn, 500, 'server error', "cannot parse base spec: $@");
+        return;
+    }
+
+    # Hostnames: always from registry (no network)
+    my $hostnames = Dispatcher::Registry::list_hostnames();
+
+    # Script names: live capabilities scan; unreachable hosts silently omitted
+    my @scripts;
+    if (@$hostnames) {
+        my $results = Dispatcher::Engine::capabilities_all(
+            hosts  => $hostnames,
+            config => $config,
+        );
+        my %seen;
+        for my $r (@$results) {
+            next unless ($r->{status} // '') eq 'ok';
+            next unless ref $r->{scripts} eq 'ARRAY';
+            for my $s (@{ $r->{scripts} }) {
+                my $name = $s->{name} or next;
+                $seen{$name}++ unless $seen{$name};
+            }
+        }
+        @scripts = sort keys %seen;
+    }
+
+    # Inject enum values into the spec
+    # hosts field appears in /ping, /run, /discovery request bodies
+    for my $path_key (qw(/ping /run /discovery)) {
+        for my $method_key (qw(post get)) {
+            my $op = $spec->{paths}{$path_key}{$method_key} or next;
+            my $body_schema = eval {
+                $op->{requestBody}{content}{'application/json'}{schema}
+            } or next;
+            # Resolve $ref if needed
+            if (my $ref = $body_schema->{'$ref'}) {
+                my $name = (split '/', $ref)[-1];
+                $body_schema = $spec->{components}{schemas}{$name} or next;
+            }
+            if (ref $body_schema->{properties}{hosts} eq 'HASH') {
+                $body_schema->{properties}{hosts}{items}{enum} =
+                    @$hostnames ? $hostnames : undef;
+            }
+        }
+    }
+
+    # script field in /run
+    if (@scripts) {
+        my $run_schema_name = eval {
+            my $ref = $spec->{paths}{'/run'}{post}{requestBody}
+                          {content}{'application/json'}{schema}{'$ref'};
+            (split '/', $ref)[-1];
+        };
+        if ($run_schema_name &&
+            ref $spec->{components}{schemas}{$run_schema_name} eq 'HASH') {
+            $spec->{components}{schemas}{$run_schema_name}
+                  {properties}{script}{enum} = \@scripts;
+        }
+    }
+
+    # Stamp live version: base_version+epoch
+    my $base_version = $spec->{info}{version} // $VERSION;
+    $base_version =~ s/\+\d+$//;   # strip any previous epoch suffix
+    $spec->{info}{version} = $base_version . '+' . time();
+
+    my $body = encode_json($spec);
+    print $conn
+        "HTTP/1.0 200 OK\r\n",
+        "Content-Type: application/json\r\n",
+        "Content-Length: ", length($body), "\r\n",
+        "\r\n",
+        $body;
 }
 
 sub _parse_body {
