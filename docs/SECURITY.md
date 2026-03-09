@@ -283,11 +283,14 @@ mTLS connection, after the handshake verifies the CA signature, the peer cert
 serial is checked against this list. A revoked cert is rejected with a 403
 and a syslog warning before any request is processed.
 
-The file contains one lowercase hex serial per line, in the format output by:
+The file contains one serial per line. All of the following formats are accepted
+and normalised to lowercase hex on load:
 
-```bash
-openssl x509 -noout -serial -in /path/to/cert.crt
-```
+- Plain hex: `deadbeef`
+- Colon-separated: `DE:AD:BE:EF` (as returned by some tools and `IO::Socket::SSL`)
+- `0x`-prefixed: `0xdeadbeef`
+- `serial=`-prefixed: `serial=DEADBEEF` (direct output of `openssl x509 -serial`)
+- Decimal integer: `3735928559`
 
 Lines beginning with `#` are treated as comments. A missing or empty file means
 no certs are revoked - the normal state for a new installation.
@@ -302,8 +305,8 @@ systemctl reload dispatcher-agent
 To revoke a cert:
 
 1. Obtain the serial: `openssl x509 -noout -serial -in /etc/dispatcher/dispatcher.crt`
-2. Append it (lowercase) to `/etc/dispatcher-agent/revoked-serials` on each
-   affected agent
+2. Append the output directly to `/etc/dispatcher-agent/revoked-serials` on each
+   affected agent - no format conversion needed, `serial=DEADBEEF` is accepted as-is
 3. Reload: `systemctl reload dispatcher-agent`
 
 For fleet-wide revocation, run a dispatcher script that appends the serial and

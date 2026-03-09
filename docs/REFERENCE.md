@@ -371,8 +371,17 @@ Key settings:
 `revoked_serials`
 : Path to a file listing revoked TLS certificate serial numbers, one per line.
   Connections presenting a revoked cert are rejected immediately after the mTLS
-  handshake, before any request is processed. Format: lowercase hex serials, one
-  per line, comments with `#`. Reloaded on SIGHUP without restart.
+  handshake, before any request is processed. Reloaded on SIGHUP without restart.
+
+  Accepted serial formats (all normalised to lowercase hex on load):
+
+  - Plain hex: `deadbeef`
+  - Colon-separated: `DE:AD:BE:EF` (as returned by some tools and `IO::Socket::SSL`)
+  - `0x`-prefixed: `0xdeadbeef`
+  - `serial=`-prefixed: `serial=DEADBEEF` (as output by `openssl x509 -serial`)
+  - Decimal integer: `3735928559`
+
+  Lines beginning with `#` are treated as comments.
 
   Default: `/etc/dispatcher-agent/revoked-serials`. A missing or empty file
   means no certs are revoked.
