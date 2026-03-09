@@ -103,7 +103,10 @@ sub mode_serve {
     });
 
     while (my $conn = $server->accept) {
-        my $peer = $conn->peerhost // 'unknown';
+        my $peer        = $conn->peerhost // 'unknown';
+        # Read peer cert serial before forking - after the parent closes its
+        # copy of $conn the SSL object becomes invalid in the child.
+        my $peer_serial = _peer_serial($conn);
         my $pid  = fork();
         if (!defined $pid) {
             warn "fork failed: $!\n";
@@ -113,7 +116,7 @@ sub mode_serve {
         if ($pid == 0) {
             # Child: close server socket, handle connection, exit
             $server->close(SSL_no_shutdown => 1);
-            handle_connection($conn, $peer, $allowlist, $config, $revoked, $disp_serial);
+            handle_connection($conn, $peer, $allowlist, $config, $revoked, $disp_serial, $peer_serial);
             $conn->close;
             exit 0;
         }
@@ -222,13 +225,11 @@ sub mode_ping_self {
 # Reads raw HTTP/1.0 request from IO::Socket::SSL, dispatches, sends response.
 
 sub handle_connection {
-    my ($conn, $peer, $allowlist, $config, $revoked, $disp_serial) = @_;
+    my ($conn, $peer, $allowlist, $config, $revoked, $disp_serial, $peer_serial) = @_;
 
-    # Check peer cert serial against the revocation list before any routing.
-    # A revoked cert is rejected regardless of what it would have been allowed
-    # to do. The check happens after the mTLS handshake (which verified the CA
-    # signature) - revocation is a post-authentication deny.
-    my $peer_serial = _peer_serial($conn);
+    # $peer_serial is extracted before fork() in the accept loop - after the
+    # parent closes its copy of $conn the SSL object is invalid in the child.
+    $peer_serial //= '';
 
     if (length $peer_serial &&
         Dispatcher::Agent::Pairing::serial_revoked($peer_serial, $revoked)) {
@@ -276,7 +277,7 @@ sub handle_connection {
         handle_ping($conn, $body, $peer);
     }
     elsif ($method eq 'GET' && $path eq '/capabilities') {
-        handle_capabilities($conn, $peer, $allowlist, $config, $disp_serial);
+        handle_capabilities($conn, $peer, $allowlist, $config, $disp_serial, $peer_serial);
     }
     else {
         _send_raw($conn, 404, encode_json({ error => 'not found' }));
@@ -405,7 +406,9 @@ sub handle_ping {
 }
 
 sub handle_capabilities {
-    my ($conn, $peer, $allowlist, $config, $disp_serial) = @_;
+    my ($conn, $peer, $allowlist, $config, $disp_serial, $peer_serial) = @_;
+
+    $peer_serial //= '';
 
     # Restrict /capabilities to the genuine dispatcher cert.
     # The stored serial was recorded at pairing time from the dispatcher's
@@ -415,10 +418,6 @@ sub handle_capabilities {
     # If no serial is stored (agent not yet paired, or pre-serial-tracking
     # pairing), the check is skipped with a warning. Re-pair to enable it.
     if (length $disp_serial) {
-        my $peer_serial = eval {
-            _peer_serial($conn)
-        } // '';
-
         unless (length $peer_serial && $peer_serial eq $disp_serial) {
             Dispatcher::Log::log_action('WARNING', {
                 ACTION      => 'capabilities-deny',

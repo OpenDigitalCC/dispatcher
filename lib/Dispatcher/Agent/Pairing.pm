@@ -267,8 +267,8 @@ sub load_revoked_serials {
     return \%revoked;
 }
 
-# Return true if the given serial (decimal string from peer_certificate,
-# or hex string) is in the revoked set.
+# Return true if the given serial (lowercase hex from _peer_serial,
+# or any format accepted by serial_to_hex) is in the revoked set.
 # Normalises the input to lowercase hex before checking.
 sub serial_revoked {
     my ($serial, $revoked) = @_;
@@ -289,15 +289,19 @@ sub serial_to_hex {
     $serial =~ s/^0x//i;
     $serial =~ s/^serial=//i;
     $serial = lc $serial;
-    $serial =~ s/://g;    # strip colon separators (e.g. DE:AD:BE:EF from IO::Socket::SSL)
-    # If it contains only hex digits and at least one a-f, already hex
-    if ($serial =~ /[a-f]/) {
+    $serial =~ s/://g;    # strip colon separators (e.g. DE:AD:BE:EF)
+
+    # If it contains only valid hex characters it is already hex.
+    # This covers pure-digit hex serials like "02" or "0a1b" which would
+    # otherwise be mistaken for decimal.
+    if ($serial =~ /\A[0-9a-f]+\z/) {
         return $serial;
     }
-    # Pure decimal - cert serials can be up to 20 bytes (160 bits), requiring
-    # bignum arithmetic. Math::BigInt is a core Perl dependency (libmath-bigint-perl)
-    # and must be present. We do not fall back to sprintf '%x' because Perl's
-    # native integer coercion silently loses precision for large decimal strings.
+
+    # Contains non-hex characters - must be a large decimal string.
+    # Cert serials can be up to 20 bytes (160 bits), requiring bignum
+    # arithmetic. We do not fall back to sprintf '%x' because Perl's native
+    # integer coercion silently loses precision for large decimal strings.
     require Math::BigInt;
     return lc( Math::BigInt->new($serial)->as_hex =~ s/^0x//r );
 }
