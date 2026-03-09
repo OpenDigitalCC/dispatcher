@@ -258,9 +258,8 @@ sub load_revoked_serials {
         $line =~ s/#.*$//;       # strip comments
         $line =~ s/^\s+|\s+$//g; # strip whitespace
         next unless length $line;
-        $line =~ s/^serial=//i;  # strip openssl prefix if present
-        $line = lc $line;
-        next unless $line =~ /^[0-9a-f]+$/;
+        $line = serial_to_hex($line);
+        next unless length $line;
         $revoked{$line} = 1;
     }
     close $fh;
@@ -290,6 +289,7 @@ sub serial_to_hex {
     $serial =~ s/^0x//i;
     $serial =~ s/^serial=//i;
     $serial = lc $serial;
+    $serial =~ s/://g;    # strip colon separators (e.g. DE:AD:BE:EF from IO::Socket::SSL)
     # If it contains only hex digits and at least one a-f, already hex
     if ($serial =~ /[a-f]/) {
         return $serial;
