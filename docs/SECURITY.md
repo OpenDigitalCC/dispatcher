@@ -133,10 +133,13 @@ The auth hook is called before every `run`, `ping`, and API request. It is
 the sole access control policy engine - dispatcher has no built-in ACLs.
 
 Default auth mode
-: When no hook is configured, behaviour is governed by `api_auth_default` in
-  `dispatcher.conf`. The default is `deny` - all requests are rejected. Set
-  to `allow` for isolated networks where credential checking is not needed.
-  This setting has no effect when a hook is configured.
+: When no hook is configured, behaviour depends on the caller. CLI invocations
+  (`dispatcher run`, `dispatcher ping`) unconditionally pass - CLI access is
+  already gated by system user and group permissions. API callers are governed
+  by `api_auth_default` in `dispatcher.conf`. The default is `deny` - all API
+  requests are rejected without a hook. Set to `allow` for isolated networks
+  where credential checking is not needed. This setting has no effect when a
+  hook is configured.
 
 Argument inspection
 : Always use `DISPATCHER_ARGS_JSON` in hook scripts to inspect script

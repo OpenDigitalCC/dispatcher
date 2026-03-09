@@ -163,7 +163,9 @@ List pending pairing requests that have not yet been approved or denied.
 dispatcher list-requests
 ```
 
-Output columns: request ID, hostname, IP, received timestamp.
+Output columns: request ID, hostname, IP, confirmation code, received timestamp.
+Verify the confirmation code matches the 6-digit code displayed on the agent
+before approving.
 
 ---
 
