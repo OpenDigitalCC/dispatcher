@@ -483,8 +483,15 @@ sub _send_raw {
 # out-of-band channel.
 sub _pairing_code {
     my ($csr_pem) = @_;
-    require Digest::SHA;
-    my $digest = Digest::SHA::sha256($csr_pem);
+    # Use openssl for SHA256 - avoids Digest::SHA dependency on minimal
+    # Perl installations (OpenWrt, embedded systems).
+    # Write CSR to a temp file and pipe through openssl dgst -binary.
+    require File::Temp;
+    my ($tmp_fh, $tmp_path) = File::Temp::tempfile(UNLINK => 1);
+    print $tmp_fh $csr_pem;
+    close $tmp_fh;
+    my $digest = `openssl dgst -sha256 -binary \Q$tmp_path\E 2>/dev/null`;
+    die "openssl dgst failed\n" unless length($digest) == 32;
     # Take first 4 bytes as a 32-bit unsigned int, modulo 1,000,000
     my $n = unpack('N', substr($digest, 0, 4)) % 1_000_000;
     return sprintf '%06d', $n;
