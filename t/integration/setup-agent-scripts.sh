@@ -153,6 +153,12 @@ chmod 0755 \
     "$SCRIPT_DIR/sleep-90.sh" \
     "$SCRIPT_DIR/daemonise-test.sh"
 
+# update-dispatcher-serial is installed by the agent installer, not written here.
+# chmod it only if it exists.
+if [ -f "$SCRIPT_DIR/update-dispatcher-serial" ]; then
+    chmod 0755 "$SCRIPT_DIR/update-dispatcher-serial"
+fi
+
 echo "Scripts written to $SCRIPT_DIR"
 
 # --- append allowlist entries if missing ---
@@ -180,23 +186,42 @@ append_if_missing "sleep-15"                 "$SCRIPT_DIR/sleep-15.sh"
 append_if_missing "sleep-90"                 "$SCRIPT_DIR/sleep-90.sh"
 append_if_missing "daemonise-test"           "$SCRIPT_DIR/daemonise-test.sh"
 append_if_missing "dispatcher-demonstrator"  "$SCRIPT_DIR/dispatcher-demonstrator.sh"
+append_if_missing "update-dispatcher-serial" "$SCRIPT_DIR/update-dispatcher-serial"
 # allowlist-reload-check is intentionally NOT added here.
 # Test 09 adds it manually after setup to verify SIGHUP reload works.
 
 # --- reload allowlist ---
 
-if command -v systemctl >/dev/null 2>&1 && systemctl is-active dispatcher-agent >/dev/null 2>&1; then
-    systemctl reload dispatcher-agent 2>/dev/null \
-        || systemctl kill --signal=HUP dispatcher-agent
-    echo "Sent HUP to dispatcher-agent via systemctl - allowlist reloaded"
-elif pgrep -x dispatcher-agent > /dev/null 2>&1; then
-    pkill -HUP -x dispatcher-agent
-    echo "Sent SIGHUP to dispatcher-agent - allowlist reloaded"
-elif pgrep -f 'dispatcher-agent serve' > /dev/null 2>&1; then
-    pkill -HUP -f 'dispatcher-agent serve'
-    echo "Sent SIGHUP to dispatcher-agent - allowlist reloaded"
-else
+reload_agent() {
+    # systemd (Debian)
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active dispatcher-agent >/dev/null 2>&1; then
+        systemctl reload dispatcher-agent 2>/dev/null \
+            || systemctl kill --signal=HUP dispatcher-agent
+        echo "Sent HUP to dispatcher-agent via systemctl - allowlist reloaded"
+        return 0
+    fi
+
+    # procd (OpenWrt)
+    if [ -f /etc/init.d/dispatcher-agent ]; then
+        /etc/init.d/dispatcher-agent reload 2>/dev/null \
+            || /etc/init.d/dispatcher-agent restart
+        echo "Sent reload to dispatcher-agent via procd - allowlist reloaded"
+        return 0
+    fi
+
+    # Portable fallback: find PID via ps, no pkill/pgrep required
+    local pid
+    pid=$(ps 2>/dev/null \
+        | awk '/dispatcher-agent/ && !/awk/ && !/setup-agent/ {print $1; exit}')
+    if [ -n "$pid" ]; then
+        kill -HUP "$pid"
+        echo "Sent SIGHUP to dispatcher-agent (pid $pid) - allowlist reloaded"
+        return 0
+    fi
+
     echo "WARNING: dispatcher-agent not running - start it before testing"
-fi
+}
+
+reload_agent
 
 echo "Done. Verify with: sudo dispatcher-agent ping-self"
