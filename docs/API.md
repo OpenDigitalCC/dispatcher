@@ -20,8 +20,8 @@ dispatcher CLI, as HTTP endpoints with JSON request and response bodies. The
 auth hook and lock checking apply identically to CLI and API requests.
 
 Endpoints: `GET /`, `GET /health`, `POST /ping`, `POST /run`,
-`GET /discovery`, `POST /discovery`, `GET /openapi.json`,
-`GET /openapi-live.json`.
+`GET /discovery`, `POST /discovery`, `GET /status/{reqid}`,
+`GET /openapi.json`, `GET /openapi-live.json`.
 
 The server listens on `api_port` (default 7445). TLS is enabled if `api_cert`
 and `api_key` are set in `dispatcher.conf`; plain HTTP is used otherwise.
@@ -50,6 +50,7 @@ to discover available endpoints and spec URLs programmatically.
     { "method": "POST", "path": "/run"               },
     { "method": "GET",  "path": "/discovery"         },
     { "method": "POST", "path": "/discovery"         },
+    { "method": "GET",  "path": "/status/{reqid}"    },
     { "method": "GET",  "path": "/openapi.json"      },
     { "method": "GET",  "path": "/openapi-live.json" }
   ]
@@ -139,6 +140,7 @@ Response (success):
 ```json
 {
   "ok": true,
+  "reqid": "a1b2c3d4",
   "results": [
     { "host": "db-01", "exit": 0, "stdout": "Backup complete\n", "stderr": "", "rtt": "4210ms", "reqid": "a1b2c3d4" },
     { "host": "db-02", "exit": -1, "error": "read timeout after 60s", "rtt": "60001ms", "reqid": "a1b2c3d5" }
@@ -146,19 +148,57 @@ Response (success):
 }
 ```
 
+`reqid`
+: Request ID at the top level of the response. Matches `REQID` in syslog on
+  both dispatcher and agent. Use to poll `GET /status/{reqid}` or to
+  correlate log entries across both sides.
+
 `exit`
 : Script exit code. 0 = success. Positive = script failure. -1 = dispatcher-side
   failure (connection error, timeout). 126 = killed by signal or exec failed.
-
-`reqid`
-: Request ID. Matches `REQID` in syslog on both dispatcher and agent. Use to
-  correlate output with log entries.
 
 Response (lock conflict):
 
 ```json
 { "ok": false, "error": "locked", "code": 4, "conflicts": ["db-01"] }
 ```
+
+---
+
+### `GET /status/{reqid}`
+
+Returns the stored result for a completed run. Results are persisted to
+`/var/lib/dispatcher/runs/<reqid>.json` for 24 hours after the run
+completes, then purged.
+
+This endpoint supports an async polling pattern: submit a run with
+`POST /run`, record the top-level `reqid`, then poll
+`GET /status/{reqid}` at a suitable interval. The calling programme
+controls the polling logic; there is no push or callback mechanism.
+
+Response (found):
+
+```json
+{
+  "ok": true,
+  "reqid": "a1b2c3d4",
+  "script": "pg-backup",
+  "hosts": ["db-01", "db-02"],
+  "completed": 1737123456,
+  "results": [
+    { "host": "db-01", "exit": 0, "stdout": "Backup complete\n", "stderr": "", "rtt": "4210ms", "reqid": "a1b2c3d4" }
+  ]
+}
+```
+
+`completed`
+: Unix timestamp of when the run completed and the result was stored.
+
+Response (not found): 404 with `{ ok: false, error: "not found", detail: "no result for reqid <id>" }`.
+
+A 404 means either the reqid never existed, the result has been purged
+after 24 hours, or the run was submitted before this version of the API
+was deployed (earlier versions did not persist results).
 
 ---
 
@@ -205,7 +245,7 @@ Results are keyed by hostname for direct lookup.
 200   Success
 400   Bad request (missing body, invalid JSON, missing required field)
 403   Auth denied
-404   Unknown route
+404   Unknown route or unknown/expired reqid (status endpoint)
 409   Lock conflict
 500   Server error
 ```
