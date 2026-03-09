@@ -1,7 +1,7 @@
 ---
 title: Dispatcher
 subtitle: Perl machine-to-machine remote script execution over mTLS
-brand: odcc
+brand: cloudient
 ---
 
 # Dispatcher
@@ -21,6 +21,8 @@ guarantees and a minimal attack surface.
 dispatcher (control host)
 : CLI tool and optional HTTP API. Connects to agents, sends signed requests,
   collects results. Manages the private CA, agent registry, and cert lifecycle.
+  The API server exposes run, ping, discovery, and status endpoints with an
+  OpenAPI spec (static and live-generated).
 
 dispatcher-agent (remote hosts)
 : mTLS HTTPS server on port 7443. Executes only scripts named in a per-host
@@ -46,11 +48,24 @@ automatic cert renewal
   during normal operation.
 
 
+## Ecosystem
+
+[dispatcher-plugins](https://github.com/OpenDigitalCC/dispatcher-plugins)
+: A companion repository providing ready-built plugins across three
+  categories: management interfaces for the HTTP API and CLI, agent scripts
+  covering common infrastructure tasks, and auth hooks integrating dispatcher
+  with external identity systems. Each plugin is self-contained.
+
+
 ## Documents
 
 `INSTALL.md`
 : Platform requirements, installer flags, initial setup, all configuration
   options, operational reference, troubleshooting.
+
+`API.md`
+: HTTP API reference. All endpoints, request and response schemas, error
+  codes, OpenAPI spec endpoints, and the run result status store.
 
 `DOCKER.md`
 : Deploying dispatcher and agents in Alpine Docker containers, including
