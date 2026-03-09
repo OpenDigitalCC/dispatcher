@@ -80,26 +80,30 @@ for test_file in "${TESTS[@]}"; do
 
     # Source rather than bash so the AGENTS array is inherited.
     # Each test file calls summary() which returns non-zero on failure.
-    # Reset per-file counters before sourcing. A trap on EXIT writes counts
-    # to a tempfile before the subshell exits (whether normally or via set -e),
-    # allowing the runner to read them back for the summary table.
+    # Reset per-file counters before sourcing.
+    #
+    # Counter extraction: tee test output to a tempfile and parse the
+    # "Results: N passed, N failed, N skipped" line that summary() always
+    # prints. This is robust against EXIT trap overwrites (e.g. 10-timeout-
+    # behaviour.sh sets trap cleanup EXIT) and lib.sh re-sourcing.
+    # pipefail ensures the subshell RC propagates through the tee pipeline.
     _PASS=0; _FAIL=0; _SKIP=0
-    _counts_file=$(mktemp)
-    if (
-        trap 'printf "%d %d %d" "$_PASS" "$_FAIL" "$_SKIP" > "'"$_counts_file"'"' EXIT
-        source "$test_file"
-    ); then
+    _out_file=$(mktemp)
+    if ( source "$test_file" ) 2>&1 | tee "$_out_file"; then
         PASS_FILES=$((PASS_FILES + 1))
         _row_status="PASS"
     else
         FAIL_FILES=$((FAIL_FILES + 1))
         _row_status="FAIL"
     fi
-    # Read counts back from tempfile written by the subshell trap
-    if [ -s "$_counts_file" ]; then
-        read -r _PASS _FAIL _SKIP < "$_counts_file"
+    # Parse the Results line written by summary() - use sed to avoid grep -P
+    _results_line=$(grep "Results:" "$_out_file" | tail -1 | sed "s/\x1b\[[0-9;]*m//g")
+    if [ -n "$_results_line" ]; then
+        _PASS=$(echo "$_results_line" | sed "s/.*Results: *\([0-9]*\) passed.*/\1/")
+        _FAIL=$(echo "$_results_line" | sed "s/.* \([0-9]*\) failed.*/\1/")
+        _SKIP=$(echo "$_results_line" | sed "s/.* \([0-9]*\) skipped.*/\1/")
     fi
-    rm -f "$_counts_file"
+    rm -f "$_out_file"
     # Derive a short label from filename: strip leading digits, dashes, .sh
     _label=$(basename "$test_file" .sh | sed 's/^[0-9]*-//')
     _SUMMARY_ROWS+=("${_label}|${_PASS}|${_FAIL}|${_SKIP}|${_row_status}")
