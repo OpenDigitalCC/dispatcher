@@ -159,6 +159,7 @@ create_system_user() {
     else
         useradd --system --no-create-home \
             --shell /usr/sbin/nologin \
+            --gid "$group" \
             --comment "$comment" \
             "$user"
     fi
