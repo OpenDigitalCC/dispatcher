@@ -228,7 +228,7 @@ sub handle_connection {
     # A revoked cert is rejected regardless of what it would have been allowed
     # to do. The check happens after the mTLS handshake (which verified the CA
     # signature) - revocation is a post-authentication deny.
-    my $peer_serial = eval { $conn->peer_certificate('serialNumber') } // '';
+    my $peer_serial = _peer_serial($conn);
 
     if (length $peer_serial &&
         Dispatcher::Agent::Pairing::serial_revoked($peer_serial, $revoked)) {
@@ -416,9 +416,7 @@ sub handle_capabilities {
     # pairing), the check is skipped with a warning. Re-pair to enable it.
     if (length $disp_serial) {
         my $peer_serial = eval {
-            Dispatcher::Agent::Pairing::serial_to_hex(
-                $conn->peer_certificate('serialNumber') // ''
-            )
+            _peer_serial($conn)
         } // '';
 
         unless (length $peer_serial && $peer_serial eq $disp_serial) {
@@ -462,6 +460,20 @@ sub handle_capabilities {
         version => $VERSION,
         scripts => \@scripts,
     });
+}
+
+# Extract the peer certificate serial number from an IO::Socket::SSL
+# connection as a lowercase hex string.
+# IO::Socket::SSL's peer_certificate('serialNumber') is not supported in
+# all versions - use Net::SSLeay directly to read the ASN1 integer.
+# Returns '' if no peer cert or serial cannot be read.
+sub _peer_serial {
+    my ($conn) = @_;
+    my $ssl  = eval { $conn->_get_ssl_object } or return '';
+    my $cert = eval { Net::SSLeay::get_peer_certificate($ssl) } or return '';
+    my $asn1 = eval { Net::SSLeay::X509_get_serialNumber($cert) } or return '';
+    my $hex  = eval { Net::SSLeay::P_ASN1_INTEGER_get_hex($asn1) } // '';
+    return lc $hex;
 }
 
 sub _send_json {

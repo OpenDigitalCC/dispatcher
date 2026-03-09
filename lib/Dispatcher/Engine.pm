@@ -443,11 +443,20 @@ sub _capabilities_one {
 sub _build_ua {
     my ($config) = @_;
     require LWP::UserAgent;
+    require IO::Socket::SSL;
+
+    # LWP's ssl_opts hash does not pass SSL_cert_file/SSL_key_file through
+    # to IO::Socket::SSL for client cert presentation. Set them as global
+    # SSL defaults so every outbound connection uses the dispatcher cert.
+    IO::Socket::SSL::set_defaults(
+        SSL_cert_file   => $config->{cert},
+        SSL_key_file    => $config->{key},
+        SSL_ca_file     => $config->{ca},
+        SSL_verify_mode => 0x01,
+    );
 
     my $ua = LWP::UserAgent->new(
         ssl_opts => {
-            SSL_cert_file   => $config->{cert},
-            SSL_key_file    => $config->{key},
             SSL_ca_file     => $config->{ca},
             SSL_verify_mode => 0x01,
             verify_hostname => 0,   # verified by CA, not hostname
