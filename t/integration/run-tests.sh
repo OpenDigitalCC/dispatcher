@@ -67,6 +67,9 @@ fi
 PASS_FILES=0
 FAIL_FILES=0
 
+# Per-file result records: "label|pass|fail|skip|status"
+declare -a _SUMMARY_ROWS=()
+
 for test_file in "${TESTS[@]}"; do
     printf '\n'
     printf '#%.0s' {1..60}
@@ -77,17 +80,45 @@ for test_file in "${TESTS[@]}"; do
 
     # Source rather than bash so the AGENTS array is inherited.
     # Each test file calls summary() which returns non-zero on failure.
-    # Reset per-file counters before sourcing.
+    # Reset per-file counters before sourcing. A trap on EXIT writes counts
+    # to a tempfile before the subshell exits (whether normally or via set -e),
+    # allowing the runner to read them back for the summary table.
     _PASS=0; _FAIL=0; _SKIP=0
-    if ( source "$test_file" ); then
+    _counts_file=$(mktemp)
+    if (
+        trap 'printf "%d %d %d" "$_PASS" "$_FAIL" "$_SKIP" > "'"$_counts_file"'"' EXIT
+        source "$test_file"
+    ); then
         PASS_FILES=$((PASS_FILES + 1))
+        _row_status="PASS"
     else
         FAIL_FILES=$((FAIL_FILES + 1))
+        _row_status="FAIL"
     fi
+    # Read counts back from tempfile written by the subshell trap
+    if [ -s "$_counts_file" ]; then
+        read -r _PASS _FAIL _SKIP < "$_counts_file"
+    fi
+    rm -f "$_counts_file"
+    # Derive a short label from filename: strip leading digits, dashes, .sh
+    _label=$(basename "$test_file" .sh | sed 's/^[0-9]*-//')
+    _SUMMARY_ROWS+=("${_label}|${_PASS}|${_FAIL}|${_SKIP}|${_row_status}")
 done
 
+# --- Summary table ---
 printf '\n'
 printf '=%.0s' {1..60}
+printf '\n'
+printf '%-32s  %4s  %4s  %4s  %s\n' "Test file" "PASS" "FAIL" "SKIP" "Status"
+printf '%-32s  %4s  %4s  %4s  %s\n' "$(printf '%.0s-' {1..32})" "----" "----" "----" "------"
+for _row in "${_SUMMARY_ROWS[@]}"; do
+    IFS='|' read -r _lbl _p _f _s _st <<< "$_row"
+    if [ "$_st" = "FAIL" ]; then
+        _red   "$(printf '%-32s  %4s  %4s  %4s  %s' "$_lbl" "$_p" "$_f" "$_s" "$_st")"
+    else
+        _green "$(printf '%-32s  %4s  %4s  %4s  %s' "$_lbl" "$_p" "$_f" "$_s" "$_st")"
+    fi
+done
 printf '\n'
 printf 'Suite complete: %d test files passed, %d failed\n' "$PASS_FILES" "$FAIL_FILES"
 printf '=%.0s' {1..60}
