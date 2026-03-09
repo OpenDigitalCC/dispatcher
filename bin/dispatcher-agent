@@ -412,7 +412,7 @@ sub handle_capabilities {
     # pairing), the check is skipped with a warning. Re-pair to enable it.
     if (length $disp_serial) {
         my $peer_serial = eval {
-            Dispatcher::Agent::Pairing::_serial_to_hex(
+            Dispatcher::Agent::Pairing::serial_to_hex(
                 $conn->peer_certificate('serialNumber') // ''
             )
         } // '';

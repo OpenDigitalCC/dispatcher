@@ -106,19 +106,21 @@ sub expire_stale_agents {
     my (%opts) = @_;
     my $config = $opts{config} or croak "config required";
 
-    my $state = load_state();
-    return unless $state && $state->{overlap_expires};
+    my $state = load_state(path => $config->{rotation_file});
 
     my $now     = time();
     my $expires = _parse_iso8601($state->{overlap_expires});
     return unless defined $expires && $now > $expires;
 
-    my $agents = Dispatcher::Registry::list_agents();
+    my $agents = Dispatcher::Registry::list_agents(
+        registry_dir => $config->{registry_dir},
+    );
     for my $agent (@$agents) {
         next unless ($agent->{serial_status} // '') eq 'pending';
         Dispatcher::Registry::update_agent_serial_status(
-            hostname => $agent->{hostname},
-            status   => 'stale',
+            hostname     => $agent->{hostname},
+            status       => 'stale',
+            registry_dir => $config->{registry_dir},
         );
         Dispatcher::Log::log_action('WARNING', {
             ACTION   => 'serial-stale',
@@ -140,13 +142,15 @@ sub broadcast_serial {
     my (%opts) = @_;
     my $config = $opts{config} or croak "config required";
 
-    my $state = load_state();
+    my $state = load_state(path => $config->{rotation_file});
     unless ($state && $state->{current_serial}) {
         return [];
     }
 
     my $serial  = $state->{current_serial};
-    my $agents  = Dispatcher::Registry::list_agents();
+    my $agents  = Dispatcher::Registry::list_agents(
+        registry_dir => $config->{registry_dir},
+    );
     my @pending = grep {
         my $s = $_->{serial_status} // 'unknown';
         $s eq 'pending' || $s eq 'unknown'
@@ -185,10 +189,11 @@ sub broadcast_serial {
         my $host = $r->{host};
         if (($r->{exit} // -1) == 0) {
             Dispatcher::Registry::update_agent_serial_status(
-                hostname        => $host,
-                status          => 'current',
-                serial          => $serial,
+                hostname         => $host,
+                status           => 'current',
+                serial           => $serial,
                 serial_confirmed => _now_iso8601(),
+                registry_dir     => $config->{registry_dir},
             );
             push @report, { hostname => $host, status => 'ok' };
             Dispatcher::Log::log_action('INFO', {
@@ -251,7 +256,9 @@ sub run_check_loop {
         }
         else {
             # No rotation needed - retry any pending agents on each check
-            my $agents   = Dispatcher::Registry::list_agents();
+            my $agents   = Dispatcher::Registry::list_agents(
+                registry_dir => $config->{registry_dir},
+            );
             my @pending  = grep { ($_->{serial_status} // '') eq 'pending' } @$agents;
             if (@pending) {
                 eval { broadcast_serial(config => $config) };
@@ -311,7 +318,8 @@ sub _do_rotation {
                           gmtime(time() + $overlap_secs));
 
     # Persist rotation state
-    _write_atomic($ROTATION_FILE, encode_json({
+    my $rotation_file = $config->{rotation_file} // $ROTATION_FILE;
+    _write_atomic($rotation_file, encode_json({
         current_serial   => $new_serial,
         previous_serial  => $old_serial,
         rotated_at       => $now,
@@ -329,12 +337,15 @@ sub _do_rotation {
     # The expected rotation sequence is: rotate cert → broadcast serial →
     # agents reload → capabilities restored. The overlap window only matters
     # for agents that were offline during the broadcast.
-    my $agents = Dispatcher::Registry::list_agents();
+    my $agents = Dispatcher::Registry::list_agents(
+        registry_dir => $config->{registry_dir},
+    );
     for my $agent (@$agents) {
         Dispatcher::Registry::update_agent_serial_status(
-            hostname => $agent->{hostname},
-            status   => 'pending',
+            hostname         => $agent->{hostname},
+            status           => 'pending',
             serial_broadcast => $now,
+            registry_dir     => $config->{registry_dir},
         );
     }
 
