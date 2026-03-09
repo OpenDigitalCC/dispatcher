@@ -16,6 +16,15 @@ use Dispatcher::Registry qw();
 my $RUNS_DIR     = '/var/lib/dispatcher/runs';
 my $RUNS_TTL     = 86400;    # seconds; results older than this are purged
 my $OPENAPI_PATH = '/usr/local/lib/dispatcher/Dispatcher/openapi.json';
+my $VERSION_FILE = '/usr/local/lib/dispatcher/VERSION';
+
+my $VERSION = do {
+    if (open my $fh, '<', $VERSION_FILE) {
+        my $v = <$fh>; chomp $v; $v;
+    } else {
+        'unknown';
+    }
+};
 
 
 # Start the API server. Blocks until SIGTERM or SIGINT.
