@@ -27,6 +27,7 @@ SCRIPTS_DIR="/opt/dispatcher-scripts"
 PAIRING_DIR="/var/lib/dispatcher/pairing"
 AGENTS_DIR="/var/lib/dispatcher/agents"
 LOCKS_DIR="/var/lib/dispatcher/locks"
+RUNS_DIR="/var/lib/dispatcher/runs"
 SYSTEMD_DIR="/etc/systemd/system"
 AGENT_SERVICE="dispatcher-agent.service"
 API_SERVICE="dispatcher-api.service"
@@ -554,6 +555,10 @@ install_dispatcher() {
     chown root:"$DISPATCHER_GROUP" "$LOCKS_DIR"
     chmod 770 "$LOCKS_DIR"
 
+    mkdir -p "$RUNS_DIR"
+    chown root:"$DISPATCHER_GROUP" "$RUNS_DIR"
+    chmod 770 "$RUNS_DIR"
+
     # Dispatcher config
     if [[ ! -f "$DISPATCHER_CONF_DIR/dispatcher.conf" ]]; then
         safe_install 640 "$SOURCE_DIR/etc/dispatcher.conf.example" "$DISPATCHER_CONF_DIR/dispatcher.conf"
@@ -584,15 +589,6 @@ install_api() {
         "$BIN_DIR/dispatcher-api"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
         "$BIN_DIR/dispatcher-api"
-
-    # Stamp version into the OpenAPI spec
-    local spec="$LIB_DIR/Dispatcher/openapi.json"
-    if [[ -f "$spec" ]]; then
-        sed -i "s|\"version\": \"[^\"]*\"|\"version\": \"$RELEASE_VERSION\"|" "$spec"
-        info "openapi.json version stamped: $RELEASE_VERSION"
-    else
-        warn "openapi.json not found at $spec - spec endpoint will return 404"
-    fi
 
     install_service_unit "$API_SERVICE"
 
@@ -641,6 +637,12 @@ uninstall() {
     if [[ -d "$LOCKS_DIR" ]]; then
         rm -rf "$LOCKS_DIR"
         info "Removed $LOCKS_DIR"
+    fi
+
+    # Remove run result store (transient, not config)
+    if [[ -d "$RUNS_DIR" ]]; then
+        rm -rf "$RUNS_DIR"
+        info "Removed $RUNS_DIR"
     fi
 
     for f in "${files[@]}"; do

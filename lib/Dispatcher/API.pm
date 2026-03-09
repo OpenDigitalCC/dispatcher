@@ -13,6 +13,10 @@ use Dispatcher::Auth     qw();
 use Dispatcher::Lock     qw();
 use Dispatcher::Registry qw();
 
+my $RUNS_DIR     = '/var/lib/dispatcher/runs';
+my $RUNS_TTL     = 86400;    # seconds; results older than this are purged
+my $OPENAPI_PATH = '/usr/local/lib/dispatcher/Dispatcher/openapi.json';
+
 
 # Start the API server. Blocks until SIGTERM or SIGINT.
 #
@@ -162,7 +166,7 @@ sub _handle_connection {
         _handle_index($conn, $config);
     }
     elsif ($path eq '/openapi.json' && $method eq 'GET') {
-        _handle_openapi($conn, $config);
+        _handle_openapi($conn);
     }
     elsif ($path eq '/openapi-live.json' && $method eq 'GET') {
         _handle_openapi_live($conn, $peer, $config);
@@ -178,6 +182,9 @@ sub _handle_connection {
     }
     elsif ($path eq '/discovery' && $method =~ /^(GET|POST)$/) {
         _handle_discovery($conn, $peer, $body, $config);
+    }
+    elsif ($path =~ m{^/status/([a-f0-9]+)$} && $method eq 'GET') {
+        _handle_status($conn, $1);
     }
     else {
         _send_error($conn, 404, 'not found', "no route for $method $path");
@@ -286,14 +293,20 @@ sub _handle_run {
         return;
     }
 
+    my $reqid = Dispatcher::Engine::gen_reqid();
     my $results = Dispatcher::Engine::dispatch_all(
-        hosts  => $hosts,
-        script => $script,
-        args   => $args,
-        config => $config,
+        hosts    => $hosts,
+        script   => $script,
+        args     => $args,
+        reqid    => $reqid,
+        username => $username,
+        token    => $token,
+        config   => $config,
     );
 
-    _send_json($conn, 200, { ok => JSON::true, results => $results });
+    _store_run_result($reqid, $script, $hosts, $results);
+
+    _send_json($conn, 200, { ok => JSON::true, reqid => $reqid, results => $results });
 }
 
 sub _handle_discovery {
@@ -365,16 +378,15 @@ sub _handle_index {
             { method => 'POST', path => '/run'               },
             { method => 'GET',  path => '/discovery'         },
             { method => 'POST', path => '/discovery'         },
+            { method => 'GET',  path => '/status/{reqid}'    },
             { method => 'GET',  path => '/openapi.json'      },
             { method => 'GET',  path => '/openapi-live.json' },
         ],
     });
 }
 
-my $OPENAPI_PATH = '/usr/local/lib/dispatcher/Dispatcher/openapi.json';
-
 sub _handle_openapi {
-    my ($conn, $config) = @_;
+    my ($conn) = @_;
     unless (-f $OPENAPI_PATH) {
         _send_error($conn, 404, 'not found', 'openapi.json not installed');
         return;
@@ -395,7 +407,6 @@ sub _handle_openapi {
 sub _handle_openapi_live {
     my ($conn, $peer, $config) = @_;
 
-    # Load the base spec from disk
     unless (-f $OPENAPI_PATH) {
         _send_error($conn, 404, 'not found', 'openapi.json not installed');
         return;
@@ -410,10 +421,8 @@ sub _handle_openapi_live {
         return;
     }
 
-    # Hostnames: always from registry (no network)
     my $hostnames = Dispatcher::Registry::list_hostnames();
 
-    # Script names: live capabilities scan; unreachable hosts silently omitted
     my @scripts;
     if (@$hostnames) {
         my $results = Dispatcher::Engine::capabilities_all(
@@ -426,21 +435,18 @@ sub _handle_openapi_live {
             next unless ref $r->{scripts} eq 'ARRAY';
             for my $s (@{ $r->{scripts} }) {
                 my $name = $s->{name} or next;
-                $seen{$name}++ unless $seen{$name};
+                $seen{$name} = 1;
             }
         }
         @scripts = sort keys %seen;
     }
 
-    # Inject enum values into the spec
-    # hosts field appears in /ping, /run, /discovery request bodies
     for my $path_key (qw(/ping /run /discovery)) {
         for my $method_key (qw(post get)) {
             my $op = $spec->{paths}{$path_key}{$method_key} or next;
             my $body_schema = eval {
                 $op->{requestBody}{content}{'application/json'}{schema}
             } or next;
-            # Resolve $ref if needed
             if (my $ref = $body_schema->{'$ref'}) {
                 my $name = (split '/', $ref)[-1];
                 $body_schema = $spec->{components}{schemas}{$name} or next;
@@ -452,7 +458,6 @@ sub _handle_openapi_live {
         }
     }
 
-    # script field in /run
     if (@scripts) {
         my $run_schema_name = eval {
             my $ref = $spec->{paths}{'/run'}{post}{requestBody}
@@ -466,9 +471,8 @@ sub _handle_openapi_live {
         }
     }
 
-    # Stamp live version: base_version+epoch
     my $base_version = $spec->{info}{version} // $VERSION;
-    $base_version =~ s/\+\d+$//;   # strip any previous epoch suffix
+    $base_version =~ s/\+\d+$//;
     $spec->{info}{version} = $base_version . '+' . time();
 
     my $body = encode_json($spec);
@@ -478,6 +482,83 @@ sub _handle_openapi_live {
         "Content-Length: ", length($body), "\r\n",
         "\r\n",
         $body;
+}
+
+sub _handle_status {
+    my ($conn, $reqid) = @_;
+
+    _purge_old_runs();
+
+    my $file = "$RUNS_DIR/$reqid.json";
+    unless (-f $file) {
+        _send_error($conn, 404, 'not found', "no result for reqid $reqid");
+        return;
+    }
+
+    open my $fh, '<', $file
+        or do { _send_error($conn, 500, 'server error', "cannot read result: $!"); return; };
+    local $/;
+    my $raw = <$fh>;
+    close $fh;
+
+    my $record = eval { decode_json($raw) };
+    if ($@ || !$record) {
+        _send_error($conn, 500, 'server error', 'corrupt result record');
+        return;
+    }
+
+    _send_json($conn, 200, { ok => JSON::true, %$record });
+}
+
+sub _store_run_result {
+    my ($reqid, $script, $hosts, $results) = @_;
+
+    unless (-d $RUNS_DIR) {
+        eval { File::Path::make_path($RUNS_DIR, { mode => 0750 }) };
+        if ($@) {
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION => 'run-store-fail',
+                REQID  => $reqid,
+                ERROR  => "cannot create $RUNS_DIR: $@",
+            });
+            return;
+        }
+    }
+
+    my $record = encode_json({
+        reqid     => $reqid,
+        script    => $script,
+        hosts     => $hosts,
+        results   => $results,
+        completed => time(),
+    });
+
+    my $file = "$RUNS_DIR/$reqid.json";
+    if (open my $fh, '>', $file) {
+        print $fh $record;
+        close $fh;
+        chmod 0640, $file;
+    }
+    else {
+        Dispatcher::Log::log_action('WARNING', {
+            ACTION => 'run-store-fail',
+            REQID  => $reqid,
+            ERROR  => "cannot write $file: $!",
+        });
+    }
+}
+
+sub _purge_old_runs {
+    return unless -d $RUNS_DIR;
+    my $cutoff = time() - $RUNS_TTL;
+    opendir my $dh, $RUNS_DIR or return;
+    while (my $entry = readdir $dh) {
+        next unless $entry =~ /^[a-f0-9]+\.json$/;
+        my $file = "$RUNS_DIR/$entry";
+        my $mtime = (stat $file)[9] // 0;
+        unlink $file if $mtime < $cutoff;
+    }
+    closedir $dh;
 }
 
 sub _parse_body {
