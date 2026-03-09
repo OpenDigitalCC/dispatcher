@@ -152,7 +152,11 @@ sub mode_request_pairing {
 
     unless ($result->{ok}) {
         my $err = $result->{error} // 'unknown error';
-        if ($err =~ /IO::Socket::IP configuration failed|connect failed|connection refused/i) {
+        if ($err =~ /IO::Socket::IP configuration failed|Name or service not known|Temporary failure in name resolution/i) {
+            die "Pairing failed: could not resolve dispatcher hostname '$dispatcher'.\n"
+              . "Check the hostname is correct or use an IP address instead.\n";
+        }
+        if ($err =~ /connect failed|connection refused|No route to host/i) {
             die "Pairing failed: could not connect to dispatcher at $dispatcher.\n"
               . "Check the dispatcher address is correct and pairing mode is active:\n"
               . "  sudo dispatcher pairing-mode\n";
