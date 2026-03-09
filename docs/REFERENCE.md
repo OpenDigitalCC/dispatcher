@@ -103,25 +103,9 @@ DISPATCHER_TOKEN=mytoken dispatcher run web-01 deploy-app
 dispatcher run web-01 deploy-app --json
 ```
 
-Output shows per-host status, exit code, round-trip time, request ID, stdout, and stderr.
+Output shows per-host status, exit code, round-trip time, stdout, and stderr.
 Exit code is 0 if all hosts succeeded, 1 if any host failed or returned
 a non-zero exit.
-
-The request ID (`req:`) in the output header matches the `REQID` field in
-syslog on both the dispatcher and agent. Use it to correlate CLI output with
-log entries:
-
-```bash
-grep REQID=a1b2c3d4 /var/log/syslog
-```
-
-The dispatcher waits up to `read_timeout` seconds (default 60) for each
-script to complete. Scripts that exceed this are reported as
-`read timeout after Ns`. Set `read_timeout` in `dispatcher.conf` to adjust:
-
-```
-read_timeout = 120
-```
 
 ---
 
@@ -245,6 +229,45 @@ Writes to `/etc/dispatcher/`. Does not overwrite existing credentials.
 
 ---
 
+## dispatcher.conf
+
+Configuration file for the dispatcher and dispatcher-api processes.
+Default path: `/etc/dispatcher/dispatcher.conf`.
+
+Key settings:
+
+`cert`, `key`, `ca`
+: Paths to the dispatcher's TLS certificate, private key, and CA
+  certificate. Required for all mTLS operations.
+
+`read_timeout`
+: How long (in seconds) the dispatcher waits for a response from an agent
+  before reporting a timeout error. Default: 60. The script continues
+  running on the agent after a timeout - only the dispatcher's ability to
+  receive the output is affected. Raise this value for scripts that are
+  expected to take longer than 60 seconds.
+
+  ```
+  read_timeout = 120
+  ```
+
+`timeout`
+: Deprecated alias for `read_timeout`. Accepted for backward compatibility.
+
+`api_port`
+: Port for the `dispatcher-api` HTTP server. Default: 7445.
+
+`api_cert`, `api_key`
+: TLS certificate and key for the API server. If both are present and
+  readable, the API server uses TLS. If absent, plain HTTP is used.
+
+`auth_hook`
+: Path to an executable called before every `run` and `ping` operation.
+  Receives request context as JSON on stdin. See INSTALL.md for the full
+  interface contract.
+
+---
+
 ## dispatcher-agent
 
 The `dispatcher-agent` binary runs on each managed host. It serves the
@@ -287,7 +310,11 @@ a supported init system.
 The agent reloads `scripts.conf` on SIGHUP without restarting:
 
 ```bash
-kill -HUP $(pgrep -f dispatcher-agent)
+# On systemd hosts (preferred)
+systemctl reload dispatcher-agent
+
+# On systems without systemd
+kill -HUP $(pidof dispatcher-agent)
 ```
 
 ---
@@ -352,22 +379,106 @@ configuration changes to confirm the agent will start cleanly.
 
 ---
 
+## dispatcher-api
+
+The `dispatcher-api` binary exposes the dispatcher's run, ping, and
+discovery operations as an HTTP REST API. It is installed as a systemd
+service (`dispatcher-api.service`) and listens on `api_port` (default 7445).
+
+Start manually for testing:
+
+```bash
+dispatcher-api --config /etc/dispatcher/dispatcher.conf
+```
+
+TLS is enabled if `api_cert` and `api_key` are set in `dispatcher.conf`
+and the files exist. Plain HTTP is used otherwise.
+
+Full endpoint documentation is in API.md. Summary:
+
+`GET /`
+: Returns a JSON index of all endpoints and spec URLs. No auth required.
+
+`GET /health`
+: Returns `{ ok: true, version: "..." }`. Use for liveness checks.
+
+`POST /ping`
+: Body: `{ hosts, username?, token? }`. Pings all specified hosts in parallel.
+
+`POST /run`
+: Body: `{ hosts, script, args?, username?, token? }`. Runs an allowlisted
+  script on all specified hosts. Returns results including a top-level
+  `reqid` for status polling and syslog correlation.
+
+`GET /discovery` or `POST /discovery`
+: Returns registered agents and their allowlisted scripts. Optional body:
+  `{ hosts?, username?, token? }`.
+
+`GET /status/{reqid}`
+: Returns the stored result for a completed run. Results are retained for
+  24 hours. Returns 404 if the reqid is unknown or has expired.
+
+`GET /openapi.json`
+: Serves the static OpenAPI 3.1 spec as installed.
+
+`GET /openapi-live.json`
+: Generates and serves a dynamic spec augmented with live host and script
+  enumerations from the registry and a capabilities scan.
+
+HTTP status codes: 200 success, 400 bad request, 403 auth denied, 404 not
+found, 409 lock conflict, 500 server error.
+
+---
+
 ## Syslog
 
 Both binaries log structured key=value records to syslog under the
 `daemon` facility. The agent logs script execution under the tag
 `dispatcher-agent`; scripts themselves may log under any tag they choose.
 
-Key fields logged on `run`:
+Key fields logged on `run` (dispatcher side, logged on response received):
 
 ```
-ACTION=run EXIT=<n> PEER=<ip> REQID=<id> SCRIPT=<name>
+ACTION=run EXIT=<n> SCRIPT=<n> TARGET=<host:port> RTT=<ms> REQID=<id>
 ```
+
+Key fields logged on `run` (agent side, logged at script completion):
+
+```
+ACTION=run EXIT=<n> SCRIPT=<n> PEER=<ip> REQID=<id>
+```
+
+The agent logs `ACTION=run` only when the script exits. There is no
+start-of-execution log entry. If the dispatcher's `read_timeout` fires
+before the script exits, the dispatcher logs a timeout error and moves
+on, but the agent logs nothing until the script completes. An operator
+cannot determine from syslog alone that a script is currently running on
+an agent.
 
 Key fields logged on `ping`:
 
 ```
 ACTION=ping STATUS=ok|error PEER=<ip> REQID=<id> RTT=<ms>
+```
+
+Key fields logged on lock events (dispatcher side):
+
+```
+ACTION=lock-acquire SCRIPT=<n> HOST=<host>
+ACTION=lock-release SCRIPT=<n> HOST=<host>
+ACTION=lock-conflict SCRIPT=<n> HOSTS=<host,...>
+```
+
+`lock-acquire` is logged when a dispatch begins. `lock-release` is logged
+when all per-host results have been collected. `lock-conflict` is logged
+when a run is rejected because the script is already locked on one or more
+of the requested hosts.
+
+To correlate a dispatcher log entry with agent log entries, filter both
+sides by `REQID`:
+
+```bash
+grep 'REQID=a1b2c3d4' /var/log/syslog
 ```
 
 See DEVELOPER.md for the full syslog field reference.
@@ -386,8 +497,11 @@ To enable it, uncomment the entry in `/etc/dispatcher-agent/scripts.conf`
 on the agent host and reload the allowlist:
 
 ```bash
-# On the agent host
-kill -HUP $(pgrep -f dispatcher-agent)
+# On systemd hosts (preferred)
+systemctl reload dispatcher-agent
+
+# On systems without systemd
+kill -HUP $(pidof dispatcher-agent)
 ```
 
 Then run the script directly on the agent host to see all available

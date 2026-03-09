@@ -603,11 +603,58 @@ Functions:
 
 ### `Dispatcher::API`
 
-HTTP API server. Full documentation of endpoints, request/response schemas,
-auth, and the live spec generator is in API.md.
+HTTP API server. Listens on `api_port` (default 7445). TLS is enabled if
+`api_cert` and `api_key` are present in config; plain HTTP otherwise.
 
-Public interface: `run(%opts)` - required: `config`. Starts the server and
-blocks until SIGTERM or SIGINT.
+Fork-per-request model: the parent accepts connections and forks a child per
+request. The child handles the request and exits. The parent reaps children
+with a SIGCHLD handler calling `waitpid(-1, WNOHANG)`.
+
+`SSL_no_shutdown => 1` is used on both parent and child connection close, for
+the same reason as in the pairing server - see the note in `Dispatcher::Pairing`.
+
+Endpoints:
+
+`GET /health`
+: No auth. Returns `{ ok: true, version: "0.1" }`. Use for liveness checks.
+
+`POST /ping`
+: Body: `{ hosts, username?, token? }`. Runs auth hook, then pings all hosts
+  in parallel via `Engine::ping_all`. Returns `{ ok: true, results: [...] }`.
+
+`POST /run`
+: Body: `{ hosts, script, args?, username?, token? }`. Runs auth hook, checks
+  locks via `Lock::check_available`, dispatches via `Engine::dispatch_all`.
+  Returns `{ ok: true, reqid: "...", results: [...] }` - note `reqid` at the
+  top level for use with `/status` and syslog correlation. On lock conflict:
+  `{ ok: false, error: "locked", code: 4, conflicts: [...] }`.
+
+`GET /discovery` or `POST /discovery`
+: Optional body: `{ hosts?, username?, token? }`. If hosts omitted, uses
+  `Registry::list_hostnames()` to query all registered agents. Auth uses ping
+  privilege level. Returns `{ ok: true, hosts: { hostname: { scripts, tags, version, rtt, ... } } }`.
+
+`GET /status/<reqid>`
+: Returns the stored result for a completed run by reqid. Results are
+  persisted to `/var/lib/dispatcher/runs/<reqid>.json` for 24 hours after
+  the run completes. Returns 404 if the reqid is unknown or has expired.
+  Returns `{ ok: true, reqid, script, hosts, completed, results: [...] }`.
+
+HTTP status codes:
+
+```
+200   Success
+400   Bad request (missing body, invalid JSON, missing required fields)
+403   Auth denied
+404   Unknown route or unknown reqid (status endpoint)
+409   Lock conflict
+500   Server error
+```
+
+Functions:
+
+`run(%opts)`
+: Required: `config`. Starts the server and blocks until SIGTERM or SIGINT.
 
 
 ### `Dispatcher::Agent::Config`
@@ -891,8 +938,6 @@ The service runs as `root:dispatcher` with `ProtectSystem=strict` and
 `ReadWritePaths=/var/lib/dispatcher`. The `dispatcher` group is created by the
 installer and grants CLI access without sudo to users added to it.
 
-For full API documentation see API.md.
-
 
 ## Request/Response Wire Format
 
@@ -1028,6 +1073,8 @@ dispatcher[1234]: ACTION=unpair AGENT=agent-host-01 EXPIRY="Jun  7 16:28:00 2027
 dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=agent-host-01:7443
 dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=agent-host-01:7443
 dispatcher[1234]: ACTION=lock-acquire HOST=agent-host-01 SCRIPT=backup-mysql
+dispatcher[1234]: ACTION=lock-release HOST=agent-host-01 SCRIPT=backup-mysql
+dispatcher[1234]: ACTION=lock-conflict HOSTS=agent-host-01 SCRIPT=backup-mysql
 ```
 
 Agent examples:
