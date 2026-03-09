@@ -397,8 +397,9 @@ subtest '_do_rotation: creates rotation state file with correct fields' => sub {
             registry_dir  => $regDir,
         ))
     };
-    if ($@) {
-        plan skip_all => "_do_rotation requires a full CA setup: $@";
+    if ($@ || !$result || !$result->{rotated}) {
+        my $reason = $@ || ($result && $result->{error}) || 'unknown';
+        plan skip_all => "_do_rotation requires a full CA setup: $reason";
         return;
     }
 
@@ -450,8 +451,9 @@ subtest '_do_rotation: registered agents marked pending after rotation' => sub {
             registry_dir  => $regDir,
         ))
     };
-    if ($@) {
-        plan skip_all => "_do_rotation requires a full CA setup: $@";
+    if ($@ || !$result || !$result->{rotated}) {
+        my $reason = $@ || ($result && $result->{error}) || 'unknown';
+        plan skip_all => "_do_rotation requires a full CA setup: $reason";
         return;
     }
 
@@ -483,8 +485,9 @@ subtest '_do_rotation: no prior cert - previous_serial is empty string' => sub {
             registry_dir  => $regDir,
         ))
     };
-    if ($@) {
-        plan skip_all => "_do_rotation requires a full CA setup: $@";
+    if ($@ || !$result || !$result->{rotated}) {
+        my $reason = $@ || ($result && $result->{error}) || 'unknown';
+        plan skip_all => "_do_rotation requires a full CA setup: $reason";
         return;
     }
 

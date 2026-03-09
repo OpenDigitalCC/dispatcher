@@ -32,9 +32,11 @@ EOF
 cat > "$SCRIPT_DIR/big-output.sh" << 'EOF'
 #!/bin/sh
 exec 0</dev/null
+# Default 500 lines; pass a count as $1 to override.
+count="${1:-500}"
 i=1
-while [ "$i" -le 1000 ]; do
-    echo "line $i of output from $(hostname)"
+while [ "$i" -le "$count" ]; do
+    echo "line $i of output from $(hostname 2>/dev/null || uname -n)"
     i=$((i + 1))
 done
 EOF
@@ -42,7 +44,7 @@ EOF
 cat > "$SCRIPT_DIR/sleep-test.sh" << 'EOF'
 #!/bin/sh
 exec 0</dev/null
-echo "sleeping on $(hostname)"
+echo "sleeping on $(hostname 2>/dev/null || uname -n)"
 sleep 30
 echo "done"
 EOF
@@ -80,7 +82,7 @@ cat > "$SCRIPT_DIR/lock-test.sh" << 'EOF'
 # Used to hold a lock while a concurrent dispatch is attempted.
 exec 0</dev/null
 secs="${1:-10}"
-echo "lock-test holding for ${secs}s on $(hostname)"
+echo "lock-test holding for ${secs}s on $(hostname 2>/dev/null || uname -n)"
 sleep "$secs"
 echo "lock-test done"
 EOF
@@ -89,14 +91,14 @@ cat > "$SCRIPT_DIR/allowlist-reload-check.sh" << 'EOF'
 #!/bin/sh
 # Simple script added after initial setup to verify SIGHUP reload works.
 exec 0</dev/null
-echo "allowlist-reload-check: ok on $(hostname)"
+echo "allowlist-reload-check: ok on $(hostname 2>/dev/null || uname -n)"
 EOF
 
 cat > "$SCRIPT_DIR/sleep-5.sh" << 'EOF'
 #!/bin/sh
 # Sleeps 5 seconds. Used for timeout testing (should complete within 10s timeout).
 exec 0</dev/null
-echo "sleep-5: starting on $(hostname)"
+echo "sleep-5: starting on $(hostname 2>/dev/null || uname -n)"
 sleep 5
 echo "sleep-5: done"
 EOF
@@ -106,7 +108,7 @@ cat > "$SCRIPT_DIR/sleep-15.sh" << 'EOF'
 # Sleeps 15 seconds. Used to trigger the 10s read timeout.
 # Will continue running on the agent after the dispatcher times out.
 exec 0</dev/null
-echo "sleep-15: starting on $(hostname)"
+echo "sleep-15: starting on $(hostname 2>/dev/null || uname -n)"
 sleep 15
 echo "sleep-15: done"
 EOF
@@ -115,7 +117,7 @@ cat > "$SCRIPT_DIR/sleep-90.sh" << 'EOF'
 #!/bin/sh
 # Sleeps 90 seconds. Used to verify read_timeout = 120 allows long runs.
 exec 0</dev/null
-echo "sleep-90: starting on $(hostname)"
+echo "sleep-90: starting on $(hostname 2>/dev/null || uname -n)"
 sleep 90
 echo "sleep-90: done"
 EOF

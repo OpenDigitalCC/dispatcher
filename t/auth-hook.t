@@ -61,7 +61,6 @@ sub run_args {
         username  => 'alice',
         token     => 'tok-test',
         source_ip => '127.0.0.1',
-        caller    => 'cli',
         %extra,
     );
 }

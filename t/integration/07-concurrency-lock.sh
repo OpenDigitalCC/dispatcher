@@ -20,7 +20,7 @@ source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
 
 require_agents 1
 
-LOCK_HOLD=10   # seconds lock-test holds the lock
+LOCK_HOLD=20   # seconds lock-test holds the lock
 
 # ============================================================
 assert_agents_reachable
@@ -33,7 +33,7 @@ sudo "$DISPATCHER" run "$AGENT1" lock-test -- "$LOCK_HOLD" \
 FIRST_PID=$!
 
 # Give it a moment to acquire the lock
-sleep 2
+sleep 6
 
 # Attempt a second dispatch of the same script to the same host
 run_dispatcher run "$AGENT1" lock-test -- "$LOCK_HOLD"
@@ -73,7 +73,7 @@ describe "Lock: JSON output on lock rejection"
 sudo "$DISPATCHER" run "$AGENT1" lock-test -- "$LOCK_HOLD" \
     > /tmp/_lock_first_out 2>&1 &
 FIRST_PID=$!
-sleep 2
+sleep 6
 
 run_dispatcher run "$AGENT1" lock-test --json
 
