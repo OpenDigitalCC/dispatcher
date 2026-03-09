@@ -94,7 +94,12 @@ sub run_pairing_mode {
 
                 if ($interactive) {
                     # Brief pause so the child can write the queue file
-                    # before we read it for display
+                    # before we read it for display.
+                    # Known limitation: this is a timing assumption, not a
+                    # synchronisation guarantee. On a heavily loaded system
+                    # the child may not have written the file within 1 second.
+                    # A pipe-based signal from child to parent would be more
+                    # robust but significantly complicates the fork pattern.
                     sleep 1;
                     _interactive_prompt($log_fn);
                 }

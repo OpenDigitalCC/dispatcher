@@ -241,7 +241,14 @@ sub load_revoked_serials {
     my $path = $opts{path} or croak "path required";
 
     my %revoked;
-    return \%revoked unless -f $path;
+    unless (-f $path) {
+        Dispatcher::Log::log_action('INFO', {
+            ACTION => 'revoked-serials-absent',
+            PATH   => $path,
+            REASON => 'file not found - no serials revoked',
+        });
+        return \%revoked;
+    }
 
     open my $fh, '<', $path
         or do { warn "Cannot read revoked serials '$path': $!\n"; return \%revoked; };
@@ -267,7 +274,7 @@ sub load_revoked_serials {
 sub serial_revoked {
     my ($serial, $revoked) = @_;
     return 0 unless defined $serial && ref $revoked eq 'HASH';
-    my $hex = _serial_to_hex($serial);
+    my $hex = serial_to_hex($serial);
     return exists $revoked->{$hex} ? 1 : 0;
 }
 
@@ -277,7 +284,7 @@ sub serial_revoked {
 # Accepts either a decimal string (from IO::Socket::SSL peer_certificate)
 # or a hex string (from openssl x509 -serial output).
 # Hex strings are identified by non-decimal characters or a leading 0x.
-sub _serial_to_hex {
+sub serial_to_hex {
     my ($serial) = @_;
     return '' unless defined $serial && length $serial;
     $serial =~ s/^0x//i;
@@ -287,23 +294,23 @@ sub _serial_to_hex {
     if ($serial =~ /[a-f]/) {
         return $serial;
     }
-    # Pure decimal - convert via Math::BigInt if available, otherwise sprintf
-    # For cert serials (up to 20 bytes / 160 bits) we need bignum arithmetic
-    eval { require Math::BigInt };
-    if (!$@) {
-        return lc Math::BigInt->new($serial)->as_hex =~ s/^0x//r;
-    }
-    # Fallback: if serial fits in 64 bits use sprintf
-    return sprintf '%x', $serial if $serial < 2**53;
-    # Last resort: return as-is with a warning
-    warn "Cannot convert serial '$serial' to hex: Math::BigInt not available\n";
-    return $serial;
+    # Pure decimal - cert serials can be up to 20 bytes (160 bits), requiring
+    # bignum arithmetic. Math::BigInt is a core Perl dependency (libmath-bigint-perl)
+    # and must be present. We do not fall back to sprintf '%x' because Perl's
+    # native integer coercion silently loses precision for large decimal strings.
+    require Math::BigInt;
+    return lc( Math::BigInt->new($serial)->as_hex =~ s/^0x//r );
 }
 
 sub _gen_nonce {
-    return sprintf '%08x%08x%08x%08x',
-        int(rand(0xffffffff)), int(rand(0xffffffff)),
-        int(rand(0xffffffff)), $$;
+    # Use /dev/urandom for cryptographically unpredictable nonces.
+    # Perl's rand() is not cryptographically random and must not be used
+    # for nonces intended to prevent replay attacks.
+    open my $fh, '<:raw', '/dev/urandom'
+        or croak "Cannot open /dev/urandom: $!";
+    read $fh, my $bytes, 16;
+    close $fh;
+    return unpack 'H*', $bytes;
 }
 
 sub _run_or_die {

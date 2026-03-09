@@ -55,15 +55,31 @@ sub check {
     my $username  = $opts{username}  // '';
     my $token     = $opts{token}     // '';
     my $source_ip = $opts{source_ip} // '127.0.0.1';
+    my $caller    = $opts{caller}    // 'api';   # 'api' | 'cli'
 
     croak "hosts must be an arrayref" unless ref $hosts eq 'ARRAY';
     croak "args must be an arrayref"  unless ref $args  eq 'ARRAY';
 
     my $hook = $config->{auth_hook} // '';
 
-    # No hook configured - behaviour governed by api_auth_default.
-    # Default is 'deny' unless explicitly set to 'allow'.
+    # No hook configured.
+    # CLI callers (bin/dispatcher modes) are already gated by system user
+    # permissions - unconditional pass preserves the original CLI behaviour.
+    # API callers apply api_auth_default (default: deny) so that an API
+    # endpoint without a hook fails closed rather than open.
     unless ($hook) {
+        if ($caller eq 'cli') {
+            Dispatcher::Log::log_action('INFO', {
+                ACTION     => 'auth',
+                RESULT     => 'pass',
+                REASON     => 'no-hook-cli',
+                AUTHACTION => $action,
+                USER       => $username || '(none)',
+                IP         => $source_ip,
+            });
+            return { ok => 1 };
+        }
+
         my $default = lc($config->{api_auth_default} // 'deny');
         if ($default eq 'allow') {
             Dispatcher::Log::log_action('INFO', {
@@ -198,6 +214,10 @@ sub _run_hook {
     }
 
     close $stdin_r;
+    # Guard against SIGPIPE if the hook exits before reading all of stdin.
+    # Without this, a broken pipe would kill the current process (the forked
+    # API request handler). The write simply fails silently instead.
+    local $SIG{PIPE} = 'IGNORE';
     print $stdin_w $json_in;
     close $stdin_w;
 

@@ -78,6 +78,7 @@ sub mode_run {
         token     => $token,
         source_ip => '127.0.0.1',
         config    => $config,
+        caller    => 'cli',
     );
     unless ($auth->{ok}) {
         _auth_error($auth, $opts->{json});
@@ -129,6 +130,7 @@ sub mode_ping {
         token     => $token,
         source_ip => '127.0.0.1',
         config    => $config,
+        caller    => 'cli',
     );
     unless ($auth->{ok}) {
         _auth_error($auth, $opts->{json});
@@ -230,11 +232,15 @@ sub mode_list_requests {
         print "No pending pairing requests.\n";
         return;
     }
-    printf "%-10s  %-30s  %-16s  %s\n", 'ID', 'HOSTNAME', 'IP', 'RECEIVED';
-    printf "%s\n", '-' x 75;
+    printf "%-10s  %-30s  %-16s  %-8s  %s\n", 'ID', 'HOSTNAME', 'IP', 'CODE', 'RECEIVED';
+    printf "%s\n", '-' x 85;
     for my $r (@$requests) {
-        printf "%-10s  %-30s  %-16s  %s\n",
-            $r->{id}, $r->{hostname}, $r->{ip}, $r->{received};
+        printf "%-10s  %-30s  %-16s  %-8s  %s\n",
+            $r->{id}       // '?',
+            $r->{hostname} // '?',
+            $r->{ip}       // '?',
+            $r->{code}     // '??????',
+            $r->{received} // '?';
     }
 }
 

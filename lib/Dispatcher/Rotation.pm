@@ -19,7 +19,7 @@ my $ROTATION_FILE  = '/var/lib/dispatcher/rotation.json';
 my $CA_DIR         = '/etc/dispatcher';
 
 # Default configuration values - overridden by dispatcher.conf
-my $DEFAULT_CERT_DAYS       = 365;   # dispatcher cert lifetime
+my $DEFAULT_CERT_DAYS       = 825;   # dispatcher cert lifetime (matches CA.pm default)
 my $DEFAULT_RENEWAL_DAYS    = 90;    # renew when this many days remain
 my $DEFAULT_OVERLAP_DAYS    = 30;    # keep old serial trusted this long after rotation
 my $DEFAULT_CHECK_INTERVAL  = 14400; # seconds between internal expiry checks (4 hours)
@@ -88,7 +88,16 @@ sub load_state {
     my $path = $opts{path} // $ROTATION_FILE;
     return undef unless -f $path;
     my $data = eval { decode_json(_slurp($path)) };
-    return $@ ? undef : $data;
+    if ($@) {
+        Dispatcher::Log::log_action('ERR', {
+            ACTION => 'rotation-state-corrupt',
+            PATH   => $path,
+            ERROR  => $@,
+            REASON => 'JSON parse failed - rotation state unreadable',
+        });
+        return undef;
+    }
+    return $data;
 }
 
 # Mark any pending agents whose overlap window has expired as stale.
@@ -138,12 +147,7 @@ sub broadcast_serial {
 
     my $serial  = $state->{current_serial};
     my $agents  = Dispatcher::Registry::list_agents();
-    my @pending = grep { ($_{serial_status} // 'unknown') ne 'current' }
-                  grep { ref $_ eq 'HASH' }
-                  @$agents;
-
-    # Filter to hosts that are pending or unknown - not already current
-    @pending = grep {
+    my @pending = grep {
         my $s = $_->{serial_status} // 'unknown';
         $s eq 'pending' || $s eq 'unknown'
     } @$agents;
@@ -165,7 +169,7 @@ sub broadcast_serial {
             script => 'update-dispatcher-serial',
             args   => [$serial],
             config => $config,
-            reqid  => _gen_reqid(),
+            reqid  => Dispatcher::Engine::gen_reqid(),
         );
     };
     if ($@) {
@@ -274,7 +278,13 @@ sub _do_rotation {
         $old_serial = _read_cert_serial($disp_crt) // '';
     }
 
-    # Generate new cert - force overwrites existing
+    # Generate new cert - force overwrites existing key and cert files.
+    # Note: the running dispatcher process holds the old key/cert in memory
+    # for active mTLS connections. It will use the new files on next restart.
+    # In normal operation this is acceptable - the dispatcher binary is
+    # typically short-lived (CLI invocations). For long-running pairing-mode
+    # processes, schedule a restart after the broadcast confirms all agents
+    # have received the new serial.
     eval {
         Dispatcher::CA::generate_dispatcher_cert(
             ca_dir => $ca_dir,
@@ -309,7 +319,16 @@ sub _do_rotation {
         overlap_days     => $overlap_days,
     }));
 
-    # Mark all agents as pending - they need to receive the new serial
+    # Mark all agents as pending - they need to receive the new serial.
+    # Note on the overlap window: it governs how long the dispatcher keeps
+    # attempting to broadcast the new serial before declaring an agent stale.
+    # It does NOT provide a grace period for capabilities: once the dispatcher
+    # starts using the new cert, agents that still hold the old serial will
+    # reject /capabilities from it (serial mismatch). Run and ping are
+    # unaffected - those endpoints do not check the dispatcher serial.
+    # The expected rotation sequence is: rotate cert → broadcast serial →
+    # agents reload → capabilities restored. The overlap window only matters
+    # for agents that were offline during the broadcast.
     my $agents = Dispatcher::Registry::list_agents();
     for my $agent (@$agents) {
         Dispatcher::Registry::update_agent_serial_status(
@@ -345,9 +364,6 @@ sub _read_cert_serial {
 
 sub _cert_days_remaining {
     my ($cert_path) = @_;
-    # Get expiry as epoch seconds via -enddate and date parsing,
-    # or use openssl's checkend for a simpler threshold check.
-    # We need the actual days remaining for logging, so parse the date.
     my $out = `openssl x509 -noout -enddate -in \Q$cert_path\E 2>/dev/null`;
     return unless defined $out && $out =~ /notAfter=(.+)/;
     my $date_str = $1;
@@ -359,8 +375,11 @@ sub _cert_days_remaining {
     if ($date_str =~ /(\w+)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d{4})\s+GMT/) {
         my ($mon, $day, $h, $m, $s, $yr) = ($1, $2, $3, $4, $5, $6);
         return unless exists $months{$mon};
-        require POSIX;
-        my $expiry = POSIX::mktime($s, $m, $h, $day, $months{$mon}, $yr - 1900);
+        # Use timegm (not mktime) - the cert date is UTC/GMT and mktime
+        # interprets its arguments as local time, producing a wrong result
+        # on hosts not running in UTC.
+        require Time::Local;
+        my $expiry = Time::Local::timegm($s, $m, $h, $day, $months{$mon}, $yr - 1900);
         my $days   = int(($expiry - time()) / 86400);
         return $days;
     }
@@ -371,18 +390,14 @@ sub _parse_iso8601 {
     my ($str) = @_;
     return unless defined $str;
     if ($str =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/) {
-        require POSIX;
-        return POSIX::mktime($6, $5, $4, $3, $2 - 1, $1 - 1900);
+        require Time::Local;
+        return Time::Local::timegm($6, $5, $4, $3, $2 - 1, $1 - 1900);
     }
     return;
 }
 
 sub _now_iso8601 {
     return strftime('%Y-%m-%dT%H:%M:%SZ', gmtime);
-}
-
-sub _gen_reqid {
-    return sprintf '%08x%04x', time() & 0xffffffff, $$ & 0xffff;
 }
 
 sub _slurp {
