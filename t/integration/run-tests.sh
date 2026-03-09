@@ -29,6 +29,11 @@ TESTS=(
     04-json-output.sh
     05-parallelism.sh
     06-auth-context.sh
+    07-concurrency-lock.sh
+    08-auth-hook.sh
+    09-allowlist-reload.sh
+    10-timeout-behaviour.sh
+    11-api-status.sh
 )
 
 if [ "$#" -gt 0 ]; then
