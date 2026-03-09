@@ -23,3 +23,15 @@ cert_days = 365
 # API server TLS (optional - plain HTTP if not set)
 # api_cert = /etc/dispatcher/dispatcher.crt
 # api_key  = /etc/dispatcher/dispatcher.key
+
+# API bind address (default: 127.0.0.1 - localhost only).
+# Set to 0.0.0.0 to accept connections on all interfaces, or specify a
+# particular interface address. Only change this if external clients need
+# direct access; prefer a reverse proxy for internet-facing deployments.
+# api_bind = 127.0.0.1
+
+# Default auth behaviour when no auth_hook is configured.
+# 'deny'  - all requests are rejected unless a hook is configured (default, recommended).
+# 'allow' - all requests are authorised without a hook (suitable for isolated networks).
+# When a hook is configured this setting has no effect.
+api_auth_default = deny

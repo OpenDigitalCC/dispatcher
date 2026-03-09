@@ -116,6 +116,12 @@ sub mode_request_pairing {
         hostname => $host,
     );
 
+    # Compute a 6-digit confirmation code from the CSR for the operator
+    # to verify against the dispatcher's display before approving.
+    my $pairing_code = _pairing_code($pair->{csr_pem});
+    print "Pairing code: $pairing_code\n";
+    print "  Verify this code matches the dispatcher display before approving.\n\n";
+
     print "Connecting to dispatcher at $dispatcher for pairing...\n";
     my $result = Dispatcher::Agent::Pairing::request_pairing(
         dispatcher => $dispatcher,
@@ -228,7 +234,7 @@ sub handle_connection {
         handle_ping($conn, $body, $peer);
     }
     elsif ($method eq 'GET' && $path eq '/capabilities') {
-        handle_capabilities($conn, $peer, $allowlist);
+        handle_capabilities($conn, $peer, $allowlist, $config);
     }
     else {
         _send_raw($conn, 404, encode_json({ error => 'not found' }));
@@ -357,7 +363,23 @@ sub handle_ping {
 }
 
 sub handle_capabilities {
-    my ($conn, $peer, $allowlist) = @_;
+    my ($conn, $peer, $allowlist, $config) = @_;
+
+    # Restrict capabilities to connections presenting the dispatcher cert.
+    # Any CA-signed peer cert whose CN does not match dispatcher_cn is rejected.
+    # This prevents lateral reconnaissance from a compromised agent peer.
+    my $expected_cn = $config->{dispatcher_cn} // 'dispatcher';
+    my $peer_cn     = eval { $conn->peer_certificate('cn') } // '';
+    unless ($peer_cn eq $expected_cn) {
+        Dispatcher::Log::log_action('WARNING', {
+            ACTION  => 'capabilities-deny',
+            PEER    => $peer,
+            PEER_CN => $peer_cn,
+            REASON  => 'cn-mismatch',
+        });
+        _send_raw($conn, 403, encode_json({ error => 'forbidden' }));
+        return;
+    }
 
     my @scripts;
     for my $name (sort keys %$allowlist) {
@@ -398,6 +420,19 @@ sub _send_raw {
         "Content-Length: ", length($body), "\r\n",
         "\r\n",
         $body;
+}
+
+# Compute a 6-digit confirmation code from a CSR PEM string.
+# The same computation on the dispatcher side produces an identical code,
+# allowing the operator to verify the request visually without any
+# out-of-band channel.
+sub _pairing_code {
+    my ($csr_pem) = @_;
+    require Digest::SHA;
+    my $digest = Digest::SHA::sha256($csr_pem);
+    # Take first 4 bytes as a 32-bit unsigned int, modulo 1,000,000
+    my $n = unpack('N', substr($digest, 0, 4)) % 1_000_000;
+    return sprintf '%06d', $n;
 }
 
 sub usage {

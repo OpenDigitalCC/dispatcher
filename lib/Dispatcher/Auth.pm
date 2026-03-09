@@ -61,17 +61,32 @@ sub check {
 
     my $hook = $config->{auth_hook} // '';
 
-    # No hook configured - unconditionally authorised
+    # No hook configured - behaviour governed by api_auth_default.
+    # Default is 'deny' unless explicitly set to 'allow'.
     unless ($hook) {
-        Dispatcher::Log::log_action('INFO', {
-            ACTION   => 'auth',
-            RESULT   => 'pass',
-            REASON   => 'no-hook',
-            AUTHACTION => $action,
-            USER     => $username || '(none)',
-            IP       => $source_ip,
-        });
-        return { ok => 1 };
+        my $default = lc($config->{api_auth_default} // 'deny');
+        if ($default eq 'allow') {
+            Dispatcher::Log::log_action('INFO', {
+                ACTION     => 'auth',
+                RESULT     => 'pass',
+                REASON     => 'no-hook-allow',
+                AUTHACTION => $action,
+                USER       => $username || '(none)',
+                IP         => $source_ip,
+            });
+            return { ok => 1 };
+        }
+        else {
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION     => 'auth',
+                RESULT     => 'deny',
+                REASON     => 'no-hook-deny',
+                AUTHACTION => $action,
+                USER       => $username || '(none)',
+                IP         => $source_ip,
+            });
+            return { ok => 0, reason => 'no auth hook configured', code => AUTH_DENIED };
+        }
     }
 
     unless (-f $hook && -x $hook) {
@@ -151,7 +166,7 @@ sub _run_hook {
     $ENV{DISPATCHER_ACTION}    = $context->{action};
     $ENV{DISPATCHER_SCRIPT}    = $context->{script};
     $ENV{DISPATCHER_HOSTS}     = join(',', @{ $context->{hosts} });
-    $ENV{DISPATCHER_ARGS}      = join(' ', @{ $context->{args} });   # lossy if args contain spaces - use DISPATCHER_ARGS_JSON
+    $ENV{DISPATCHER_ARGS}      = join(' ', @{ $context->{args} });   # DEPRECATED: lossy if args contain spaces or newlines; use DISPATCHER_ARGS_JSON
     $ENV{DISPATCHER_ARGS_JSON} = encode_json($context->{args});       # reliable JSON array
     $ENV{DISPATCHER_USERNAME}  = $context->{username};
     $ENV{DISPATCHER_TOKEN}     = $context->{token};

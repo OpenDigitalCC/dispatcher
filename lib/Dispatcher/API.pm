@@ -30,20 +30,22 @@ sub run {
     my (%opts) = @_;
     my $config = $opts{config} or croak "config required";
 
-    my $port     = $config->{api_port} // 7445;
-    my $api_cert = $config->{api_cert} // '';
-    my $api_key  = $config->{api_key}  // '';
+    my $port     = $config->{api_port}  // 7445;
+    my $bind     = $config->{api_bind}  // '127.0.0.1';
+    my $api_cert = $config->{api_cert}  // '';
+    my $api_key  = $config->{api_key}   // '';
     my $use_tls  = ($api_cert && $api_key && -f $api_cert && -f $api_key);
 
-    my $server = _make_server($port, $use_tls, $api_cert, $api_key);
+    my $server = _make_server($port, $bind, $use_tls, $api_cert, $api_key);
 
     Dispatcher::Log::log_action('INFO', {
         ACTION   => 'api-start',
         PORT     => $port,
+        BIND     => $bind,
         TLS      => ($use_tls ? 'yes' : 'no'),
     });
 
-    print "Dispatcher API listening on port $port"
+    print "Dispatcher API listening on $bind:$port"
         . ($use_tls ? " (TLS)" : " (plain HTTP)") . "\n";
 
     $SIG{INT} = $SIG{TERM} = sub {
@@ -94,29 +96,31 @@ sub run {
 # --- private ---
 
 sub _make_server {
-    my ($port, $use_tls, $cert, $key) = @_;
+    my ($port, $bind, $use_tls, $cert, $key) = @_;
 
     if ($use_tls) {
         require IO::Socket::SSL;
         my $srv = IO::Socket::SSL->new(
+            LocalAddr       => $bind,
             LocalPort       => $port,
             Listen          => 10,
             ReuseAddr       => 1,
             SSL_cert_file   => $cert,
             SSL_key_file    => $key,
             SSL_verify_mode => IO::Socket::SSL::SSL_VERIFY_NONE(),
-        ) or die "Cannot start TLS API server on port $port: "
+        ) or die "Cannot start TLS API server on $bind:$port: "
                . "$IO::Socket::SSL::SSL_ERROR\n";
         return $srv;
     }
     else {
         require IO::Socket::INET;
         my $srv = IO::Socket::INET->new(
+            LocalAddr => $bind,
             LocalPort => $port,
             Listen    => 10,
             ReuseAddr => 1,
             Proto     => 'tcp',
-        ) or die "Cannot start API server on port $port: $!\n";
+        ) or die "Cannot start API server on $bind:$port: $!\n";
         return $srv;
     }
 }
@@ -160,6 +164,32 @@ sub _handle_connection {
         PEER   => $peer,
         LEN    => $content_length,
     });
+
+    # All endpoints pass through auth.
+    # The auth hook (or api_auth_default) decides what is permitted.
+    # Operators who want public endpoints (e.g. /health) configure the hook
+    # to pass those paths selectively.
+    my $auth = Dispatcher::Auth::check(
+        action    => 'api',
+        script    => '',
+        hosts     => [],
+        args      => [],
+        username  => '',
+        token     => ($body =~ /^\{/ ? do {
+            my $b = eval { decode_json($body) } // {};
+            $b->{token} // ''
+        } : ''),
+        source_ip => $peer,
+        config    => $config,
+    );
+    unless ($auth->{ok}) {
+        _send_json($conn, 403, {
+            ok    => JSON::false,
+            error => $auth->{reason},
+            code  => $auth->{code},
+        });
+        return;
+    }
 
     # Route
     if ($path eq '/' && $method eq 'GET') {

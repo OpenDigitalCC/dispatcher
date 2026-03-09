@@ -8,6 +8,7 @@ use JSON        qw(encode_json decode_json);
 use POSIX       qw(strftime);
 use Carp        qw(croak);
 use Time::HiRes qw();
+use Digest::SHA qw(sha256);
 
 
 my $_reqid_counter = 0;
@@ -280,6 +281,8 @@ sub _interactive_prompt {
         print "\n";
         printf "Pairing request from %s (%s) - ID: %s\n",
             $r->{hostname} // '?', $r->{ip} // '?', $r->{id} // '?';
+        printf "  Code:     %s   (verify this matches the agent display)\n",
+            $r->{code} // '??????';
         printf "  Received: %s\n", $r->{received} // '?';
         print "Accept, Deny, or Skip? [a/d/s]: ";
     }
@@ -296,10 +299,11 @@ sub _print_queue {
     my ($reqs) = @_;
     my $i = 1;
     for my $r (@$reqs) {
-        printf "  [%d] %-30s  %-16s  %s\n",
+        printf "  [%d] %-30s  %-16s  code: %s  %s\n",
             $i++,
             $r->{hostname} // '?',
             $r->{ip}       // '?',
+            $r->{code}     // '??????',
             $r->{received} // '?';
     }
 }
@@ -391,6 +395,7 @@ sub _handle_pair_request {
     my $csr      = $data->{csr};
     my $nonce    = $data->{nonce} // '';
     my $received = strftime('%Y-%m-%dT%H:%M:%SZ', gmtime);
+    my $code     = _pairing_code($csr);
 
     # Queue the request
     make_path($PAIRING_DIR) unless -d $PAIRING_DIR;
@@ -401,6 +406,7 @@ sub _handle_pair_request {
         csr      => $csr,
         nonce    => $nonce,
         received => $received,
+        code     => $code,
     }));
 
     $log_fn->({ ACTION => 'pair-request', AGENT => $hostname, IP => $peer_ip, REQID => $reqid, STATUS => 'pending' });
@@ -480,6 +486,17 @@ sub _write_file {
     open my $fh, '>', $path or croak "Cannot write '$path': $!";
     print $fh $content;
     close $fh;
+}
+
+# Compute a 6-digit confirmation code from a CSR PEM string.
+# Identical computation to the agent side - both derive the code from the
+# CSR content independently so no extra round-trip is required.
+# The operator verifies both displays match before approving.
+sub _pairing_code {
+    my ($csr_pem) = @_;
+    my $digest = sha256($csr_pem);
+    my $n = unpack('N', substr($digest, 0, 4)) % 1_000_000;
+    return sprintf '%06d', $n;
 }
 
 # Extract the notAfter date from a PEM cert string.

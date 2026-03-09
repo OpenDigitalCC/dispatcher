@@ -35,8 +35,8 @@ reaps children with a SIGCHLD handler calling `waitpid(-1, WNOHANG)`.
 
 ### `GET /`
 
-Returns a JSON index of all endpoints. No authentication required. Use this
-to discover available endpoints and spec URLs programmatically.
+Returns a JSON index of all endpoints. Use this to discover available
+endpoints and spec URLs programmatically.
 
 ```json
 {
@@ -61,8 +61,7 @@ to discover available endpoints and spec URLs programmatically.
 
 ### `GET /health`
 
-No authentication required. Returns the API server version. Use for liveness
-checks.
+Returns the API server version. Use for liveness checks.
 
 ```json
 { "ok": true, "version": "0.2.8" }
@@ -263,13 +262,21 @@ Auth error codes in the `code` field:
 
 ## Auth hook
 
-If `auth_hook` is set in `dispatcher.conf`, it is called before every `/run`
-and `/ping` request. The hook receives the full request context as JSON on
-stdin, including `action`, `script`, `hosts`, `username`, `token`, and
+If `auth_hook` is set in `dispatcher.conf`, it is called before every
+request including `/run`, `/ping`, `/discovery`, and all informational
+endpoints. The hook receives the full request context as JSON on stdin,
+including `action`, `script`, `hosts`, `username`, `token`, and
 `source_ip`. Exit codes follow the same convention as the CLI: 0 = authorised,
 1 = denied, 2 = bad credentials, 3 = insufficient privilege.
 
-If no hook is configured, all requests are authorised unconditionally.
+If no hook is configured, behaviour is governed by `api_auth_default` in
+`dispatcher.conf`. The default is `deny` - all requests return 403 until a
+hook is configured. Set `api_auth_default = allow` only on isolated networks
+where no credential checking is required.
+
+Always use `DISPATCHER_ARGS_JSON` in hook scripts to inspect script arguments.
+`DISPATCHER_ARGS` (space-joined) is deprecated and unreliable for arguments
+containing spaces or newlines.
 
 ---
 

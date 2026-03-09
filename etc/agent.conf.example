@@ -6,6 +6,12 @@ cert = /etc/dispatcher-agent/agent.crt
 key  = /etc/dispatcher-agent/agent.key
 ca   = /etc/dispatcher-agent/ca.crt
 
+# Dispatcher certificate CN for capabilities access control.
+# The /capabilities endpoint is restricted to connections presenting a cert
+# whose CN matches this value. Set to the CN used when running setup-dispatcher
+# on the dispatcher host (default: 'dispatcher').
+# dispatcher_cn = dispatcher
+
 # Restrict scripts to approved directories (optional, recommended).
 # Colon-separated list of absolute directory paths.
 # If set, any script path in scripts.conf not under an approved directory

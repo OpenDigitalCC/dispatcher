@@ -144,7 +144,9 @@ approval, and signs and returns the certificate on approval.
 dispatcher pairing-mode
 ```
 
-The prompt shows the requesting agent's hostname, IP, and request ID.
+The prompt shows the requesting agent's hostname, IP, request ID, and a
+6-digit confirmation code. The agent displays the same code at submission
+time. Verify both match before approving.
 Enter `a` to approve, `d` to deny, or `s` to skip and leave the request
 pending. Press Ctrl-C to stop pairing mode.
 
@@ -261,10 +263,71 @@ Key settings:
 : TLS certificate and key for the API server. If both are present and
   readable, the API server uses TLS. If absent, plain HTTP is used.
 
+`api_bind`
+: Network address the API server binds to. Default: `127.0.0.1` (localhost
+  only). Set to `0.0.0.0` to accept connections on all interfaces, or to a
+  specific interface address. Only change this if external clients need direct
+  access; prefer a reverse proxy for internet-facing deployments.
+
+  ```
+  api_bind = 0.0.0.0
+  ```
+
+`api_auth_default`
+: Controls API behaviour when no `auth_hook` is configured. Accepts `deny`
+  (default) or `allow`. With `deny`, all requests are rejected until a hook
+  is configured. With `allow`, all requests are authorised without a hook -
+  suitable only for isolated networks. When a hook is configured this setting
+  has no effect.
+
+  ```
+  api_auth_default = allow
+  ```
+
 `auth_hook`
 : Path to an executable called before every `run` and `ping` operation.
   Receives request context as JSON on stdin. See INSTALL.md for the full
   interface contract.
+
+---
+
+## agent.conf
+
+Configuration file for the `dispatcher-agent` process.
+Default path: `/etc/dispatcher-agent/agent.conf`.
+
+Key settings:
+
+`port`
+: Port the agent listens on for mTLS connections from the dispatcher. Default: 7443.
+
+`cert`, `key`, `ca`
+: Paths to the agent's TLS certificate, private key, and CA certificate.
+
+`dispatcher_cn`
+: The CN (Common Name) of the dispatcher's certificate. The `/capabilities`
+  endpoint rejects any peer cert whose CN does not match this value, restricting
+  allowlist enumeration to the dispatcher only and preventing lateral
+  reconnaissance from a compromised agent peer. Default: `dispatcher` (matching
+  the CN set by `setup-dispatcher`).
+
+  ```
+  dispatcher_cn = dispatcher
+  ```
+
+`script_dirs`
+: Colon-separated list of absolute directory paths. If set, any script in
+  `scripts.conf` whose path does not fall under one of these directories is
+  rejected at load time and re-validated at execution time.
+
+  ```
+  script_dirs = /opt/dispatcher-scripts:/usr/local/lib/dispatcher-scripts
+  ```
+
+`auth_hook`
+: Path to an executable called before every `run` request on the agent,
+  after allowlist validation. Enables independent downstream token validation
+  separate from the dispatcher's own hook. Exit 0 = authorised, 1/2/3 = denied.
 
 ---
 
