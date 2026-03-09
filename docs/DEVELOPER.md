@@ -1,7 +1,7 @@
 ---
 title: Dispatcher and agent - Developer document
 subtitle: Purpose, contents, protocol, logging, security model and extending
-brand: opendigitalcc
+brand: odcc
 ---
 
 # Dispatcher - Developer Documentation

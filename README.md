@@ -1,7 +1,7 @@
 ---
 title: Dispatcher
 subtitle: Perl machine-to-machine remote script execution over mTLS
-brand: cloudient
+brand: odcc
 ---
 
 # Dispatcher
@@ -85,7 +85,9 @@ automatic cert renewal
 Full detail is in `INSTALL.md`. The sequence below gets dispatcher running
 between two hosts in about ten minutes.
 
-### Dispatcher host
+### 1. Dispatcher host
+
+Install and initialise the CA and dispatcher identity:
 
 ```bash
 sudo ./install.sh --dispatcher
@@ -95,48 +97,84 @@ sudo usermod -aG dispatcher $USER
 # Log out and back in for group membership to take effect
 ```
 
-### Agent host
+Configure the auth hook. The dispatcher requires an auth hook to authorise
+`run` and `ping` requests. For an isolated network the simplest policy is
+allow-all - replace with real logic when deploying to production:
+
+```bash
+sudo cp /usr/local/lib/dispatcher/auth-hook.example /etc/dispatcher/auth-hook
+sudo chmod 755 /etc/dispatcher/auth-hook
+```
+
+Edit `/etc/dispatcher/auth-hook` and uncomment `exit 0` near the end of the
+file (the "Allow everything" example). The last executable line must be
+`exit 0`.
+
+If you prefer not to use a hook, remove or comment out the `auth_hook` line
+in `/etc/dispatcher/dispatcher.conf` and set:
+
+```ini
+api_auth_default = allow
+```
+
+### 2. Agent host
+
+Install the agent:
 
 ```bash
 sudo ./install.sh --agent
 ```
 
-Edit `/etc/dispatcher-agent/scripts.conf` - add at least one script:
+Edit `/etc/dispatcher-agent/scripts.conf` to add the scripts the agent is
+permitted to run. `logger` is available on every platform and requires no
+additional setup:
 
 ```ini
-check-disk = /opt/dispatcher-scripts/check-disk.sh
+logger = /usr/bin/logger
 ```
+
+Start the agent:
 
 ```bash
 sudo systemctl enable dispatcher-agent
 sudo systemctl start dispatcher-agent
 ```
 
-### Pair the agent
+Verify the agent configuration is valid before pairing:
 
-On the dispatcher host:
+```bash
+sudo dispatcher-agent ping-self
+```
+
+### 3. Pair the agent
+
+On the dispatcher host, start pairing mode:
 
 ```bash
 sudo dispatcher pairing-mode
 ```
 
-On the agent host:
+On the agent host, request pairing:
 
 ```bash
 sudo dispatcher-agent request-pairing --dispatcher <dispatcher-hostname>
 ```
 
-Type `a` in the pairing mode terminal to approve. The agent stores its cert
+A pairing code is displayed on both hosts. Confirm they match, then type `a`
+in the pairing mode terminal to approve. The agent receives its signed cert
 and is ready.
 
-### Verify
+### 4. Verify
 
 ```bash
 dispatcher ping <agent-hostname>
-dispatcher run <agent-hostname> check-disk
+dispatcher run <agent-hostname> --script logger -- -t test "hello from dispatcher"
 ```
 
 ### Optional: API server
+
+The API server exposes dispatcher over HTTP on `localhost:7445`. Install and
+start it on the dispatcher host:
 
 ```bash
 sudo ./install.sh --api
@@ -144,6 +182,10 @@ sudo systemctl enable dispatcher-api
 sudo systemctl start dispatcher-api
 curl -s http://localhost:7445/health
 ```
+
+The API uses the same auth hook as the CLI. Ensure the hook is configured
+before starting the API - the hook is read at startup and a stale process
+will not pick up config changes without a restart.
 
 
 ## Platform Support
