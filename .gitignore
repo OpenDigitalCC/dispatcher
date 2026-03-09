@@ -10,4 +10,4 @@ dispatcher-*.tar.gz.sha256
 TODO.md
 
 # hardlink
-lib/Dispatcher/Agent/Agent_Paring.pm
+lib/Dispatcher/Agent/Agent_Pairing.pm
