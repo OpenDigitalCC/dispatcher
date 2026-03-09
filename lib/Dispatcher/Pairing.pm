@@ -209,26 +209,43 @@ sub approve_request {
     );
     my $ca_pem = Dispatcher::CA::read_ca_cert(ca_dir => $ca_dir);
 
+    # Read the dispatcher cert serial so the agent can store it and use it
+    # to restrict /capabilities to the genuine dispatcher only.
+    my $disp_cert = "$ca_dir/dispatcher.crt";
+    my $disp_serial = '';
+    if (-f $disp_cert) {
+        my $out = `openssl x509 -noout -serial -in \Q$disp_cert\E 2>/dev/null`;
+        if (defined $out && $out =~ /serial=([0-9A-Fa-f]+)/) {
+            $disp_serial = lc $1;
+        }
+    }
+
     # Extract cert expiry for the registry record
     my $expiry = _cert_expiry_from_pem($cert_pem);
 
     # Write approval response - the waiting child process reads this
     my $resp_file = "$pairing_dir/$reqid.approved";
     _write_file($resp_file, encode_json({
-        status => 'approved',
-        cert   => $cert_pem,
-        ca     => $ca_pem,
-        nonce  => $req->{nonce} // '',
+        status          => 'approved',
+        cert            => $cert_pem,
+        ca              => $ca_pem,
+        nonce           => $req->{nonce} // '',
+        dispatcher_serial => $disp_serial,
     }));
 
     # Persist agent record - source of truth for all paired agents
     require Dispatcher::Registry;
     Dispatcher::Registry::register_agent(
-        hostname => $req->{hostname},
-        ip       => $req->{ip},
-        paired   => strftime('%Y-%m-%dT%H:%M:%SZ', gmtime),
-        expiry   => $expiry // '',
-        reqid    => $reqid,
+        hostname          => $req->{hostname},
+        ip                => $req->{ip},
+        paired            => strftime('%Y-%m-%dT%H:%M:%SZ', gmtime),
+        expiry            => $expiry // '',
+        reqid             => $reqid,
+        dispatcher_serial => $disp_serial,
+        serial_status     => (length $disp_serial ? 'current' : 'unknown'),
+        serial_confirmed  => (length $disp_serial
+                                ? strftime('%Y-%m-%dT%H:%M:%SZ', gmtime)
+                                : ''),
     );
 
     $log_fn->({ ACTION => 'pair-approve', AGENT => $req->{hostname}, REQID => $reqid });

@@ -18,3 +18,17 @@
 #
 # Uncomment to enable:
 # dispatcher-demonstrator = /opt/dispatcher-scripts/dispatcher-demonstrator.sh
+
+# --- Dispatcher certificate rotation ---
+#
+# Required for automatic dispatcher cert rotation. When the dispatcher
+# rotates its certificate, it calls this script on each agent to update
+# the stored dispatcher serial and reload the agent configuration.
+# Without this entry, the agent will not receive serial updates and will
+# eventually require manual re-pairing after the overlap window expires.
+#
+# The script is installed at /opt/dispatcher-scripts/update-dispatcher-serial
+# by the agent installer.
+#
+# Uncomment to enable:
+# update-dispatcher-serial = /opt/dispatcher-scripts/update-dispatcher-serial

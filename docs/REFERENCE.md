@@ -221,13 +221,57 @@ Writes to `/etc/dispatcher/`. Does not overwrite an existing CA.
 ### setup-dispatcher
 
 Generate the dispatcher's own key and certificate, signed by the CA.
-Run after `setup-ca`.
+Run after `setup-ca`. If an existing cert is found and registered agents
+exist, the command displays the agent count and requires confirmation before
+proceeding - replacing the cert changes its serial and agents will need
+re-pairing if they miss the rotation broadcast.
 
 ```bash
 dispatcher setup-dispatcher
 ```
 
-Writes to `/etc/dispatcher/`. Does not overwrite existing credentials.
+Writes to `/etc/dispatcher/`.
+
+---
+
+### rotate-cert
+
+Rotate the dispatcher certificate immediately. Generates a new cert, marks
+all registered agents as pending, broadcasts the new serial to all agents
+in parallel, and reports per-agent results.
+
+```bash
+dispatcher rotate-cert
+```
+
+Agents that were unreachable during the broadcast are retried automatically
+by the internal check loop. Agents that remain unreachable after
+`cert_overlap_days` are marked `stale` and require re-pairing.
+
+The `update-dispatcher-serial` script must be in the agent's `scripts.conf`
+allowlist for the broadcast to succeed. See `scripts.conf.example`.
+
+---
+
+### serial-status
+
+Show the current dispatcher serial, previous serial, rotation timestamps,
+overlap expiry, and per-agent serial state.
+
+```bash
+dispatcher serial-status
+dispatcher serial-status --json
+```
+
+Output columns: hostname, status (current/pending/stale/unknown), last
+confirmed timestamp, serial (truncated).
+
+Status values:
+
+- `current` - agent has confirmed the current serial
+- `pending` - broadcast attempted but not yet confirmed (agent may be offline)
+- `stale` - overlap window expired without confirmation; re-pair required
+- `unknown` - agent has never received a serial update
 
 ---
 
@@ -284,14 +328,32 @@ Key settings:
   api_auth_default = allow
   ```
 
+`cert_days`
+: Lifetime of the dispatcher certificate in days. Default: 365. Applied when
+  generating a new cert via `setup-dispatcher` or automatic rotation.
+
+`cert_renewal_days`
+: Begin renewal this many days before the dispatcher cert expires. Default: 90.
+  With `cert_days = 365`, renewal begins at day 275 of the cert's life.
+
+`cert_overlap_days`
+: After rotation, continue retrying agents that missed the serial broadcast for
+  this many days before marking them `stale` (requiring re-pair). Default: 30.
+  Configurable to accommodate fleets with agents that are offline for extended
+  periods.
+
+  ```
+  cert_overlap_days = 60
+  ```
+
+`cert_check_interval`
+: Seconds between internal cert expiry checks. Default: 14400 (4 hours). Reduce
+  for testing. The check is lightweight: read the cert, compare notAfter to now.
+
 `auth_hook`
 : Path to an executable called before every `run` and `ping` operation.
   Receives request context as JSON on stdin. See INSTALL.md for the full
   interface contract.
-
----
-
-## agent.conf
 
 Configuration file for the `dispatcher-agent` process.
 Default path: `/etc/dispatcher-agent/agent.conf`.
@@ -304,16 +366,30 @@ Key settings:
 `cert`, `key`, `ca`
 : Paths to the agent's TLS certificate, private key, and CA certificate.
 
-`dispatcher_cn`
-: The CN (Common Name) of the dispatcher's certificate. The `/capabilities`
-  endpoint rejects any peer cert whose CN does not match this value, restricting
-  allowlist enumeration to the dispatcher only and preventing lateral
-  reconnaissance from a compromised agent peer. Default: `dispatcher` (matching
-  the CN set by `setup-dispatcher`).
+`revoked_serials`
+: Path to a file listing revoked TLS certificate serial numbers, one per line.
+  Connections presenting a revoked cert are rejected immediately after the mTLS
+  handshake, before any request is processed. Format: lowercase hex serials, one
+  per line, comments with `#`. Reloaded on SIGHUP without restart.
+
+  Default: `/etc/dispatcher-agent/revoked-serials`. A missing or empty file
+  means no certs are revoked.
 
   ```
-  dispatcher_cn = dispatcher
+  revoked_serials = /etc/dispatcher-agent/revoked-serials
   ```
+
+`dispatcher_serial_path`
+: Path to the stored dispatcher cert serial file. Written automatically by
+  `request-pairing` - do not edit manually. The `/capabilities` endpoint
+  rejects peers whose cert serial does not match the stored value. Re-pair
+  the agent to update after a dispatcher cert rotation.
+
+  Default: `/etc/dispatcher-agent/dispatcher-serial`. Reloaded on SIGHUP.
+
+`dispatcher_cn`
+: Removed. Previously used to restrict `/capabilities` by cert CN. Replaced
+  by serial tracking via `dispatcher_serial_path`.
 
 `script_dirs`
 : Colon-separated list of absolute directory paths. If set, any script in
@@ -370,7 +446,8 @@ Under normal operation this is started and managed by the init system
 (systemd or procd). Run directly for debugging or on systems without
 a supported init system.
 
-The agent reloads `scripts.conf` on SIGHUP without restarting:
+The agent reloads `scripts.conf` and the revocation list on SIGHUP without
+restarting:
 
 ```bash
 # On systemd hosts (preferred)

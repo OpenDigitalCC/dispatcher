@@ -12,6 +12,7 @@ use Dispatcher::Lock    qw();
 use Dispatcher::Pairing qw();
 use Dispatcher::CA        qw();
 use Dispatcher::Registry  qw();
+use Dispatcher::Rotation  qw();
 use JSON                qw(encode_json decode_json);
 use Getopt::Long        qw(GetOptions :config pass_through);
 use Sys::Hostname       qw(hostname);
@@ -39,15 +40,17 @@ sub main {
     Dispatcher::Log::init('dispatcher');
 
     my %dispatch = (
-        'run'           => \&mode_run,
-        'ping'          => \&mode_ping,
-        'pairing-mode'  => \&mode_pairing,
-        'list-requests' => \&mode_list_requests,
-        'approve'       => \&mode_approve,
-        'deny'          => \&mode_deny,
+        'run'               => \&mode_run,
+        'ping'              => \&mode_ping,
+        'pairing-mode'      => \&mode_pairing,
+        'list-requests'     => \&mode_list_requests,
+        'approve'           => \&mode_approve,
+        'deny'              => \&mode_deny,
         'setup-ca'          => \&mode_setup_ca,
         'setup-dispatcher'  => \&mode_setup_dispatcher,
-        'list-agents'   => \&mode_list_agents,
+        'list-agents'       => \&mode_list_agents,
+        'rotate-cert'       => \&mode_rotate_cert,
+        'serial-status'     => \&mode_serial_status,
     );
 
     my $handler = $dispatch{$mode}
@@ -183,6 +186,35 @@ sub mode_list_agents {
 sub mode_pairing {
     my ($opts) = @_;
     my $config = _load_config();
+
+    # Fork a child to run the cert renewal check loop.
+    # The child runs independently - if it exits, pairing mode continues.
+    # The parent reaps it on exit via END block.
+    my $check_pid = fork();
+    if (!defined $check_pid) {
+        warn "Warning: could not fork renewal check loop: $!\n";
+    }
+    elsif ($check_pid == 0) {
+        # Child: run renewal loop indefinitely
+        # Small startup delay so pairing mode is listening first
+        sleep 5;
+        eval {
+            Dispatcher::Rotation::check_and_rotate(config => $config);
+            Dispatcher::Rotation::broadcast_serial(config => $config);
+            Dispatcher::Rotation::expire_stale_agents(config => $config);
+            Dispatcher::Rotation::run_check_loop(config => $config);
+        };
+        exit 0;
+    }
+
+    # Parent: register cleanup
+    $SIG{INT} = $SIG{TERM} = sub {
+        kill 'TERM', $check_pid if $check_pid;
+        Dispatcher::Log::log_action('INFO', { ACTION => 'pairing-mode-stop' });
+        print "\nPairing mode stopped.\n";
+        exit 0;
+    };
+
     Dispatcher::Pairing::run_pairing_mode(
         port   => $opts->{port} // $PAIR_PORT,
         ca_dir => '/etc/dispatcher',
@@ -235,14 +267,127 @@ sub mode_setup_ca {
 }
 
 sub mode_setup_dispatcher {
+    my $ca_dir   = '/etc/dispatcher';
+    my $disp_crt = "$ca_dir/dispatcher.crt";
+
+    if (-f $disp_crt) {
+        # Replacing the dispatcher cert changes its serial. Every paired agent
+        # stores the dispatcher serial at pairing time and uses it to restrict
+        # /capabilities. After re-keying, agents will reject /capabilities
+        # from the new dispatcher cert until re-paired.
+        my $agents = eval { Dispatcher::Registry::list_agents() } // [];
+        my $count  = scalar @$agents;
+        if ($count > 0) {
+            print "WARNING: Existing dispatcher cert found.\n";
+            printf "  %d registered agent%s will require re-pairing after this operation.\n",
+                $count, ($count == 1 ? '' : 's');
+            print "  Operations (run/ping) continue to work until agent certs expire.\n";
+            print "  /capabilities will be rejected by agents until re-paired.\n";
+            print "\nProceed? [y/N]: ";
+            my $answer = <STDIN>;
+            chomp $answer;
+            unless (lc($answer) eq 'y') {
+                print "Aborted.\n";
+                exit 0;
+            }
+        }
+        else {
+            print "Existing dispatcher cert found. No registered agents - replacing.\n";
+        }
+    }
+
     print "Generating dispatcher certificate...\n";
-    my $result = Dispatcher::CA::generate_dispatcher_cert(ca_dir => '/etc/dispatcher');
+    my $result = Dispatcher::CA::generate_dispatcher_cert(
+        ca_dir => $ca_dir,
+        force  => 1,
+    );
     print "Dispatcher cert created:\n";
     print "  Key:  $result->{key}\n";
     print "  Cert: $result->{cert}\n";
+    print "Run 'dispatcher pairing-mode' to re-pair agents as needed.\n"
+        if -f "$ca_dir/dispatcher.crt";
 }
 
-sub _format_run_results {
+sub mode_rotate_cert {
+    my ($opts) = @_;
+    my $config = _load_config();
+
+    print "Rotating dispatcher certificate...\n";
+
+    my $result = Dispatcher::Rotation::rotate(config => $config);
+
+    unless ($result->{rotated}) {
+        die "Rotation failed: " . ($result->{error} // 'unknown error') . "\n";
+    }
+
+    printf "New serial:      %s\n", $result->{serial};
+    printf "Old serial:      %s\n", $result->{old_serial} || '(none)';
+    printf "Overlap expires: %s\n", $result->{overlap_expires};
+    printf "Agents pending:  %d\n", $result->{agents_pending};
+
+    if ($result->{agents_pending} > 0) {
+        print "\nBroadcasting new serial to agents...\n";
+        my $report = Dispatcher::Rotation::broadcast_serial(config => $config);
+
+        my @ok     = grep { $_->{status} eq 'ok'     } @$report;
+        my @failed = grep { $_->{status} eq 'failed' } @$report;
+
+        printf "  Updated: %d\n", scalar @ok;
+        printf "  Failed:  %d\n", scalar @failed;
+
+        if (@failed) {
+            print "\nAgents requiring attention:\n";
+            for my $r (@failed) {
+                printf "  %-30s  %s\n", $r->{hostname}, $r->{error} // 'failed';
+            }
+            print "\nFailed agents will be retried automatically by the check loop.\n";
+            print "Agents offline longer than the overlap window will require re-pairing.\n";
+        }
+    }
+}
+
+sub mode_serial_status {
+    my ($opts) = @_;
+
+    my $state  = Dispatcher::Rotation::load_state();
+    my $agents = Dispatcher::Registry::list_agents();
+
+    if ($state) {
+        printf "Current serial:  %s\n",  $state->{current_serial}  // '?';
+        printf "Previous serial: %s\n",  $state->{previous_serial} // '(none)';
+        printf "Rotated at:      %s\n",  $state->{rotated_at}      // '?';
+        printf "Overlap expires: %s\n",  $state->{overlap_expires} // '?';
+        print "\n";
+    }
+    else {
+        print "No rotation has been performed.\n\n";
+    }
+
+    if (!@$agents) {
+        print "No registered agents.\n";
+        return;
+    }
+
+    if ($opts->{json}) {
+        print encode_json({
+            state  => $state,
+            agents => $agents,
+        }), "\n";
+        return;
+    }
+
+    printf "%-30s  %-10s  %-24s  %s\n",
+        'HOSTNAME', 'STATUS', 'CONFIRMED', 'SERIAL';
+    printf "%s\n", '-' x 85;
+    for my $a (@$agents) {
+        printf "%-30s  %-10s  %-24s  %s\n",
+            $a->{hostname}         // '?',
+            $a->{serial_status}    // 'unknown',
+            $a->{serial_confirmed} // '-',
+            substr($a->{dispatcher_serial} // '-', 0, 16)
+                . (length($a->{dispatcher_serial} // '') > 16 ? '...' : '');
+    }
+}
     my ($results) = @_;
     for my $r (@$results) {
         my $host   = $r->{host}  // '?';
@@ -359,6 +504,8 @@ Modes:
   setup-ca                   One-time CA initialisation
   setup-dispatcher           Generate dispatcher key and certificate
   list-agents                List all registered (paired) agents
+  rotate-cert                Rotate dispatcher certificate and broadcast new serial
+  serial-status              Show dispatcher serial and per-agent serial state
 
 Options:
   --config <path>            Path to dispatcher.conf

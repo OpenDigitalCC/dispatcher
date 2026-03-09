@@ -68,15 +68,23 @@ sub generate_csr_only {
 # cert_dir defaults to /etc/dispatcher-agent
 sub store_certs {
     my (%opts) = @_;
-    my $cert_pem  = $opts{cert_pem}  or croak "cert_pem required";
-    my $ca_pem    = $opts{ca_pem}    or croak "ca_pem required";
-    my $key_pem   = $opts{key_pem}   or croak "key_pem required";
-    my $cert_dir  = $opts{cert_dir}  // '/etc/dispatcher-agent';
-    my $group     = $opts{group}     // 'dispatcher-agent';
+    my $cert_pem          = $opts{cert_pem}          or croak "cert_pem required";
+    my $ca_pem            = $opts{ca_pem}             or croak "ca_pem required";
+    my $key_pem           = $opts{key_pem}            or croak "key_pem required";
+    my $dispatcher_serial = $opts{dispatcher_serial}  // '';
+    my $cert_dir          = $opts{cert_dir}            // '/etc/dispatcher-agent';
+    my $group             = $opts{group}               // 'dispatcher-agent';
 
     _write_file("$cert_dir/agent.crt", $cert_pem, 0640);
     _write_file("$cert_dir/agent.key", $key_pem,  0640);
     _write_file("$cert_dir/ca.crt",   $ca_pem,   0644);
+
+    # Store dispatcher cert serial for capabilities access control.
+    # The agent uses this to restrict /capabilities to the genuine dispatcher
+    # only, preventing lateral reconnaissance from a compromised agent peer.
+    if (length $dispatcher_serial) {
+        _write_file("$cert_dir/dispatcher-serial", $dispatcher_serial . "\n", 0644);
+    }
 
     # Set group ownership so the service user can read the certs
     my $gid = getgrnam($group);
@@ -84,6 +92,7 @@ sub store_certs {
         chown 0, $gid, "$cert_dir/agent.crt",
                        "$cert_dir/agent.key",
                        "$cert_dir/ca.crt";
+        # dispatcher-serial is world-readable (0644) - no group ownership needed
     }
     else {
         warn "store_certs: group '$group' not found - set ownership manually\n";
@@ -190,16 +199,106 @@ sub request_pairing {
             return { ok => 0, error => 'nonce mismatch in pairing response' };
         }
         return {
-            ok       => 1,
-            cert_pem => $data->{cert},
-            ca_pem   => $data->{ca},
+            ok                => 1,
+            cert_pem          => $data->{cert},
+            ca_pem            => $data->{ca},
+            dispatcher_serial => $data->{dispatcher_serial} // '',
         };
     }
 
     return { ok => 0, error => $data->{reason} // 'denied' };
 }
 
+# Load the stored dispatcher cert serial from file.
+# Returns lowercase hex string, or empty string if file absent or unreadable.
+# File contains a single line written by store_certs at pairing time.
+sub load_dispatcher_serial {
+    my (%opts) = @_;
+    my $path = $opts{path} or croak "path required";
+
+    return '' unless -f $path;
+
+    open my $fh, '<', $path
+        or do { warn "Cannot read dispatcher serial '$path': $!\n"; return ''; };
+    my $line = <$fh>;
+    close $fh;
+
+    return '' unless defined $line;
+    $line =~ s/\s+//g;
+    $line = lc $line;
+    return $line =~ /^[0-9a-f]+$/ ? $line : '';
+}
+
+# Load the revoked serials file into a hashref keyed by lowercase hex serial.
+# Tolerates absent file - returns empty hashref.
+# Format: one serial per line, hex string (as output by openssl x509 -serial,
+# with or without "serial=" prefix, upper or lower case - all normalised).
+# Lines beginning with # are treated as comments and ignored.
+#
+# Returns hashref: { 'aabbcc...' => 1, ... }
+sub load_revoked_serials {
+    my (%opts) = @_;
+    my $path = $opts{path} or croak "path required";
+
+    my %revoked;
+    return \%revoked unless -f $path;
+
+    open my $fh, '<', $path
+        or do { warn "Cannot read revoked serials '$path': $!\n"; return \%revoked; };
+
+    while (my $line = <$fh>) {
+        chomp $line;
+        $line =~ s/#.*$//;       # strip comments
+        $line =~ s/^\s+|\s+$//g; # strip whitespace
+        next unless length $line;
+        $line =~ s/^serial=//i;  # strip openssl prefix if present
+        $line = lc $line;
+        next unless $line =~ /^[0-9a-f]+$/;
+        $revoked{$line} = 1;
+    }
+    close $fh;
+
+    return \%revoked;
+}
+
+# Return true if the given serial (decimal string from peer_certificate,
+# or hex string) is in the revoked set.
+# Normalises the input to lowercase hex before checking.
+sub serial_revoked {
+    my ($serial, $revoked) = @_;
+    return 0 unless defined $serial && ref $revoked eq 'HASH';
+    my $hex = _serial_to_hex($serial);
+    return exists $revoked->{$hex} ? 1 : 0;
+}
+
 # --- private helpers ---
+
+# Normalise a serial number to lowercase hex.
+# Accepts either a decimal string (from IO::Socket::SSL peer_certificate)
+# or a hex string (from openssl x509 -serial output).
+# Hex strings are identified by non-decimal characters or a leading 0x.
+sub _serial_to_hex {
+    my ($serial) = @_;
+    return '' unless defined $serial && length $serial;
+    $serial =~ s/^0x//i;
+    $serial =~ s/^serial=//i;
+    $serial = lc $serial;
+    # If it contains only hex digits and at least one a-f, already hex
+    if ($serial =~ /[a-f]/) {
+        return $serial;
+    }
+    # Pure decimal - convert via Math::BigInt if available, otherwise sprintf
+    # For cert serials (up to 20 bytes / 160 bits) we need bignum arithmetic
+    eval { require Math::BigInt };
+    if (!$@) {
+        return lc Math::BigInt->new($serial)->as_hex =~ s/^0x//r;
+    }
+    # Fallback: if serial fits in 64 bits use sprintf
+    return sprintf '%x', $serial if $serial < 2**53;
+    # Last resort: return as-is with a warning
+    warn "Cannot convert serial '$serial' to hex: Math::BigInt not available\n";
+    return $serial;
+}
 
 sub _gen_nonce {
     return sprintf '%08x%08x%08x%08x',

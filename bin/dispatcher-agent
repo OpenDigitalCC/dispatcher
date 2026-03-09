@@ -59,10 +59,30 @@ sub mode_serve {
     my $config    = Dispatcher::Agent::Config::load_config($CONFIG_PATH);
     my $allowlist = Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH);
 
+    my $revoked_path = $config->{revoked_serials}
+                    // '/etc/dispatcher-agent/revoked-serials';
+    my $revoked = Dispatcher::Agent::Pairing::load_revoked_serials(
+        path => $revoked_path,
+    );
+
+    my $disp_serial_path = $config->{dispatcher_serial_path}
+                        // '/etc/dispatcher-agent/dispatcher-serial';
+    my $disp_serial = Dispatcher::Agent::Pairing::load_dispatcher_serial(
+        path => $disp_serial_path,
+    );
+
     $SIG{HUP} = sub {
-        warn "Reloading allowlist...\n";
+        warn "Reloading allowlist, revocation list, and dispatcher serial...\n";
         $allowlist = eval { Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH) };
         warn "Allowlist reload failed: $@\n" if $@;
+        $revoked = eval {
+            Dispatcher::Agent::Pairing::load_revoked_serials(path => $revoked_path)
+        };
+        warn "Revocation list reload failed: $@\n" if $@;
+        $disp_serial = eval {
+            Dispatcher::Agent::Pairing::load_dispatcher_serial(path => $disp_serial_path)
+        };
+        warn "Dispatcher serial reload failed: $@\n" if $@;
     };
 
     require IO::Socket::SSL;
@@ -93,7 +113,7 @@ sub mode_serve {
         if ($pid == 0) {
             # Child: close server socket, handle connection, exit
             $server->close(SSL_no_shutdown => 1);
-            handle_connection($conn, $peer, $allowlist, $config);
+            handle_connection($conn, $peer, $allowlist, $config, $revoked, $disp_serial);
             $conn->close;
             exit 0;
         }
@@ -141,9 +161,10 @@ sub mode_request_pairing {
     }
 
     Dispatcher::Agent::Pairing::store_certs(
-        cert_pem => $result->{cert_pem},
-        ca_pem   => $result->{ca_pem},
-        key_pem  => $pair->{key_pem},
+        cert_pem          => $result->{cert_pem},
+        ca_pem            => $result->{ca_pem},
+        key_pem           => $pair->{key_pem},
+        dispatcher_serial => $result->{dispatcher_serial} // '',
     );
 
     Dispatcher::Log::log_action('INFO', {
@@ -197,7 +218,24 @@ sub mode_ping_self {
 # Reads raw HTTP/1.0 request from IO::Socket::SSL, dispatches, sends response.
 
 sub handle_connection {
-    my ($conn, $peer, $allowlist, $config) = @_;
+    my ($conn, $peer, $allowlist, $config, $revoked, $disp_serial) = @_;
+
+    # Check peer cert serial against the revocation list before any routing.
+    # A revoked cert is rejected regardless of what it would have been allowed
+    # to do. The check happens after the mTLS handshake (which verified the CA
+    # signature) - revocation is a post-authentication deny.
+    my $peer_serial = eval { $conn->peer_certificate('serialNumber') } // '';
+
+    if (length $peer_serial &&
+        Dispatcher::Agent::Pairing::serial_revoked($peer_serial, $revoked)) {
+        Dispatcher::Log::log_action('WARNING', {
+            ACTION => 'revoked-cert',
+            PEER   => $peer,
+            SERIAL => $peer_serial,
+        });
+        _send_raw($conn, 403, encode_json({ error => 'certificate revoked' }));
+        return;
+    }
 
     # Read request line
     my $request_line = <$conn>;
@@ -234,7 +272,7 @@ sub handle_connection {
         handle_ping($conn, $body, $peer);
     }
     elsif ($method eq 'GET' && $path eq '/capabilities') {
-        handle_capabilities($conn, $peer, $allowlist, $config);
+        handle_capabilities($conn, $peer, $allowlist, $config, $disp_serial);
     }
     else {
         _send_raw($conn, 404, encode_json({ error => 'not found' }));
@@ -363,22 +401,39 @@ sub handle_ping {
 }
 
 sub handle_capabilities {
-    my ($conn, $peer, $allowlist, $config) = @_;
+    my ($conn, $peer, $allowlist, $config, $disp_serial) = @_;
 
-    # Restrict capabilities to connections presenting the dispatcher cert.
-    # Any CA-signed peer cert whose CN does not match dispatcher_cn is rejected.
-    # This prevents lateral reconnaissance from a compromised agent peer.
-    my $expected_cn = $config->{dispatcher_cn} // 'dispatcher';
-    my $peer_cn     = eval { $conn->peer_certificate('cn') } // '';
-    unless ($peer_cn eq $expected_cn) {
+    # Restrict /capabilities to the genuine dispatcher cert.
+    # The stored serial was recorded at pairing time from the dispatcher's
+    # own cert. Any CA-signed peer whose serial does not match is rejected -
+    # this closes lateral reconnaissance from a compromised agent peer.
+    #
+    # If no serial is stored (agent not yet paired, or pre-serial-tracking
+    # pairing), the check is skipped with a warning. Re-pair to enable it.
+    if (length $disp_serial) {
+        my $peer_serial = eval {
+            Dispatcher::Agent::Pairing::_serial_to_hex(
+                $conn->peer_certificate('serialNumber') // ''
+            )
+        } // '';
+
+        unless (length $peer_serial && $peer_serial eq $disp_serial) {
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION      => 'capabilities-deny',
+                PEER        => $peer,
+                PEER_SERIAL => $peer_serial,
+                REASON      => 'serial-mismatch',
+            });
+            _send_raw($conn, 403, encode_json({ error => 'forbidden' }));
+            return;
+        }
+    }
+    else {
         Dispatcher::Log::log_action('WARNING', {
-            ACTION  => 'capabilities-deny',
-            PEER    => $peer,
-            PEER_CN => $peer_cn,
-            REASON  => 'cn-mismatch',
+            ACTION => 'capabilities-no-serial',
+            PEER   => $peer,
+            REASON => 'no dispatcher serial stored - re-pair to enable restriction',
         });
-        _send_raw($conn, 403, encode_json({ error => 'forbidden' }));
-        return;
     }
 
     my @scripts;

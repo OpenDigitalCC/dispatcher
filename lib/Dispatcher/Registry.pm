@@ -20,6 +20,12 @@ my $REGISTRY_DIR = '/var/lib/dispatcher/agents';
 #   paired   => $iso8601
 #   expiry   => $str      (openssl notAfter string, may be '')
 #   reqid    => $str
+#
+# Optional serial tracking opts (written at pairing time):
+#   dispatcher_serial => $hex    (serial agent has stored)
+#   serial_status     => $str    (current|pending|stale|unknown)
+#   serial_broadcast  => $iso8601
+#   serial_confirmed  => $iso8601
 sub register_agent {
     my (%opts) = @_;
     my $hostname = $opts{hostname} or croak "hostname required";
@@ -28,14 +34,50 @@ sub register_agent {
     make_path($dir) unless -d $dir;
 
     my $record = {
-        hostname => $hostname,
-        ip       => $opts{ip}     // '',
-        paired   => $opts{paired} // '',
-        expiry   => $opts{expiry} // '',
-        reqid    => $opts{reqid}  // '',
+        hostname          => $hostname,
+        ip                => $opts{ip}                // '',
+        paired            => $opts{paired}            // '',
+        expiry            => $opts{expiry}            // '',
+        reqid             => $opts{reqid}             // '',
+        dispatcher_serial => $opts{dispatcher_serial} // '',
+        serial_status     => $opts{serial_status}     // 'unknown',
+        serial_broadcast  => $opts{serial_broadcast}  // '',
+        serial_confirmed  => $opts{serial_confirmed}  // '',
     };
 
     _write_atomic("$dir/$hostname.json", encode_json($record));
+}
+
+# Update serial tracking fields for an existing agent record.
+# Merges the provided fields into the existing record without touching
+# other fields (hostname, ip, paired, expiry, etc.).
+#
+# Required opts:
+#   hostname => $str
+#   status   => 'current' | 'pending' | 'stale' | 'unknown'
+#
+# Optional opts:
+#   serial           => $hex      (update stored serial)
+#   serial_broadcast => $iso8601
+#   serial_confirmed => $iso8601
+sub update_agent_serial_status {
+    my (%opts) = @_;
+    my $hostname = $opts{hostname} or croak "hostname required";
+    my $status   = $opts{status}   or croak "status required";
+    my $dir      = $opts{registry_dir} // $REGISTRY_DIR;
+    my $path     = "$dir/$hostname.json";
+
+    my $record = -f $path
+        ? (eval { decode_json(_slurp($path)) } // {})
+        : {};
+
+    $record->{hostname}      = $hostname;
+    $record->{serial_status} = $status;
+    $record->{dispatcher_serial}  = $opts{serial}           if defined $opts{serial};
+    $record->{serial_broadcast}   = $opts{serial_broadcast} if defined $opts{serial_broadcast};
+    $record->{serial_confirmed}   = $opts{serial_confirmed} if defined $opts{serial_confirmed};
+
+    _write_atomic($path, encode_json($record));
 }
 
 # Return a list of all registered agents as an arrayref of hashrefs,

@@ -218,22 +218,117 @@ The API unit additionally sets `ReadWritePaths=/var/lib/dispatcher` to
 restrict filesystem write access to the runtime directory only.
 
 
-## Unpairing and Cert Revocation
+## Dispatcher Serial Tracking and Cert Rotation
 
-`dispatcher unpair <hostname>` removes the agent from the registry. The
-dispatcher will no longer attempt to contact or renew certs for that host.
+At pairing time, the dispatcher includes its own cert serial in the approval
+payload. The agent stores this at `/etc/dispatcher-agent/dispatcher-serial`.
+On every `/capabilities` request, the agent compares the incoming peer cert
+serial against the stored value and rejects any mismatch with a 403.
 
-There is no CRL or OCSP mechanism. The agent's certificate remains technically
-valid until its natural expiry date after unpairing. The mTLS connection will
-still succeed if the agent attempts to connect with a valid cert and a
-dispatcher that still has the CA.
+The dispatcher cert is renewed automatically before expiry. The renewal
+process and the serial tracking work together to rotate credentials without
+disrupting the fleet:
 
-Operational mitigations:
+Renewal trigger
+: The dispatcher checks its own cert expiry at startup and every 4 hours
+  (configurable via `cert_check_interval`). When fewer than `cert_renewal_days`
+  remain (default: 90), it generates a new cert automatically.
 
-- Decommission the agent host promptly after unpairing
-- With the default 365-day cert lifetime, the exposure window is bounded
-- For immediate revocation, rotate the CA: generate a new CA, re-pair all
-  remaining agents, decommission the old CA
+Broadcast
+: Immediately after generating the new cert, the dispatcher calls
+  `update-dispatcher-serial` on all registered agents in parallel, passing
+  the new serial as an argument. The script writes the file and sends SIGHUP.
+  Agents that respond successfully are marked `current` in the registry.
+
+Overlap window
+: Agents that were offline during the broadcast are marked `pending`. The
+  dispatcher retries them on each subsequent check interval. After
+  `cert_overlap_days` (default: 30, configurable) the overlap expires and
+  any remaining `pending` agents are marked `stale`. A stale agent needs
+  re-pairing - it has missed the rotation window. Operations (run, ping)
+  continue to work until the agent cert expires; only `/capabilities` is
+  affected.
+
+`dispatcher serial-status`
+: Shows the current and previous dispatcher serial, rotation timestamp,
+  overlap expiry, and per-agent serial state (current/pending/stale/unknown).
+  Use this to identify agents that need attention after a rotation.
+
+`dispatcher rotate-cert`
+: Manual rotation trigger. Runs the same logic as the automatic check,
+  broadcasts immediately, and reports per-agent results. Use after a suspected
+  compromise or to test the rotation path.
+
+Dispatcher re-keying
+: Running `setup-dispatcher` again generates a new cert with a new serial
+  and marks all agents as pending. The dispatcher binary checks the registry
+  before proceeding and displays the number of agents that will require
+  re-pairing if the overlap window is missed.
+
+`update-dispatcher-serial` script
+: Installed by the agent installer at
+  `/opt/dispatcher-scripts/update-dispatcher-serial`. Must be enabled in the
+  agent's `scripts.conf` for automatic rotation to work. Agents without this
+  entry in their allowlist will not receive serial updates and will need
+  re-pairing when the overlap window expires.
+
+## Certificate Revocation
+
+The agent maintains a revocation list at `/etc/dispatcher-agent/revoked-serials`
+(path configurable via `revoked_serials` in `agent.conf`). On every incoming
+mTLS connection, after the handshake verifies the CA signature, the peer cert
+serial is checked against this list. A revoked cert is rejected with a 403
+and a syslog warning before any request is processed.
+
+The file contains one lowercase hex serial per line, in the format output by:
+
+```bash
+openssl x509 -noout -serial -in /path/to/cert.crt
+```
+
+Lines beginning with `#` are treated as comments. A missing or empty file means
+no certs are revoked - the normal state for a new installation.
+
+The revocation list is loaded at agent startup and reloaded on SIGHUP without
+restarting the agent or dropping active connections:
+
+```bash
+systemctl reload dispatcher-agent
+```
+
+To revoke a cert:
+
+1. Obtain the serial: `openssl x509 -noout -serial -in /etc/dispatcher/dispatcher.crt`
+2. Append it (lowercase) to `/etc/dispatcher-agent/revoked-serials` on each
+   affected agent
+3. Reload: `systemctl reload dispatcher-agent`
+
+For fleet-wide revocation, run a dispatcher script that appends the serial and
+sends SIGHUP on each agent. A `revoke-cert` script is a natural entry in the
+agent allowlist for this purpose.
+
+Unpairing and revocation
+: `dispatcher unpair <hostname>` removes the agent from the registry and
+  prevents further cert renewal. The agent cert remains technically valid until
+  natural expiry. To immediately close this window, add the agent cert serial
+  to the dispatcher's own revocation check (if implemented) or decommission
+  the host promptly. The revocation list on the agent only covers certs
+  presented *to* the agent - it does not prevent a stolen agent cert from
+  connecting to the dispatcher.
+
+What revocation closes
+: A compromised dispatcher cert that has been revoked cannot connect to any
+  agent that has been updated, even though it was signed by the CA and has not
+  expired. A compromised agent cert cannot be revoked via this mechanism on
+  the dispatcher side - that requires the dispatcher-side equivalent (serial
+  tracking work, next phase).
+
+What revocation does not close
+: A compromised cert that reaches an agent before the revocation list is updated.
+  The list is only as current as the last SIGHUP. For time-critical revocation,
+  restart the agent service rather than reloading - the connection is still
+  rejected on reconnect but any in-flight connection from a revoked cert may
+  complete if it was established before the reload.
 
 
 ## CA Key Protection
@@ -276,7 +371,7 @@ where the API is reachable from outside the dispatcher host:
 | Rogue dispatcher connecting to agent | Agent verifies dispatcher cert against CA |
 | Pairing replay or misrouting | Nonce verified before cert storage |
 | Pairing CSR injection / social engineering | 6-digit pairing code verified by operator on both sides |
-| Lateral reconnaissance via capabilities | `/capabilities` restricted to dispatcher CN only |
+| Lateral reconnaissance via capabilities | `/capabilities` restricted to stored dispatcher serial; re-pair to activate |
 | Arbitrary script execution via run | Agent-side allowlist, name pattern validation |
 | Path traversal in script name | `/^[\w-]+$/` excludes `/` and `.` |
 | Shell injection via arguments | `exec` without shell, args passed as list |
@@ -286,6 +381,7 @@ where the API is reachable from outside the dispatcher host:
 | Unauthorised API access (network) | API binds to `127.0.0.1` by default; external bind is opt-in |
 | API script inventory exposure | All endpoints including `/openapi-live.json` pass through auth |
 | CA key theft | 0600 root-only, offline backup, host access controls |
-| Cert remaining valid after unpair | Short cert lifetime, prompt decommission; revocation list (TODO) |
+| Cert remaining valid after unpair | Revocation list on agent; add serial and reload |
+| Compromised dispatcher cert | Add serial to revoked-serials on all agents; reload |
 | Token leaking via logs | Tokens never logged by dispatcher or agent |
 | Token leaking via ps | Use `DISPATCHER_TOKEN` env var not `--token` flag |

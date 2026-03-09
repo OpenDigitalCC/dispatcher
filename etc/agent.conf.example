@@ -12,6 +12,26 @@ ca   = /etc/dispatcher-agent/ca.crt
 # on the dispatcher host (default: 'dispatcher').
 # dispatcher_cn = dispatcher
 
+# Dispatcher certificate serial (written automatically at pairing time).
+# Path to a file containing the trusted dispatcher cert serial number (hex).
+# The /capabilities endpoint rejects any peer whose cert serial does not match.
+# This restricts allowlist enumeration to the genuine dispatcher only,
+# preventing lateral reconnaissance from a compromised agent peer.
+# Written by request-pairing - do not edit manually.
+# Re-pair the agent if this file is missing or needs updating.
+# Reloaded on SIGHUP alongside the allowlist and revocation list.
+# dispatcher_serial_path = /etc/dispatcher-agent/dispatcher-serial
+
+# Revoked certificate serials.
+# Path to a file listing revoked TLS certificate serial numbers, one per line.
+# Connections presenting a cert whose serial is in this list are rejected
+# immediately after the mTLS handshake, before any request is processed.
+# Format: lowercase hex serial as output by: openssl x509 -noout -serial -in cert.crt
+# Lines beginning with # are treated as comments.
+# The file is loaded at startup and reloaded on SIGHUP (systemctl reload dispatcher-agent).
+# A missing or empty file means no certs are revoked - this is the normal state.
+# revoked_serials = /etc/dispatcher-agent/revoked-serials
+
 # Restrict scripts to approved directories (optional, recommended).
 # Colon-separated list of absolute directory paths.
 # If set, any script path in scripts.conf not under an approved directory

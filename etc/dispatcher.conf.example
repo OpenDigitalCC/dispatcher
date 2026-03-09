@@ -24,6 +24,21 @@ cert_days = 365
 # api_cert = /etc/dispatcher/dispatcher.crt
 # api_key  = /etc/dispatcher/dispatcher.key
 
+# Dispatcher certificate rotation
+#
+# cert_days: lifetime of the dispatcher certificate in days (default: 365).
+# cert_renewal_days: begin renewal this many days before expiry (default: 90).
+#   With cert_days = 365 and cert_renewal_days = 90, renewal begins at day 275.
+# cert_overlap_days: how long to keep broadcasting after rotation before marking
+#   unreachable agents as stale and requiring re-pair (default: 30).
+# cert_check_interval: seconds between internal expiry checks (default: 14400 = 4h).
+#   Reduce for testing. The check is lightweight - a cert read and date comparison.
+#
+# cert_days          = 365
+# cert_renewal_days  = 90
+# cert_overlap_days  = 30
+# cert_check_interval = 14400
+
 # API bind address (default: 127.0.0.1 - localhost only).
 # Set to 0.0.0.0 to accept connections on all interfaces, or specify a
 # particular interface address. Only change this if external clients need
