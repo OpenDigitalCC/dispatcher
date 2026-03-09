@@ -394,6 +394,8 @@ sub mode_serial_status {
                 . (length($a->{dispatcher_serial} // '') > 16 ? '...' : '');
     }
 }
+
+sub _format_run_results {
     my ($results) = @_;
     for my $r (@$results) {
         my $host   = $r->{host}  // '?';
