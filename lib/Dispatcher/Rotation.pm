@@ -107,6 +107,7 @@ sub expire_stale_agents {
     my $config = $opts{config} or croak "config required";
 
     my $state = load_state(path => $config->{rotation_file});
+    return unless $state && $state->{overlap_expires};
 
     my $now     = time();
     my $expires = _parse_iso8601($state->{overlap_expires});
