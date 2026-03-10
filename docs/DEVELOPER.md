@@ -1,7 +1,7 @@
 ---
 title: Dispatcher and agent - Developer document
 subtitle: Purpose, contents, protocol, logging, security model and extending
-brand: odcc
+brand: opendigitalcc
 ---
 
 # Dispatcher - Developer Documentation
@@ -519,6 +519,16 @@ agent's cert expiry (returned in the ping response) is within half the
 configured `cert_days`, the dispatcher initiates renewal over the same mTLS
 connection. Renewal failure is logged at ERR level but does not affect the
 ping result.
+
+SSL configuration note
+: Outbound connections use `IO::Socket::SSL::set_defaults` rather than
+  `ssl_opts` on `LWP::UserAgent->new`. This is required because `LWP`'s
+  `ssl_opts` mechanism does not reliably pass `SSL_cert_file` and
+  `SSL_key_file` through to `IO::Socket::SSL` for client cert presentation
+  in mTLS. `set_defaults` is the authoritative SSL configuration path for all
+  outbound connections, including TLS version floor and cipher list. Any future
+  SSL option changes for outbound connections must be made there, not in
+  `ssl_opts`.
 
 Functions:
 
@@ -1454,6 +1464,17 @@ Interactive pairing prompt buffering (fixed)
   182.5 days). Since 200 > 182.5, the cert is not yet past half-life and the
   assertion was wrong. Corrected: 200 days remaining is not due with
   cert_days=365 (200 > 182.5) and is due with cert_days=730 (200 < 365).
+
+`RateLimit::check` stale key after expired block (fixed)
+: When a block had expired, `check` deleted the entry and then re-initialised
+  an empty `{ connections => [], failures => [] }` entry for the same IP before
+  returning 0. This left a stale key in `%rate_state` with empty arrays rather
+  than no key at all. On the next connection, `record_connection` would push
+  into the pre-existing empty arrayref correctly, but the presence of the key
+  meant that eviction would treat this IP as having a `blocked_until` of `undef`
+  (sorting as 0) rather than as a genuinely new entry. Fixed by adding
+  `return 0` immediately after `delete $state->{$peer}`, consistent with the
+  spec's "delete the entire entry and continue" intent.
 
 
 ## Adding a New Script to an Agent

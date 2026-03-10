@@ -210,23 +210,52 @@ The `dispatcher` group grants CLI access to non-root operators.
 The agent and API systemd units apply the following restrictions:
 
 ```
-NoNewPrivileges=true
+NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
 ```
 
 The API unit additionally sets `ReadWritePaths=/var/lib/dispatcher` to
 restrict filesystem write access to the runtime directory only.
+
+The agent unit applies additional containment:
+
+```
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+```
+
+`CapabilityBoundingSet=` (empty) drops all capabilities from the bounding
+set, preventing any allowlisted script from acquiring capabilities regardless
+of file capability bits. `MemoryDenyWriteExecute=yes` is safe for the current
+bash-only script inventory but must be removed if a JIT-compiled runtime
+(Java, Node, Python with JIT) is added to the allowlist.
 
 
 ## Dispatcher Serial Tracking and Cert Rotation
 
 At pairing time, the dispatcher includes its own cert serial in the approval
 payload. The agent stores this at `/etc/dispatcher-agent/dispatcher-serial`.
-On every `/capabilities` request, the agent compares the incoming peer cert
-serial against the stored value and rejects any mismatch with a 403.
+On every `/run`, `/ping`, and `/capabilities` request, the agent compares the
+incoming peer cert serial against the stored value and rejects any mismatch
+with a 403. If no serial file is present, `/run` and `/ping` deny all
+requests; `/capabilities` retains a warn-and-allow path for agents that have
+not yet been re-paired after serial tracking was introduced.
+
+`/renew` and `/renew-complete` are intentionally exempt from the serial check.
+During cert rotation, the dispatcher presents its new cert before agents
+receive the updated serial. Applying the serial check to the renewal endpoints
+would cause every agent to reject the serial broadcast, breaking the rotation
+mechanism. The renewal endpoints require a valid CA-signed cert (mTLS still
+applies) but do not require serial match. See Cert Rotation below.
 
 The dispatcher cert is renewed automatically before expiry. The renewal
 process and the serial tracking work together to rotate credentials without
@@ -248,9 +277,9 @@ Overlap window
   dispatcher retries them on each subsequent check interval. After
   `cert_overlap_days` (default: 30, configurable) the overlap expires and
   any remaining `pending` agents are marked `stale`. A stale agent needs
-  re-pairing - it has missed the rotation window. Operations (run, ping)
-  continue to work until the agent cert expires; only `/capabilities` is
-  affected.
+  re-pairing - it has missed the rotation window. `/run` and `/ping` deny
+  with 403 once the serial no longer matches; `/capabilities` warns but
+  allows.
 
 `dispatcher serial-status`
 : Shows the current and previous dispatcher serial, rotation timestamp,
@@ -354,6 +383,46 @@ Recommended practices:
 - Audit access to the dispatcher host via system auth logs
 
 
+## Connection Hardening
+
+Connection rate limiting
+: The agent tracks connection attempts per source IP in memory. A source
+  that establishes more than 10 connections within 60 seconds is blocked for
+  5 minutes (volume threshold). A source that causes more than 3 TLS handshake
+  failures within 600 seconds is blocked for 1 hour (probe threshold). Blocks
+  are held in the agent process memory and cleared on SIGHUP. The block state
+  is logged at the point the threshold is crossed; repeat checks are silent.
+
+IP allowlist
+: If `allowed_ips` is set in `agent.conf`, the agent enforces an IP allowlist
+  before the rate check and before any request is processed. Any source IP not
+  in the list is rejected immediately with the connection closed and an
+  `ACTION=ip-block` syslog entry. The allowlist supports exact IPs and /8,
+  /16, /24 CIDR prefixes. Invalid entries are filtered at load time with a
+  warning; the agent starts normally with the remaining valid entries. When
+  `allowed_ips` is absent, all source IPs are permitted.
+
+TLS version and cipher restriction
+: The agent accepts TLS 1.2 and TLS 1.3 only. TLS 1.0 and 1.1 are rejected.
+  For TLS 1.2 connections, only ECDHE cipher suites using AES-256-GCM or
+  ChaCha20-Poly1305 are permitted. CBC mode, RC4, export-grade, and anonymous
+  ciphers are excluded. TLS 1.3 cipher suites are governed by OpenSSL defaults,
+  which are all AEAD on current releases.
+
+Request body size limit
+: The agent limits incoming request bodies to 1 MB. Any request declaring a
+  `Content-Length` above this threshold is rejected with HTTP 413 before the
+  body is read. No legitimate Dispatcher request approaches this limit - the
+  largest legitimate body (a `/renew-complete` cert delivery) is under 10 KB.
+
+Argument validation scope
+: Dispatcher does not validate script argument values. Validation of arguments
+  is the responsibility of the allowlisted script itself and the auth hook.
+  The hook receives arguments as a JSON array via `DISPATCHER_ARGS_JSON` and
+  on stdin; the script receives them directly as `@ARGV`. Neither path involves
+  shell interpretation.
+
+
 ## API Deployment Guidance
 
 The API binds to `127.0.0.1` by default and is not reachable from the network
@@ -378,11 +447,18 @@ where the API is reachable from outside the dispatcher host:
 | Pairing replay or misrouting | Nonce verified before cert storage |
 | Pairing CSR injection / social engineering | 6-digit pairing code verified by operator on both sides |
 | Lateral reconnaissance via capabilities | `/capabilities` restricted to stored dispatcher serial; re-pair to activate |
+| Script execution by non-current dispatcher cert | `/run` and `/ping` restricted to stored dispatcher serial; hard deny on mismatch |
 | Arbitrary script execution via run | Agent-side allowlist, name pattern validation |
 | Path traversal in script name | `/^[\w-]+$/` excludes `/` and `.` |
 | Shell injection via arguments | `exec` without shell, args passed as list |
 | Argument bypass via DISPATCHER_ARGS | Use `DISPATCHER_ARGS_JSON`; `DISPATCHER_ARGS` is deprecated |
 | Script outside approved directories | `script_dirs` check at load and exec time |
+| Connection flood from valid cert | Rate limiting: volume block at 10 conn/60s (5 min), probe block at 3 failures/600s (1 hr) |
+| Port scan or TLS probe from unexpected host | IP allowlist (`allowed_ips` in `agent.conf`); connection closed before any request |
+| TLS downgrade or weak cipher negotiation | TLS 1.2 minimum; ECDHE+AEAD ciphers only; CBC, RC4, export-grade excluded |
+| Memory exhaustion via large request body | Body size limit: 1 MB ceiling checked before read; 413 returned on excess |
+| Privilege escalation via allowlisted script | Empty `CapabilityBoundingSet`; `MemoryDenyWriteExecute`; restricted syscall filter |
+| Namespace escape from agent process | `RestrictNamespaces=yes` in agent systemd unit |
 | Unauthorised API access (no hook) | `api_auth_default = deny` blocks all requests by default |
 | Unauthorised API access (network) | API binds to `127.0.0.1` by default; external bind is opt-in |
 | API script inventory exposure | All endpoints including `/openapi-live.json` pass through auth |
