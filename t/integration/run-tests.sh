@@ -122,7 +122,7 @@ for test_file in "${TESTS[@]}"; do
     fi
     # After each file, check agents are still responding and scan the
     # tee'd output for rate-limit symptoms before cleaning up.
-    _no_response_count=$(grep -c "no response from child" "$_out_file" 2>/dev/null || echo 0)
+    _no_response_count=$(grep -o "no response from child" "$_out_file" 2>/dev/null | wc -l | tr -d ' ')
     rm -f "$_out_file"
 
     # Derive a short label from filename: strip leading digits, dashes, .sh
