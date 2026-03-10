@@ -3,6 +3,7 @@ package Dispatcher::Agent::Config;
 use strict;
 use warnings;
 use Carp qw(croak);
+use Dispatcher::Log qw();
 
 
 # Load and validate agent.conf
@@ -65,6 +66,38 @@ sub _validate_config {
     }
     else {
         delete $config->{script_dirs};   # absent = no restriction
+    }
+
+    # Parse allowed_ips from comma-separated string into arrayref.
+    # Validate CIDR prefix lengths at load time; reject invalid entries with a
+    # warning so ip_allowed only ever sees well-formed entries.
+    if (my $raw = $config->{allowed_ips}) {
+        my @candidates = grep { length } map { s/^\s+|\s+$//gr } split /,/, $raw;
+        my @entries;
+        for my $entry (@candidates) {
+            if ($entry =~ m{/}) {
+                my (undef, $prefix_len) = split m{/}, $entry, 2;
+                unless (defined $prefix_len && $prefix_len =~ /^\d+$/ &&
+                        grep { $prefix_len == $_ } (8, 16, 24)) {
+                    Dispatcher::Log::log_action('WARNING', {
+                        ACTION => 'config-warn',
+                        ENTRY  => $entry,
+                        MSG    => 'unsupported prefix length',
+                    });
+                    next;
+                }
+            }
+            push @entries, $entry;
+        }
+        if (@entries) {
+            $config->{allowed_ips} = \@entries;
+        }
+        else {
+            delete $config->{allowed_ips};
+        }
+    }
+    else {
+        delete $config->{allowed_ips};
     }
 
     # Validate auth_hook if present
@@ -140,6 +173,50 @@ sub _path_in_dirs {
         $dir =~ s{/+$}{};   # strip trailing slash
         return 1 if index($path, "$dir/") == 0;
     }
+    return 0;
+}
+
+# Check whether a peer IP is permitted by the allowed_ips list.
+# Returns 1 if the IP matches any entry, 0 otherwise.
+# Supports exact IPs and CIDR prefixes /8, /16, /24 only.
+# Invalid entries are filtered out at config load time; none reach here.
+# IPv6 addresses (containing ':') return 0 silently.
+sub ip_allowed {
+    my ($ip, $allowed_ref) = @_;
+
+    # IPv6: not supported - return 0 silently
+    return 0 if $ip =~ /:/;
+
+    for my $entry (@$allowed_ref) {
+        if ($entry !~ m{/}) {
+            # Exact IP match
+            return 1 if $ip eq $entry;
+        }
+        else {
+            my ($network, $prefix_len) = split m{/}, $entry, 2;
+
+            # Unsupported prefix lengths were filtered at load time; skip silently
+            next unless defined $prefix_len && $prefix_len =~ /^\d+$/ &&
+                        grep { $prefix_len == $_ } (8, 16, 24);
+
+            my @ip_oct  = split /\./, $ip,      4;
+            my @net_oct = split /\./, $network,  4;
+
+            if ($prefix_len == 8) {
+                return 1 if $ip_oct[0] eq $net_oct[0];
+            }
+            elsif ($prefix_len == 16) {
+                return 1 if $ip_oct[0] eq $net_oct[0]
+                         && $ip_oct[1] eq $net_oct[1];
+            }
+            elsif ($prefix_len == 24) {
+                return 1 if $ip_oct[0] eq $net_oct[0]
+                         && $ip_oct[1] eq $net_oct[1]
+                         && $ip_oct[2] eq $net_oct[2];
+            }
+        }
+    }
+
     return 0;
 }
 

@@ -49,6 +49,14 @@ ca   = /etc/dispatcher-agent/ca.crt
 #
 # auth_hook = /etc/dispatcher-agent/auth-hook
 
+# Optional: restrict connections to known dispatcher IPs.
+# Comma-separated list of IPs or CIDR prefixes (/8, /16, /24 only).
+# If absent, all source IPs are accepted (mTLS still applies).
+# Connections from unlisted IPs are closed before TLS handshake cost is paid.
+# Reloaded on SIGHUP (systemctl reload dispatcher-agent).
+#
+# allowed_ips = 192.168.1.10, 10.0.0.0/8
+
 # Agent tags - reported in /capabilities response and dispatcher discovery.
 # Use to group and filter agents by environment, role, location, etc.
 #

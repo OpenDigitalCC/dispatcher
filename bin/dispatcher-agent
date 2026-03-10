@@ -109,6 +109,17 @@ sub mode_serve {
     while (my $conn = $server->accept) {
         my $peer        = $conn->peerhost // 'unknown';
 
+        # IP allowlist check: before rate check, before fork, before peer serial
+        if ($config->{allowed_ips} &&
+            !Dispatcher::Agent::Config::ip_allowed($peer, $config->{allowed_ips})) {
+            $conn->close(SSL_no_shutdown => 1);
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION => 'ip-block',
+                PEER   => $peer,
+            });
+            next;
+        }
+
         if (Dispatcher::Agent::RateLimit::check($peer, \%rate_state)) {
             $conn->close(SSL_no_shutdown => 1);
             next;
