@@ -34,6 +34,7 @@ TESTS=(
     09-allowlist-reload.sh
     10-timeout-behaviour.sh
     11-api-status.sh
+    12-serial-check.sh
 )
 
 if [ "$#" -gt 0 ]; then
