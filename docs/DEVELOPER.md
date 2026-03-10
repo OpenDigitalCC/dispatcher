@@ -1,7 +1,7 @@
 ---
 title: Dispatcher and agent - Developer document
 subtitle: Purpose, contents, protocol, logging, security model and extending
-brand: odcc
+brand: opendigitalcc
 ---
 
 # Dispatcher - Developer Documentation
@@ -94,6 +94,7 @@ lib/Dispatcher/
   CA.pm                   CA and cert signing via openssl subprocess
   Pairing.pm              Dispatcher-side pairing server and approval queue
   Registry.pm             Persistent agent store (written at pairing, read by API)
+  Rotation.pm             Dispatcher cert rotation, serial broadcast, overlap tracking
   Engine.pm               Parallel dispatch, ping, capabilities, and cert renewal
   Auth.pm                 Auth hook runner
   Lock.pm                 flock-based host:script concurrency control
@@ -116,6 +117,7 @@ t/
   agent-config.t          Tests for Dispatcher::Agent::Config
   agent-run.t             Tests for Dispatcher::Agent::Runner
   auth.t                  Tests for Dispatcher::Auth
+  auth-hook.t             Integration: auth hook exit codes and context passing
   dispatcher-cli.t        Tests for CLI argument parsing and output formatting
   engine.t                Tests for Dispatcher::Engine
   lock.t                  Tests for Dispatcher::Lock
@@ -125,7 +127,11 @@ t/
   pairing-csr.t           Tests for Dispatcher::Agent::Pairing (key/CSR/nonce)
   pairing-dispatcher.t    Tests for Dispatcher::Pairing (stale expiry, nonce storage)
   registry.t              Tests for Dispatcher::Registry
-  renewal.t               Tests for cert renewal functions
+  registry-serial.t       Tests for serial tracking fields in Dispatcher::Registry
+  renewal.t               Tests for cert renewal functions in Dispatcher::Engine
+  rotation.t              Tests for Dispatcher::Rotation
+  serial-normalisation.t  Tests for Dispatcher::Agent::Pairing::serial_to_hex
+  update-dispatcher-serial.t  Tests for the update-dispatcher-serial script
 
 install.sh                Installer: --agent | --dispatcher | --api | --uninstall | --run-tests
 README.md                 Project overview and quick start
@@ -210,6 +216,10 @@ Output format: `ACTION=run EXIT=0 PEER=10.0.1.5 REQID=a3f9b2c1 SCRIPT=backup`
 
 `ACTION` is always first. All other keys follow in alphabetical order. Values
 containing spaces are quoted. Levels: `INFO`, `WARNING`, `ERR`.
+
+Field ordering is enforced automatically by `log_action` - the caller passes
+fields in any order and the output is always sorted. The `ACTION` key is
+required; callers need not place it first in the hashref.
 
 Functions:
 
@@ -328,6 +338,117 @@ Important SSL note - `SSL_no_shutdown => 1` on parent close
   file descriptor without sending close-notify, leaving the child's copy intact.
   This pattern is required anywhere a forked server hands off an SSL connection
   to a child.
+
+
+### `Dispatcher::Rotation`
+
+Dispatcher cert lifecycle management. Monitors the dispatcher's own cert
+expiry, rotates it when approaching expiry, and broadcasts the new serial to
+all registered agents so they can update their trusted-dispatcher serial.
+
+The module is used in two ways: `check_and_rotate` is called at startup and
+by the background loop in `run_check_loop`; `rotate` is called directly by
+`dispatcher rotate-cert` for operator-initiated rotation.
+
+Call sequence for automatic rotation:
+
+```
+run_check_loop
+  └─ expire_stale_agents   (mark pending agents stale after overlap window)
+  └─ check_and_rotate      (check expiry; calls _do_rotation if renewal due)
+       └─ _do_rotation     (regenerate cert, write rotation.json, mark agents pending)
+  └─ broadcast_serial      (run update-dispatcher-serial on all pending agents)
+```
+
+Call sequence for manual rotation (`dispatcher rotate-cert`):
+
+```
+rotate
+  └─ _do_rotation
+broadcast_serial            (called separately by the CLI mode)
+```
+
+Rotation state (`/var/lib/dispatcher/rotation.json`):
+
+```json
+{
+  "current_serial":  "0a1b2c3d",
+  "previous_serial": "09abcdef",
+  "rotated_at":      "2026-03-09T14:30:00Z",
+  "overlap_expires": "2026-04-08T14:30:00Z"
+}
+```
+
+The `overlap_expires` timestamp is `rotated_at + cert_overlap_days`. During
+the overlap window, agents that have not yet confirmed the new serial are
+`pending`. After the window expires, `expire_stale_agents` marks them `stale`.
+The overlap protects `broadcast_serial` retry attempts only - it is not a
+grace period for operational traffic.
+
+Agent serial status values in the registry:
+
+```
+unknown    Paired before serial tracking was introduced
+pending    Serial broadcast attempted but not yet confirmed
+confirmed  Agent has acknowledged the current dispatcher serial
+stale      Overlap window expired without confirmation
+```
+
+Functions:
+
+`check_and_rotate(%opts)`
+: Reads the dispatcher cert expiry. If remaining days is below
+  `cert_renewal_days` (default 90), calls `_do_rotation`. Returns
+  `{ rotated => 0 }`, `{ rotated => 1, serial => $hex, ... }`, or
+  `{ rotated => 0, error => $str }` for non-fatal failures.
+  Required: `config`.
+
+`rotate(%opts)`
+: Unconditional rotation. Thin wrapper around `_do_rotation`. Used by
+  `dispatcher rotate-cert`. Required: `config`.
+
+`load_state(%opts)`
+: Reads and parses `rotation.json`. Returns the state hashref or `undef` if
+  the file does not exist or is corrupt. Logs `ERR` on corrupt file.
+  Optional: `path` (default `/var/lib/dispatcher/rotation.json`).
+
+`expire_stale_agents(%opts)`
+: Reads rotation state. If `overlap_expires` is in the past, marks all
+  `pending` agents as `stale` in the registry. No-op if no rotation state
+  exists or overlap has not expired. Required: `config`.
+
+`broadcast_serial(%opts)`
+: Reads rotation state to find `current_serial`. Queries the registry for
+  agents with status `pending` or `unknown`. Dispatches
+  `update-dispatcher-serial` to all of them in parallel via
+  `Dispatcher::Engine::dispatch_all`. On success for each agent, calls
+  `Dispatcher::Registry::update_agent_serial_status` to set status
+  `confirmed`. Returns arrayref of `{ hostname, status => 'ok'|'failed', error? }`.
+  Required: `config`.
+
+`run_check_loop(%opts)`
+: Infinite loop. Sleeps `cert_check_interval` seconds (default 4 hours),
+  then calls `expire_stale_agents`, `check_and_rotate`, and if rotated calls
+  `broadcast_serial`. On non-rotation checks, retries `broadcast_serial` for
+  any still-pending agents. All steps are wrapped in `eval` - failures are
+  logged at WARNING and the loop continues. Required: `config`.
+
+Private functions:
+
+`_do_rotation(%opts)`
+: Core rotation logic. Reads the old cert serial, calls
+  `Dispatcher::CA::generate_dispatcher_cert(force => 1)` to replace the cert,
+  reads the new serial, writes `rotation.json` with `overlap_expires` set to
+  now + `cert_overlap_days`, then marks all registered agents as `pending` via
+  `Dispatcher::Registry::update_agent_serial_status`. Returns the result
+  hashref passed back through `rotate` and `check_and_rotate`.
+
+`_read_cert_serial($path)`
+: Calls `openssl x509 -noout -serial` on the cert file. Returns lowercase hex.
+
+`_cert_days_remaining($path)`
+: Calls `openssl x509 -noout -enddate` and computes remaining days.
+  Returns a number (may be negative for expired certs).
 
 
 ### `Dispatcher::Registry`
@@ -625,8 +746,7 @@ Endpoints:
 `POST /run`
 : Body: `{ hosts, script, args?, username?, token? }`. Runs auth hook, checks
   locks via `Lock::check_available`, dispatches via `Engine::dispatch_all`.
-  Returns `{ ok: true, reqid: "...", results: [...] }` - note `reqid` at the
-  top level for use with `/status` and syslog correlation. On lock conflict:
+  Returns `{ ok: true, results: [...] }` or on lock conflict:
   `{ ok: false, error: "locked", code: 4, conflicts: [...] }`.
 
 `GET /discovery` or `POST /discovery`
@@ -634,19 +754,13 @@ Endpoints:
   `Registry::list_hostnames()` to query all registered agents. Auth uses ping
   privilege level. Returns `{ ok: true, hosts: { hostname: { scripts, tags, version, rtt, ... } } }`.
 
-`GET /status/<reqid>`
-: Returns the stored result for a completed run by reqid. Results are
-  persisted to `/var/lib/dispatcher/runs/<reqid>.json` for 24 hours after
-  the run completes. Returns 404 if the reqid is unknown or has expired.
-  Returns `{ ok: true, reqid, script, hosts, completed, results: [...] }`.
-
 HTTP status codes:
 
 ```
 200   Success
 400   Bad request (missing body, invalid JSON, missing required fields)
 403   Auth denied
-404   Unknown route or unknown reqid (status endpoint)
+404   Unknown route
 409   Lock conflict
 500   Server error
 ```
@@ -898,6 +1012,101 @@ Modes:
 : Loads config, allowlist, and cert status without starting the server.
   Validates each allowlisted script is executable.
 
+Accept loop skeleton
+
+The accept loop is in `mode_serve`. Variable names, fork pattern, and SIGHUP
+placement are shown below - this is the authoritative structure for any work
+that needs to hook into the loop:
+
+```perl
+sub mode_serve {
+    # Load initial state
+    my $config    = Dispatcher::Agent::Config::load_config($CONFIG_PATH);
+    my $allowlist = Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH);
+    my $revoked   = Dispatcher::Agent::Pairing::load_revoked_serials(...);
+    my $disp_serial = Dispatcher::Agent::Pairing::load_dispatcher_serial(...);
+
+    # SIGHUP handler is top-level in mode_serve (not local $SIG{HUP}).
+    # It closes over $allowlist, $revoked, $disp_serial and reassigns them.
+    # Changes take effect for the next accepted connection.
+    $SIG{HUP} = sub {
+        $allowlist   = eval { ... };
+        $revoked     = eval { ... };
+        $disp_serial = eval { ... };
+    };
+
+    my $server = IO::Socket::SSL->new(...)
+        or die "Cannot start server: $IO::Socket::SSL::SSL_ERROR\n";
+
+    while (my $conn = $server->accept) {
+        my $peer        = $conn->peerhost // 'unknown';
+        # Peer serial extracted HERE in the parent, before fork.
+        # After the parent closes its copy of $conn the SSL object is
+        # invalid in the child - _peer_serial must not be called in the child.
+        my $peer_serial = _peer_serial($conn);
+
+        my $pid = fork();
+        if (!defined $pid) { ... next; }
+
+        if ($pid == 0) {
+            $server->close(SSL_no_shutdown => 1);
+            handle_connection($conn, $peer, $allowlist, $config,
+                              $revoked, $disp_serial, $peer_serial);
+            $conn->close;
+            exit 0;
+        }
+        # Parent releases fd without TLS shutdown so child owns it
+        $conn->close(SSL_no_shutdown => 1);
+        waitpid -1, WNOHANG();
+    }
+}
+```
+
+`$server->accept` on failure
+: Returns `undef` and sets `$IO::Socket::SSL::SSL_ERROR`. The loop uses
+  `while (my $conn = $server->accept)` - a failed handshake returns `undef`,
+  the condition is false, and the loop continues. The error string is available
+  as `$IO::Socket::SSL::SSL_ERROR` immediately after the failed accept, before
+  the next iteration. Client cert failures (wrong CA, expired cert) manifest
+  here as handshake errors, not inside `handle_connection`.
+
+`handle_connection` signature
+: `handle_connection($conn, $peer, $allowlist, $config, $revoked, $disp_serial, $peer_serial)`
+
+  All variables come from `mode_serve`'s scope and are passed explicitly - there
+  is no closure over them. `$peer_serial` is a plain lowercase hex string (or
+  `''`) extracted before fork. `$revoked` is a hashref keyed by hex serial.
+  `$disp_serial` is the stored dispatcher serial hex string (or `''` if not
+  yet set).
+
+Testability
+: `bin/dispatcher-agent` calls `main()` unconditionally at the top level - it
+  does **not** use the `main() unless caller` idiom used by `bin/dispatcher`.
+  This means it cannot be `do`'d by test files without executing. The test
+  files `agent-config.t` and `agent-run.t` test `Dispatcher::Agent::Config`
+  and `Dispatcher::Agent::Runner` directly by loading those modules - they do
+  not load the binary. Functions defined in the binary itself (such as
+  `_peer_serial`, `handle_connection`, `handle_capabilities`) are not unit
+  tested independently; they are covered by integration tests.
+
+`_peer_serial` helper
+: Extracts the peer certificate serial from an accepted `IO::Socket::SSL`
+  connection using `Net::SSLeay` directly. `IO::Socket::SSL`'s
+  `peer_certificate('serialNumber')` is not a valid argument in the version
+  shipped with Debian trixie - the Net::SSLeay approach is the only reliable
+  method. Returns lowercase hex or `''` on failure.
+
+```perl
+sub _peer_serial {
+    my ($conn) = @_;
+    my $ssl  = eval { $conn->_get_ssl_object } or return '';
+    my $cert = eval { Net::SSLeay::get_peer_certificate($ssl) } or return '';
+    my $asn1 = eval { Net::SSLeay::X509_get_serialNumber($cert) } or return '';
+    my $hex  = eval { Net::SSLeay::P_ASN1_INTEGER_get_hex($asn1) } // '';
+    return lc $hex;
+}
+```
+
 Endpoints handled in `handle_connection`:
 
 `POST /run`
@@ -1073,8 +1282,6 @@ dispatcher[1234]: ACTION=unpair AGENT=agent-host-01 EXPIRY="Jun  7 16:28:00 2027
 dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=agent-host-01:7443
 dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=agent-host-01:7443
 dispatcher[1234]: ACTION=lock-acquire HOST=agent-host-01 SCRIPT=backup-mysql
-dispatcher[1234]: ACTION=lock-release HOST=agent-host-01 SCRIPT=backup-mysql
-dispatcher[1234]: ACTION=lock-conflict HOSTS=agent-host-01 SCRIPT=backup-mysql
 ```
 
 Agent examples:
