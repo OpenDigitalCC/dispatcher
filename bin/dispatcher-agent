@@ -323,10 +323,10 @@ sub handle_connection {
     }
 
     if ($method eq 'POST' && $path eq '/run') {
-        handle_run($conn, $body, $peer, $allowlist, $config);
+        handle_run($conn, $body, $peer, $allowlist, $config, $disp_serial, $peer_serial);
     }
     elsif ($method eq 'POST' && $path eq '/ping') {
-        handle_ping($conn, $body, $peer);
+        handle_ping($conn, $body, $peer, $disp_serial, $peer_serial);
     }
     elsif ($method eq 'GET' && $path eq '/capabilities') {
         handle_capabilities($conn, $peer, $allowlist, $config, $disp_serial, $peer_serial);
@@ -337,7 +337,17 @@ sub handle_connection {
 }
 
 sub handle_run {
-    my ($conn, $body, $peer, $allowlist, $config) = @_;
+    my ($conn, $body, $peer, $allowlist, $config, $disp_serial, $peer_serial) = @_;
+
+    unless (_check_dispatcher_serial($peer_serial, $disp_serial)) {
+        _send_raw($conn, 403, encode_json({ error => 'serial mismatch', status => 'forbidden' }));
+        Dispatcher::Log::log_action('WARNING', {
+            ACTION => 'serial-reject',
+            PEER   => $peer,
+            REQID  => '(none)',
+        });
+        return;
+    }
 
     my $data = eval { decode_json($body) };
     if ($@) {
@@ -435,7 +445,17 @@ sub handle_run {
 }
 
 sub handle_ping {
-    my ($conn, $body, $peer) = @_;
+    my ($conn, $body, $peer, $disp_serial, $peer_serial) = @_;
+
+    unless (_check_dispatcher_serial($peer_serial, $disp_serial)) {
+        _send_raw($conn, 403, encode_json({ error => 'serial mismatch', status => 'forbidden' }));
+        Dispatcher::Log::log_action('WARNING', {
+            ACTION => 'serial-reject',
+            PEER   => $peer,
+            REQID  => '(none)',
+        });
+        return;
+    }
 
     my $data  = eval { decode_json($body) } // {};
     my $reqid = $data->{reqid} // '';
@@ -470,7 +490,7 @@ sub handle_capabilities {
     # If no serial is stored (agent not yet paired, or pre-serial-tracking
     # pairing), the check is skipped with a warning. Re-pair to enable it.
     if (length $disp_serial) {
-        unless (length $peer_serial && $peer_serial eq $disp_serial) {
+        unless (_check_dispatcher_serial($peer_serial, $disp_serial)) {
             Dispatcher::Log::log_action('WARNING', {
                 ACTION      => 'capabilities-deny',
                 PEER        => $peer,
@@ -511,6 +531,16 @@ sub handle_capabilities {
         version => $VERSION,
         scripts => \@scripts,
     });
+}
+
+# Verify that the peer cert serial matches the stored dispatcher serial.
+# Returns 1 if matched, 0 if not. Does not log - caller logs on failure.
+# Both arguments must be non-empty lowercase hex strings to return 1.
+sub _check_dispatcher_serial {
+    my ($peer_serial, $disp_serial) = @_;
+    return 0 unless length($disp_serial  // '');
+    return 0 unless length($peer_serial  // '');
+    return $peer_serial eq $disp_serial ? 1 : 0;
 }
 
 # Extract the peer certificate serial number from an IO::Socket::SSL
