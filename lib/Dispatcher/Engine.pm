@@ -305,11 +305,21 @@ sub _dispatch_one {
     my $rtt = sprintf '%.0fms', (Time::HiRes::time() - $t0) * 1000;
 
     if ($@ || !$resp || !$resp->is_success) {
-        my $raw_err = $@ || ($resp ? $resp->status_line : 'no response');
-        my $timeout = $config->{read_timeout} // $config->{timeout} // 60;
-        my $err = ($raw_err =~ /timeout|read timeout|500/i)
-            ? "read timeout after ${timeout}s"
-            : $raw_err;
+        my $err;
+        if ($resp && $resp->code == 403) {
+            my $body = eval { decode_json($resp->content) } // {};
+            $err = 'forbidden: ' . ($body->{error} // $resp->status_line);
+        }
+        elsif ($resp && $resp->code == 413) {
+            $err = 'request too large';
+        }
+        else {
+            my $raw_err = $@ || ($resp ? $resp->status_line : 'no response');
+            my $timeout = $config->{read_timeout} // $config->{timeout} // 60;
+            $err = ($raw_err =~ /timeout|read timeout/i)
+                ? "read timeout after ${timeout}s"
+                : $raw_err;
+        }
         Dispatcher::Log::log_action('ERR', {
             ACTION => 'run',
             SCRIPT => $opts{script},
@@ -369,7 +379,17 @@ sub _ping_one {
     my $rtt = sprintf '%.0fms', (Time::HiRes::time() - $t0) * 1000;
 
     if ($@ || !$resp || !$resp->is_success) {
-        my $err = $@ || ($resp ? $resp->status_line : 'no response');
+        my $err;
+        if ($resp && $resp->code == 403) {
+            my $body = eval { decode_json($resp->content) } // {};
+            $err = 'forbidden: ' . ($body->{error} // $resp->status_line);
+        }
+        elsif ($resp && $resp->code == 413) {
+            $err = 'request too large';
+        }
+        else {
+            $err = $@ || ($resp ? $resp->status_line : 'no response');
+        }
         Dispatcher::Log::log_action('ERR', {
             ACTION => 'ping',
             TARGET => "$host:$port",
