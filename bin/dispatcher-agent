@@ -73,6 +73,7 @@ sub mode_serve {
     );
 
     my %rate_state;
+    my $rate_config = $config->{rate_limit} // {};
 
     $SIG{HUP} = sub {
         warn "Reloading allowlist, revocation list, and dispatcher serial...\n";
@@ -134,13 +135,13 @@ sub mode_serve {
                 last;
             }
 
-            Dispatcher::Agent::RateLimit::record_failure($peer, \%rate_state);
+            Dispatcher::Agent::RateLimit::record_failure($peer, \%rate_state, $rate_config);
             Dispatcher::Log::log_action('WARNING', {
                 ACTION => 'tls-failure',
                 PEER   => $peer,
                 REASON => $err,
             });
-            Dispatcher::Agent::RateLimit::check($peer, \%rate_state);
+            Dispatcher::Agent::RateLimit::check($peer, \%rate_state, $rate_config);
             next;
         }
 
@@ -157,11 +158,11 @@ sub mode_serve {
             next;
         }
 
-        if (Dispatcher::Agent::RateLimit::check($peer, \%rate_state)) {
+        if (Dispatcher::Agent::RateLimit::check($peer, \%rate_state, $rate_config)) {
             $conn->close(SSL_no_shutdown => 1);
             next;
         }
-        Dispatcher::Agent::RateLimit::record_connection($peer, \%rate_state);
+        Dispatcher::Agent::RateLimit::record_connection($peer, \%rate_state, $rate_config);
 
         # Read peer cert serial before forking - after the parent closes its
         # copy of $conn the SSL object becomes invalid in the child.

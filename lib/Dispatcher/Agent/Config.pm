@@ -100,6 +100,39 @@ sub _validate_config {
         delete $config->{allowed_ips};
     }
 
+    # Parse rate limit configuration.
+    # rate_limit_disable = 1  disables rate limiting entirely (testing only).
+    # rate_limit_volume  = <limit>/<window>/<block>  e.g. 10/60/300
+    # rate_limit_probe   = <limit>/<window>/<block>  e.g. 3/600/3600
+    # Absent or invalid values leave defaults in place (current constants).
+    {
+        my %rl;
+        if ($config->{rate_limit_disable} && $config->{rate_limit_disable} =~ /^[1y]/i) {
+            $rl{disabled} = 1;
+        }
+        for my $param (qw(volume probe)) {
+            my $key = "rate_limit_$param";
+            if (my $raw = $config->{$key}) {
+                my ($limit, $window, $block) = split m{/}, $raw, 3;
+                if (defined $limit  && $limit  =~ /^\d+$/ &&
+                    defined $window && $window =~ /^\d+$/ &&
+                    defined $block  && $block  =~ /^\d+$/) {
+                    $rl{"${param}_limit"}  = int($limit);
+                    $rl{"${param}_window"} = int($window);
+                    $rl{"${param}_block"}  = int($block);
+                }
+                else {
+                    Dispatcher::Log::log_action('WARNING', {
+                        ACTION => 'config-warn',
+                        KEY    => $key,
+                        MSG    => 'invalid format, expected limit/window/block - using defaults',
+                    });
+                }
+            }
+        }
+        $config->{rate_limit} = \%rl if %rl;
+    }
+
     # Validate auth_hook if present
     if (defined $config->{auth_hook} && length $config->{auth_hook}) {
         croak "auth_hook '$config->{auth_hook}' is not executable in '$path'"

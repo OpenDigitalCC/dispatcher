@@ -13,6 +13,22 @@
 # Agents are discovered automatically from "dispatcher list-agents".
 # No hostnames need to be configured.
 #
+# PREREQUISITE - rate limiter:
+#   The suite fires more than 10 connections to each agent, which exceeds
+#   the default volume_limit and will trigger a 5-minute block mid-suite.
+#   The suite detects this automatically and prints a warning. To prevent
+#   it, set the following in /etc/dispatcher-agent/agent.conf on each agent
+#   before running and remove it when done:
+#
+#     disable_rate_limit = 1
+#
+#   Then reload: systemctl reload dispatcher-agent
+#              (or: /etc/init.d/dispatcher-agent reload  on OpenWrt)
+#
+#   Rate-limit behaviour is covered separately by:
+#     t/rate-limit.t                  (unit test, always runnable)
+#     13-rate-limit-integration.sh    (manual integration test)
+#
 # Environment variables:
 #   DISPATCHER   dispatcher binary name or path (default: dispatcher)
 
@@ -104,10 +120,45 @@ for test_file in "${TESTS[@]}"; do
         _FAIL=$(echo "$_results_line" | sed "s/.* \([0-9]*\) failed.*/\1/")
         _SKIP=$(echo "$_results_line" | sed "s/.* \([0-9]*\) skipped.*/\1/")
     fi
+    # After each file, check agents are still responding and scan the
+    # tee'd output for rate-limit symptoms before cleaning up.
+    _no_response_count=$(grep -c "no response from child" "$_out_file" 2>/dev/null || echo 0)
     rm -f "$_out_file"
+
     # Derive a short label from filename: strip leading digits, dashes, .sh
     _label=$(basename "$test_file" .sh | sed 's/^[0-9]*-//')
     _SUMMARY_ROWS+=("${_label}|${_PASS}|${_FAIL}|${_SKIP}|${_row_status}")
+
+    # Warn on rate-limit symptoms from this file's output.
+    if [ "${_no_response_count:-0}" -ge 3 ]; then
+        printf '\n'
+        _yellow "  RATE-LIMIT WARNING: $_no_response_count \"no response from child\" errors in $test_file"
+        _yellow "  This is consistent with agent rate-limiting blocking the dispatcher IP."
+        _yellow "  Set 'disable_rate_limit = 1' in /etc/dispatcher-agent/agent.conf"
+        _yellow "  and reload each agent, then re-run the suite."
+        printf '\n'
+    fi
+
+    # Check agent reachability after each file. If an agent that was reachable
+    # at suite start is now silent, report it - a low connection count into
+    # the suite strongly suggests the rate-limit is the cause.
+    if ! check_agents_still_reachable; then
+        _total_so_far=0
+        for _row in "${_SUMMARY_ROWS[@]}"; do
+            IFS='|' read -r _ _rp _rf _rs _ <<< "$_row"
+            _total_so_far=$(( _total_so_far + _rp + _rf ))
+        done
+        printf '\n'
+        _red "AGENT LOSS detected after $test_file (approx $_total_so_far assertions run):"
+        for _gone in "${AGENTS_LOST[@]}"; do
+            printf '  %-30s  no longer responding\n' "$_gone"
+        done
+        if [ "${_no_response_count:-0}" -ge 1 ] || [ "$_total_so_far" -le 30 ]; then
+            _yellow "  -> early or sudden loss after ~$_total_so_far assertions is consistent with rate-limiting"
+            _yellow "  -> set 'disable_rate_limit = 1' in agent.conf and reload, then re-run"
+        fi
+        printf '\n'
+    fi
 done
 
 # --- Summary table ---

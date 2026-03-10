@@ -21,13 +21,30 @@ use constant PRUNE_WINDOW    => 600;
 use constant MAX_ENTRIES     => 1000;
 
 
-# check($peer_ip, $rate_state_ref) -> 1 (blocked) or 0 (allow)
+# check($peer_ip, $rate_state_ref, $rate_config) -> 1 (blocked) or 0 (allow)
 #
 # Called in the parent accept loop before fork(). Checks both volume and probe
 # thresholds. Applies a block and logs on first trigger. Returns 1 silently
 # for IPs already under an active block.
+#
+# $rate_config is an optional hashref from $config->{rate_limit}. When absent,
+# module constants are used. Keys: disabled, volume_limit, volume_window,
+# volume_block, probe_limit, probe_window, probe_block.
 sub check {
-    my ($peer, $state_ref) = @_;
+    my ($peer, $state_ref, $rate_config) = @_;
+    $rate_config //= {};
+
+    # Disabled: rate limiting turned off entirely
+    return 0 if $rate_config->{disabled};
+
+    my $volume_limit  = $rate_config->{volume_limit}  // VOLUME_LIMIT;
+    my $volume_window = $rate_config->{volume_window} // VOLUME_WINDOW;
+    my $volume_block  = $rate_config->{volume_block}  // VOLUME_BLOCK;
+    my $probe_limit   = $rate_config->{probe_limit}   // PROBE_LIMIT;
+    my $probe_window  = $rate_config->{probe_window}  // PROBE_WINDOW;
+    my $probe_block   = $rate_config->{probe_block}   // PROBE_BLOCK;
+    my $prune_window  = ($volume_window > $probe_window)
+                      ? $volume_window : $probe_window;
 
     my $now = time();
 
@@ -63,14 +80,14 @@ sub check {
     $state_ref->{$peer} //= { connections => [], failures => [] };
     my $entry = $state_ref->{$peer};
 
-    # Step 4: Prune timestamps older than the long window from both arrays
-    $entry->{connections} = [ grep { $now - $_ < PRUNE_WINDOW } @{ $entry->{connections} } ];
-    $entry->{failures}    = [ grep { $now - $_ < PRUNE_WINDOW } @{ $entry->{failures}    } ];
+    # Step 4: Prune timestamps older than the longer of the two windows
+    $entry->{connections} = [ grep { $now - $_ < $prune_window } @{ $entry->{connections} } ];
+    $entry->{failures}    = [ grep { $now - $_ < $prune_window } @{ $entry->{failures}    } ];
 
     # Step 5: Volume check - count connections within the short window only
-    my $recent_conns = grep { $now - $_ < VOLUME_WINDOW } @{ $entry->{connections} };
-    if ($recent_conns >= VOLUME_LIMIT) {
-        $entry->{blocked_until} = $now + VOLUME_BLOCK;
+    my $recent_conns = grep { $now - $_ < $volume_window } @{ $entry->{connections} };
+    if ($volume_limit > 0 && $recent_conns >= $volume_limit) {
+        $entry->{blocked_until} = $now + $volume_block;
         Dispatcher::Log::log_action('WARNING', {
             ACTION => 'rate-block',
             PEER   => $peer,
@@ -80,9 +97,9 @@ sub check {
     }
 
     # Step 6: Probe check - count failures within the probe window
-    my $recent_fails = grep { $now - $_ < PROBE_WINDOW } @{ $entry->{failures} };
-    if ($recent_fails >= PROBE_LIMIT) {
-        $entry->{blocked_until} = $now + PROBE_BLOCK;
+    my $recent_fails = grep { $now - $_ < $probe_window } @{ $entry->{failures} };
+    if ($probe_limit > 0 && $recent_fails >= $probe_limit) {
+        $entry->{blocked_until} = $now + $probe_block;
         Dispatcher::Log::log_action('WARNING', {
             ACTION => 'rate-block',
             PEER   => $peer,
@@ -95,24 +112,26 @@ sub check {
 }
 
 
-# record_connection($peer_ip, $rate_state_ref) -> void
+# record_connection($peer_ip, $rate_state_ref, $rate_config) -> void
 #
 # Called after check() returns 0, before fork(). Records a post-handshake
-# connection timestamp for volume tracking.
+# connection timestamp for volume tracking. $rate_config is accepted for
+# call-site consistency but not used here.
 sub record_connection {
-    my ($peer, $state_ref) = @_;
+    my ($peer, $state_ref, $rate_config) = @_;
 
     $state_ref->{$peer} //= { connections => [], failures => [] };
     push @{ $state_ref->{$peer}{connections} }, time();
 }
 
 
-# record_failure($peer_ip, $rate_state_ref) -> void
+# record_failure($peer_ip, $rate_state_ref, $rate_config) -> void
 #
 # Called when a TLS handshake failure is detected (item 3 call site). Records
-# a failure timestamp for probe tracking.
+# a failure timestamp for probe tracking. $rate_config is accepted for
+# call-site consistency but not used here.
 sub record_failure {
-    my ($peer, $state_ref) = @_;
+    my ($peer, $state_ref, $rate_config) = @_;
 
     $state_ref->{$peer} //= { connections => [], failures => [] };
     push @{ $state_ref->{$peer}{failures} }, time();

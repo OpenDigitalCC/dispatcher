@@ -252,15 +252,85 @@ assert_json_valid() {
     fi
 }
 
+# --- connection tracking ---
+#
+# _CONN_TOTAL counts every run_dispatcher call across the entire suite run.
+# _CONN_AGENT_<name> counts calls to each specific agent (name with non-
+# alphanumerics replaced by underscores).
+# _FAIL_STREAK counts consecutive run_dispatcher calls where the output
+# contained "no response from child" - the signature of a rate-block.
+# These are exported so run-tests.sh can report them in the summary.
+
+_CONN_TOTAL=0
+_FAIL_STREAK=0
+_FAIL_STREAK_START=0   # _CONN_TOTAL value when the streak began
+
+_conn_key() {
+    # Produce a shell-safe variable name suffix from an agent hostname.
+    printf '%s' "$1" | tr -c 'A-Za-z0-9' '_'
+}
+
+_conn_increment() {
+    local agent="$1"
+    _CONN_TOTAL=$((_CONN_TOTAL + 1))
+    local key="_CONN_AGENT_$(_conn_key "$agent")"
+    local cur="${!key:-0}"
+    printf -v "$key" '%d' $(( cur + 1 ))
+    export "$key"
+}
+
+_conn_for_agent() {
+    local key="_CONN_AGENT_$(_conn_key "$1")"
+    printf '%d' "${!key:-0}"
+}
+
+# _check_rate_warning: called after every run_dispatcher invocation.
+# Inspects OUT for the "no response from child" signature. If the failure
+# streak grows beyond 2 consecutive calls, prints a rate-limit warning
+# once per streak start so the output is not flooded.
+_check_rate_warning() {
+    if echo "${OUT:-}" | grep -qF "no response from child"; then
+        if [ "$_FAIL_STREAK" -eq 0 ]; then
+            _FAIL_STREAK_START="$_CONN_TOTAL"
+        fi
+        _FAIL_STREAK=$((_FAIL_STREAK + 1))
+        if [ "$_FAIL_STREAK" -eq 3 ]; then
+            printf '\n'
+            _yellow "  WARNING: 3 consecutive \"no response from child\" errors"
+            _yellow "  (started at connection $_FAIL_STREAK_START of $_CONN_TOTAL total)"
+            _yellow "  This is consistent with agent rate-limiting blocking the dispatcher IP."
+            _yellow "  Set 'disable_rate_limit = 1' in agent.conf and reload, then re-run."
+            printf '\n'
+        fi
+    else
+        _FAIL_STREAK=0
+    fi
+}
+
+export _CONN_TOTAL _FAIL_STREAK _FAIL_STREAK_START
+
 # run_dispatcher <args...> - runs dispatcher, sets OUT, ERR, RC
 # Passes DISPATCHER_TOKEN explicitly so sudo does not strip it.
+# Tracks per-agent and total connection counts; detects rate-limit signatures.
 run_dispatcher() {
     local token_env=""
     if [ -n "${DISPATCHER_TOKEN:-}" ]; then
         token_env="DISPATCHER_TOKEN=${DISPATCHER_TOKEN}"
     fi
+
+    # Extract the agent name from the argument list for per-agent counting.
+    # Argument pattern is: run_dispatcher <verb> <agent> [...]
+    #                   or: run_dispatcher ping <agent> [...]
+    # The agent is always $2 in the arg list passed to this function.
+    local _verb="${1:-}" _agent="${2:-}"
+    if [ -n "$_agent" ] && [ "$_verb" != "--json" ]; then
+        _conn_increment "$_agent"
+    fi
+
     OUT=$(sudo env $token_env "$DISPATCHER" "$@" 2>/tmp/_disp_err); RC=$?
     ERR=$(cat /tmp/_disp_err)
+
+    _check_rate_warning
 }
 
 # elapsed_seconds <start_seconds>
