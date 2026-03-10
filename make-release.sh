@@ -68,6 +68,7 @@ SHIP_FILES=(
     bin/dispatcher
     bin/dispatcher-agent
     bin/dispatcher-api
+    bin/update-dispatcher-serial
     install.sh
     VERSION
     LICENCE
@@ -120,7 +121,7 @@ info "Generating CycloneDX SBOM..."
 collect_components() {
     local components="[]"
 
-    # bin/ executables
+    # bin/ executables (Perl binaries with $VERSION stamped)
     for bin in dispatcher dispatcher-agent dispatcher-api; do
         local path="bin/$bin"
         local staged="$STAGE/bin/$bin"
@@ -146,6 +147,32 @@ comps.append(json.loads(sys.stdin.read()))
 print(json.dumps(comps))
 " <<< "$component")
     done
+
+    # bin/update-dispatcher-serial (bash script - no $VERSION stamp)
+    {
+        local staged="$STAGE/bin/update-dispatcher-serial"
+        local hash
+        hash=$(sha256sum "$staged" | awk '{print $1}')
+        local component
+        component=$(python3 -c "
+import json
+c = {
+    'type': 'file',
+    'name': 'update-dispatcher-serial',
+    'version': '$VERSION',
+    'hashes': [{'alg': 'SHA-256', 'content': '$hash'}],
+    'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
+    'purl': 'pkg:generic/opendigital/dispatcher-update-dispatcher-serial@$VERSION'
+}
+print(json.dumps(c))
+")
+        components=$(python3 -c "
+import json, sys
+comps = json.loads('''$components''')
+comps.append(json.loads(sys.stdin.read()))
+print(json.dumps(comps))
+" <<< "$component")
+    }
 
     # lib/ modules
     while IFS= read -r -d '' pm; do
