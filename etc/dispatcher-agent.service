@@ -28,6 +28,14 @@ ProtectHome=yes
 ReadWritePaths=/var/log
 PrivateTmp=yes
 PrivateDevices=yes
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
 
 # Allow reading config and certs
 ReadOnlyPaths=/etc/dispatcher-agent
