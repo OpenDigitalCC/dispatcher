@@ -5,9 +5,10 @@ use warnings;
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::Agent::Config  qw();
-use Dispatcher::Agent::Runner  qw();
-use Dispatcher::Agent::Pairing qw();
+use Dispatcher::Agent::Config    qw();
+use Dispatcher::Agent::Runner    qw();
+use Dispatcher::Agent::Pairing   qw();
+use Dispatcher::Agent::RateLimit qw();
 use Dispatcher::Auth           qw();
 use Dispatcher::Log            qw();
 use JSON                       qw(encode_json decode_json);
@@ -71,6 +72,8 @@ sub mode_serve {
         path => $disp_serial_path,
     );
 
+    my %rate_state;
+
     $SIG{HUP} = sub {
         warn "Reloading allowlist, revocation list, and dispatcher serial...\n";
         $allowlist = eval { Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH) };
@@ -83,6 +86,7 @@ sub mode_serve {
             Dispatcher::Agent::Pairing::load_dispatcher_serial(path => $disp_serial_path)
         };
         warn "Dispatcher serial reload failed: $@\n" if $@;
+        %rate_state = ();
     };
 
     require IO::Socket::SSL;
@@ -104,6 +108,13 @@ sub mode_serve {
 
     while (my $conn = $server->accept) {
         my $peer        = $conn->peerhost // 'unknown';
+
+        if (Dispatcher::Agent::RateLimit::check($peer, \%rate_state)) {
+            $conn->close(SSL_no_shutdown => 1);
+            next;
+        }
+        Dispatcher::Agent::RateLimit::record_connection($peer, \%rate_state);
+
         # Read peer cert serial before forking - after the parent closes its
         # copy of $conn the SSL object becomes invalid in the child.
         my $peer_serial = _peer_serial($conn);
