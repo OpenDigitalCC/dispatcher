@@ -106,7 +106,37 @@ sub mode_serve {
         PORT   => $config->{port},
     });
 
-    while (my $conn = $server->accept) {
+    while (1) {
+        my $conn = $server->accept;
+
+        unless (defined $conn) {
+            my $err  = $IO::Socket::SSL::SSL_ERROR // '';
+            my $peer = $server->peerhost // 'unknown';
+
+            # Distinguish TLS handshake failure from a fatal socket error.
+            # A handshake failure leaves $! at 0 (or EAGAIN/EINTR); the SSL
+            # error string describes the cert/protocol problem. A fatal error
+            # (server socket closed, accept(2) syscall failed) sets $! to a
+            # real errno value. Exit the loop only on fatal errors.
+            if ($!) {
+                Dispatcher::Log::log_action('ERR', {
+                    ACTION => 'accept-fatal',
+                    PEER   => $peer,
+                    REASON => "$!",
+                });
+                last;
+            }
+
+            Dispatcher::Agent::RateLimit::record_failure($peer, \%rate_state);
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION => 'tls-failure',
+                PEER   => $peer,
+                REASON => $err,
+            });
+            Dispatcher::Agent::RateLimit::check($peer, \%rate_state);
+            next;
+        }
+
         my $peer        = $conn->peerhost // 'unknown';
 
         # IP allowlist check: before rate check, before fork, before peer serial
