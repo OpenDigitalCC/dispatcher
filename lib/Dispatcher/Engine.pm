@@ -453,6 +453,11 @@ sub _build_ua {
         SSL_key_file    => $config->{key},
         SSL_ca_file     => $config->{ca},
         SSL_verify_mode => 0x01,
+        SSL_version     => 'TLSv1_3:TLSv1_2',
+        SSL_cipher_list => 'ECDHE-ECDSA-AES256-GCM-SHA384:'
+                         . 'ECDHE-RSA-AES256-GCM-SHA384:'
+                         . 'ECDHE-ECDSA-CHACHA20-POLY1305:'
+                         . 'ECDHE-RSA-CHACHA20-POLY1305',
     );
 
     my $ua = LWP::UserAgent->new(
