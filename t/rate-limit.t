@@ -204,22 +204,26 @@ use Dispatcher::Agent::RateLimit qw();
     my %state;
     my $now = time();
 
-    # Fill with 999 unblocked entries
+    # Fill with 999 entries all blocked until now+100 (higher blocked_until)
     for my $i (1..999) {
-        $state{"192.168.0.$i"} = { connections => [], failures => [] };
+        $state{"192.168.0.$i"} = {
+            connections   => [],
+            failures      => [],
+            blocked_until => $now + 100,
+        };
     }
 
-    # Add one with a known blocked_until value (earliest - should be evicted)
+    # Add one entry with a lower blocked_until (now+10) - this is the minimum
+    # and must be the one the sort-ascending eviction targets
     $state{'172.16.0.1'} = {
         connections   => [],
         failures      => [],
         blocked_until => $now + 10,
     };
 
-    # This check will be for a new IP, pushing total to 1001 before eviction
-    # We need exactly 1000 before the new IP triggers eviction
-    # Currently we have 1000 entries total (999 + 1 blocked)
-    # Adding the new IP in check() would make 1001, so eviction fires at >= 1000
+    # %state now has 1000 entries. check() for a new IP triggers eviction
+    # (>= MAX_ENTRIES) and must remove the entry with the lowest blocked_until,
+    # which is 172.16.0.1 (now+10 < now+100).
 
     my $log_calls = 0;
     my $evict_logged = 0;
