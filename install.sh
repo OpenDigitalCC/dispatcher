@@ -477,6 +477,9 @@ install_agent() {
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
         "$BIN_DIR/dispatcher-agent"
 
+    safe_install 755 "$SOURCE_DIR/bin/update-dispatcher-serial" \
+        "$BIN_DIR/update-dispatcher-serial"
+
     # Config directory - readable by agent group, not world
     mkdir -p "$AGENT_CONF_DIR"
     chmod 750 "$AGENT_CONF_DIR"
@@ -623,6 +626,7 @@ uninstall() {
         "$BIN_DIR/dispatcher-agent"
         "$BIN_DIR/dispatcher"
         "$BIN_DIR/dispatcher-api"
+        "$BIN_DIR/update-dispatcher-serial"
     )
 
     if [[ "$HAS_SYSTEMD" == true ]]; then
