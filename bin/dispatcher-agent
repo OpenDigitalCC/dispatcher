@@ -324,6 +324,10 @@ sub handle_connection {
     # Read body
     my $body = '';
     if (my $len = $headers{'content-length'}) {
+        if ($len > 1_048_576) {
+            _send_raw($conn, 413, encode_json({ error => 'request too large' }));
+            return;
+        }
         read $conn, $body, $len;
     }
 
