@@ -18,6 +18,11 @@ use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
 use Dispatcher::Agent::Pairing qw();
+use Dispatcher::Log qw();
+
+# Initialise syslog handle so load_revoked_serials and other functions
+# that call log_action do not hit the uninitialised fallback path.
+Dispatcher::Log::init('test');
 
 # ---------------------------------------------------------------------------
 # serial_to_hex: basic hex input
