@@ -31,6 +31,7 @@ sub make_hook {
 {
     my $result = Dispatcher::Auth::check(
         action => 'run',
+        caller => 'cli',
         config => {},
     );
     ok $result->{ok}, 'no hook: authorised by default';
@@ -39,6 +40,7 @@ sub make_hook {
 {
     my $result = Dispatcher::Auth::check(
         action => 'ping',
+        caller => 'cli',
         config => {},
     );
     ok $result->{ok}, 'no hook: ping authorised by default';
@@ -47,6 +49,7 @@ sub make_hook {
 {
     my $result = Dispatcher::Auth::check(
         action => 'run',
+        caller => 'cli',
         config => { auth_hook => '' },
     );
     ok $result->{ok}, 'empty hook path: authorised by default';
