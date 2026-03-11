@@ -84,7 +84,7 @@ sub run_pairing_mode {
                 }
                 if ($pid == 0) {
                     $server->close;
-                    _handle_pair_request($conn, $peer_ip, $log_fn, $max_queue);
+                    _handle_pair_request($conn, $peer_ip, $log_fn, $max_queue, $PAIRING_DIR);
                     $conn->close;
                     exit 0;
                 }
@@ -401,8 +401,9 @@ sub _do_deny {
 }
 
 sub _handle_pair_request {
-    my ($conn, $peer_ip, $log_fn, $max_queue) = @_;
-    $max_queue //= 10;
+    my ($conn, $peer_ip, $log_fn, $max_queue, $pairing_dir) = @_;
+    $max_queue  //= 10;
+    $pairing_dir //= $PAIRING_DIR;
 
     # Read raw HTTP request
     my $raw = '';
@@ -431,8 +432,8 @@ sub _handle_pair_request {
     my $code     = _pairing_code($csr);
 
     # Queue depth check - expire stale entries first, then count remaining
-    _expire_stale_requests($PAIRING_DIR);
-    my @pending = glob "$PAIRING_DIR/*.json";
+    _expire_stale_requests($pairing_dir);
+    my @pending = glob "$pairing_dir/*.json";
     if (@pending >= $max_queue) {
         _send_raw($conn, encode_json({
             status => 'error',
@@ -443,8 +444,8 @@ sub _handle_pair_request {
     }
 
     # Queue the request
-    make_path($PAIRING_DIR) unless -d $PAIRING_DIR;
-    _write_file("$PAIRING_DIR/$reqid.json", encode_json({
+    make_path($pairing_dir) unless -d $pairing_dir;
+    _write_file("$pairing_dir/$reqid.json", encode_json({
         id       => $reqid,
         hostname => $hostname,
         ip       => $peer_ip,
@@ -464,8 +465,8 @@ sub _handle_pair_request {
     _send_raw($conn, encode_json({ status => 'pending', reqid => $reqid }));
 
     # Poll for approval or denial (max 10 minutes)
-    my $resp_approved = "$PAIRING_DIR/$reqid.approved";
-    my $resp_denied   = "$PAIRING_DIR/$reqid.denied";
+    my $resp_approved = "$pairing_dir/$reqid.approved";
+    my $resp_denied   = "$pairing_dir/$reqid.denied";
     my $deadline      = time + 600;
 
     while (time < $deadline) {
@@ -473,7 +474,7 @@ sub _handle_pair_request {
             my $resp = _slurp($resp_approved);
             _send_raw($conn, $resp);
             unlink $resp_approved;
-            unlink "$PAIRING_DIR/$reqid.json";
+            unlink "$pairing_dir/$reqid.json";
             return;
         }
         if (-f $resp_denied) {
@@ -487,7 +488,7 @@ sub _handle_pair_request {
 
     # Timeout
     _send_raw($conn, encode_json({ status => 'denied', reason => 'approval timeout' }));
-    unlink "$PAIRING_DIR/$reqid.json";
+    unlink "$pairing_dir/$reqid.json";
 }
 
 sub _send_raw {
