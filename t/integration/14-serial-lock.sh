@@ -20,6 +20,9 @@
 #   - Dispatcher::Pairing cannot be loaded
 
 set -uo pipefail
+# This test requires no live agents. Set AGENT1 to suppress lib.sh's
+# auto-discovery which would exit if no agents are registered.
+AGENT1="${AGENT1:-none}"
 source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
 
 # ---------------------------------------------------------------------------

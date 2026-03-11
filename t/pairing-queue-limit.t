@@ -51,12 +51,19 @@ sub make_pair_request {
 # Run _handle_pair_request with a mock socketpair.
 # Returns decoded JSON response sent back to the client side.
 # pairing_dir is passed as the optional fifth argument if provided.
+#
+# auto_deny => 1: forks a background process that watches pairing_dir for a
+# newly queued .json file and immediately writes a .denied response. This
+# unblocks _handle_pair_request's poll loop in ~2 seconds, allowing tests
+# that verify a request was accepted (file written) to complete without
+# waiting the full 10-minute poll timeout.
 sub call_handle {
     my (%opts) = @_;
     my $max_queue   = $opts{max_queue}   // 10;
     my $pairing_dir = $opts{pairing_dir};
     my $request     = $opts{request}     // make_pair_request();
     my $log_ref     = $opts{log_ref}     // [];
+    my $auto_deny   = $opts{auto_deny}   // 0;
 
     my $log_fn = sub { push @$log_ref, $_[0] };
 
@@ -71,6 +78,31 @@ sub call_handle {
     print $server $request;
     $server->shutdown(1);
 
+    # Background denier: watches for any new .json in pairing_dir and writes
+    # a .denied file so the poll loop exits promptly.
+    my $denier_pid;
+    if ($auto_deny && defined $pairing_dir) {
+        my @existing = glob("$pairing_dir/*.json");
+        my %known = map { $_ => 1 } @existing;
+        $denier_pid = fork();
+        die "fork: $!" unless defined $denier_pid;
+        if ($denier_pid == 0) {
+            require JSON;
+            for (1..15) {  # poll up to 30 seconds
+                sleep 2;
+                for my $f (glob("$pairing_dir/*.json")) {
+                    next if $known{$f};
+                    (my $base = $f) =~ s/\.json$//;
+                    unless (-f "$base.denied") {
+                        open my $fh, '>', "$base.denied" or next;
+                        print $fh JSON::encode_json({ status => 'denied', reason => 'test-auto-deny' });
+                    }
+                }
+            }
+            exit 0;
+        }
+    }
+
     if (defined $pairing_dir) {
         Dispatcher::Pairing::_handle_pair_request(
             $server, '127.0.0.1', $log_fn, $max_queue, $pairing_dir
@@ -82,11 +114,25 @@ sub call_handle {
     }
     $server->close;
 
+    if (defined $denier_pid) {
+        kill 'TERM', $denier_pid;
+        waitpid $denier_pid, 0;
+    }
+
     local $/;
     my $raw = <$client> // '';
     $client->close;
-    $raw =~ s/\A.*?\r\n\r\n//s;
-    return eval { decode_json($raw) } // { _raw => $raw };
+    # Strip all HTTP response chunks up to the last \r\n\r\n separator.
+    # _handle_pair_request sends two responses for accepted requests:
+    # first {"status":"pending",...} then the deny/approve response.
+    # Take the final JSON object only.
+    my @chunks;
+    while ($raw =~ s/\A.*?\r\n\r\n//s) {
+        push @chunks, $raw =~ /\A(\{.*?\})/s ? $1 : '';
+    }
+    my $body = $chunks[-1] // $raw;
+    $body = $raw unless $body =~ /\{/;
+    return eval { decode_json($body) } // { _raw => $raw };
 }
 
 # Pre-populate pairing dir with N .json queue files.
@@ -118,7 +164,7 @@ my $has_pairing_dir_param = do {
     if (-f $src) {
         open my $fh, '<', $src or die $!;
         local $/; my $text = <$fh>;
-        $text =~ /sub _handle_pair_request\s*\{[^}]{0,300}my\s+\$pairing_dir\b/s ? 1 : 0;
+        $text =~ /sub _handle_pair_request\s*\{\s*my\s*\([^)]*\$pairing_dir\b/s ? 1 : 0;
     } else { 0 }
 };
 
@@ -164,7 +210,7 @@ SKIP: {
     my $dir = tempdir(CLEANUP => 1);
     populate_queue($dir, 9);
     my @logs;
-    my $resp = call_handle(max_queue => 10, pairing_dir => $dir, log_ref => \@logs);
+    my $resp = call_handle(max_queue => 10, pairing_dir => $dir, log_ref => \@logs, auto_deny => 1);
 
     subtest 'queue at 9/10: request accepted' => sub {
         isnt $resp->{status}, 'error', 'response is not an error';
@@ -190,7 +236,7 @@ SKIP: {
 
     my $dir = tempdir(CLEANUP => 1);
     populate_queue($dir, 10, stale => 5);
-    my $resp = call_handle(max_queue => 10, pairing_dir => $dir);
+    my $resp = call_handle(max_queue => 10, pairing_dir => $dir, auto_deny => 1);
 
     subtest 'queue with 5 stale: expires stale entries and accepts request' => sub {
         isnt $resp->{status}, 'error',
@@ -218,7 +264,7 @@ SKIP: {
 
     my $dir_ok = tempdir(CLEANUP => 1);
     populate_queue($dir_ok, 2);
-    my $resp_ok = call_handle(max_queue => 3, pairing_dir => $dir_ok);
+    my $resp_ok = call_handle(max_queue => 3, pairing_dir => $dir_ok, auto_deny => 1);
 
     subtest 'custom max_queue=3: accepted with 2 files' => sub {
         isnt $resp_ok->{status}, 'error', 'accepted when below custom limit';
@@ -247,22 +293,10 @@ subtest 'run_pairing_mode: accepts max_queue parameter' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# NOTE: To make all queue limit subtests runnable, add pairing_dir as a
-# fifth parameter to _handle_pair_request and use it throughout:
-#
-#   sub _handle_pair_request {
-#       my ($conn, $peer_ip, $log_fn, $max_queue, $pairing_dir) = @_;
-#       $max_queue   //= 10;
-#       $pairing_dir //= $PAIRING_DIR;
-#       # replace all bare $PAIRING_DIR references with $pairing_dir
-#   }
-#
-# And pass it from run_pairing_mode:
-#
-#   _handle_pair_request($conn, $peer_ip, $log_fn, $max_queue, $PAIRING_DIR);
-#
-# This is a purely internal change - _handle_pair_request is private
-# and called in one place only. The public API is unaffected.
+# NOTE: _handle_pair_request accepts pairing_dir as a fifth parameter and
+# run_pairing_mode passes $PAIRING_DIR to it. This was the change required
+# to make the queue limit subtests testable without touching the real
+# pairing directory. The public API is unaffected.
 # ---------------------------------------------------------------------------
 
 done_testing;
