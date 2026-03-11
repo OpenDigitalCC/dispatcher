@@ -3,7 +3,7 @@ package Dispatcher::Agent::Runner;
 use strict;
 use warnings;
 use JSON   qw(encode_json);
-use POSIX  qw(WIFEXITED WEXITSTATUS);
+use POSIX  qw(WIFEXITED WEXITSTATUS EINTR EAGAIN);
 
 
 # Execute a script with no shell, capture stdout/stderr/exit.
@@ -21,8 +21,9 @@ use POSIX  qw(WIFEXITED WEXITSTATUS);
 #   exit  126   killed by signal or exec failed
 #   exit  -1    fork or pipe failure (error in stderr)
 sub run_script {
-    my ($script_path, $args, $context) = @_;
-    $args //= [];
+    my ($script_path, $args, $context, $timeout) = @_;
+    $args    //= [];
+    $timeout //= 10;
 
     # Pipes for stdin (JSON context), stdout, and stderr
     pipe my $stdin_r,  my $stdin_w  or return _error("pipe(stdin): $!");
@@ -57,10 +58,9 @@ sub run_script {
     close $stdout_w;
     close $stderr_w;
 
-    # Write context JSON to script stdin, then close to signal EOF
+    # Write context JSON to script stdin with timeout, then close to signal EOF
     if ($context) {
-        binmode $stdin_w, ':utf8';
-        print $stdin_w encode_json($context);
+        _write_stdin($stdin_w, encode_json($context), $timeout);
     }
     close $stdin_w;
 
@@ -77,6 +77,49 @@ sub run_script {
         stderr => $stderr,
         exit   => $exit,
     };
+}
+
+# Write to the script's stdin pipe with a timeout.
+# Uses O_NONBLOCK + select to avoid blocking indefinitely if the script
+# does not read stdin. On timeout or unrecoverable error, closes the write
+# end and returns — the script receives EOF and may exit normally or with
+# a JSON parse error. Either is preferable to the agent child hanging.
+sub _write_stdin {
+    my ($fh, $data, $timeout) = @_;
+    $timeout //= 10;
+
+    require Fcntl;
+    my $flags = 0;
+    Fcntl::fcntl($fh, Fcntl::F_GETFL(), $flags) or return;
+    Fcntl::fcntl($fh, Fcntl::F_SETFL(), $flags | Fcntl::O_NONBLOCK()) or return;
+
+    binmode $fh, ':utf8';
+    my $deadline = time + $timeout;
+    my $offset   = 0;
+    my $len      = length $data;
+
+    while ($offset < $len) {
+        if (time >= $deadline) {
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION => 'stdin-timeout',
+                BYTES  => $len - $offset,
+            });
+            return;
+        }
+
+        my $ready = '';
+        vec($ready, fileno($fh), 1) = 1;
+        my $found = select undef, $ready, undef, ($deadline - time);
+        next if $found == -1 && $! == EINTR;
+        last unless $found;
+
+        my $n = syswrite $fh, $data, $len - $offset, $offset;
+        if (!defined $n) {
+            next if $! == EAGAIN || $! == EINTR;
+            last;    # real error — close and let script see EOF
+        }
+        $offset += $n;
+    }
 }
 
 sub _slurp {

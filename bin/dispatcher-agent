@@ -527,7 +527,10 @@ sub handle_run {
         timestamp => POSIX::strftime('%Y-%m-%dT%H:%M:%SZ', gmtime),
     };
 
-    my $result = Dispatcher::Agent::Runner::run_script($script_path, $args, $context);
+    my $result = Dispatcher::Agent::Runner::run_script(
+        $script_path, $args, $context,
+        $config->{stdin_timeout} // 10,
+    );
 
     Dispatcher::Log::log_action('INFO', {
         ACTION => 'run',
