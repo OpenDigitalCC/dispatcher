@@ -33,6 +33,8 @@ sub main {
         'allowlist=s'   => \$ALLOWLIST_PATH,
         'dispatcher=s'  => \$opts{dispatcher},
         'port=i'        => \$opts{port},
+        'background'    => \$opts{background},
+        'timeout=i'     => \$opts{timeout},
     ) or die usage();
 
     $mode = shift @ARGV // 'serve';
@@ -189,32 +191,41 @@ sub mode_serve {
 sub mode_request_pairing {
     my ($opts) = @_;
 
-    my $dispatcher = $opts->{dispatcher}
+    my $dispatcher  = $opts->{dispatcher}
         or die "--dispatcher <host> required for request-pairing\n";
+    my $background  = $opts->{background} // 0;
+    my $timeout     = $opts->{timeout}    // 30;
+
+    if ($background && $timeout > 600) {
+        die "Error: --timeout cannot exceed 600 seconds in background mode.\n"
+          . "The agent connection window is 660 seconds; values above 600 risk\n"
+          . "the connection expiring before approval is received.\n";
+    }
 
     my $host = hostname();
 
-    print "Generating key and CSR for '$host'...\n";
+    print "Generating key and CSR for '$host'...\n" unless $background;
     my $pair = Dispatcher::Agent::Pairing::generate_key_and_csr(
         hostname => $host,
     );
 
-    # Compute a 6-digit confirmation code from the CSR for the operator
-    # to verify against the dispatcher's display before approving.
-    my $pairing_code = _pairing_code($pair->{csr_pem});
-    print "Pairing code: $pairing_code\n";
-    print "  Verify this code matches the dispatcher display before approving.\n\n";
+    unless ($background) {
+        my $pairing_code = _pairing_code($pair->{csr_pem});
+        print "Pairing code: $pairing_code\n";
+        print "  Verify this code matches the dispatcher display before approving.\n\n";
+        print "Connecting to dispatcher at $dispatcher for pairing...\n";
+    }
 
-    print "Connecting to dispatcher at $dispatcher for pairing...\n";
-    my $result = Dispatcher::Agent::Pairing::request_pairing(
+    # Submit the CSR. The dispatcher queues it and returns a reqid immediately.
+    my $submitted = Dispatcher::Agent::Pairing::submit_pairing_request(
         dispatcher => $dispatcher,
         port       => $opts->{port} // 7444,
         csr_pem    => $pair->{csr_pem},
         hostname   => $host,
     );
 
-    unless ($result->{ok}) {
-        my $err = $result->{error} // 'unknown error';
+    unless ($submitted->{ok}) {
+        my $err = $submitted->{error} // 'unknown error';
         if ($err =~ /IO::Socket::IP configuration failed|Name or service not known|Temporary failure in name resolution/i) {
             die "Pairing failed: could not resolve dispatcher hostname '$dispatcher'.\n"
               . "Check the hostname is correct or use an IP address instead.\n";
@@ -227,10 +238,76 @@ sub mode_request_pairing {
         die "Pairing failed: $err\n";
     }
 
+    my $reqid = $submitted->{reqid};
+
+    if ($background) {
+        # Print reqid to stdout for the orchestrator, then fork.
+        # Parent exits 0 immediately. Child waits for approval subject to timeout.
+        print "$reqid\n";
+        STDOUT->flush;
+
+        my $pid = fork();
+        die "fork failed: $!\n" unless defined $pid;
+
+        if ($pid != 0) {
+            # Parent: exit cleanly. Socket fd is inherited by child.
+            exit 0;
+        }
+
+        # Child: detach from terminal, wait for approval with timeout.
+        # $submitted->{sock} is inherited across the fork.
+        local $SIG{ALRM} = sub {
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION => 'pair-timeout',
+                REQID  => $reqid,
+            });
+            exit 2;
+        };
+        alarm $timeout;
+
+        my $result = Dispatcher::Agent::Pairing::await_pairing_result(
+            sock  => $submitted->{sock},
+            nonce => $submitted->{nonce},
+            reqid => $reqid,
+        );
+        alarm 0;
+
+        unless ($result->{ok}) {
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION => 'pair-denied',
+                REQID  => $reqid,
+                REASON => $result->{error} // 'denied',
+            });
+            exit 3;
+        }
+
+        _store_pairing_result($result, $pair->{key_pem}, $dispatcher);
+        return;
+    }
+
+    # Interactive (non-background) mode: await inline.
+    my $result = Dispatcher::Agent::Pairing::await_pairing_result(
+        sock  => $submitted->{sock},
+        nonce => $submitted->{nonce},
+        reqid => $reqid,
+    );
+
+    unless ($result->{ok}) {
+        my $err = $result->{error} // 'unknown error';
+        die "Pairing failed: $err\n";
+    }
+
+    _store_pairing_result($result, $pair->{key_pem}, $dispatcher);
+    print "Pairing complete. Certificates stored.\n";
+}
+
+sub _store_pairing_result {
+    my ($result, $key_pem, $dispatcher) = @_;
+
     Dispatcher::Agent::Pairing::store_certs(
         cert_pem          => $result->{cert_pem},
         ca_pem            => $result->{ca_pem},
-        key_pem           => $pair->{key_pem},
+        key_pem           => $key_pem,
         dispatcher_serial => $result->{dispatcher_serial} // '',
     );
 
@@ -239,8 +316,6 @@ sub mode_request_pairing {
         STATUS     => 'approved',
         DISPATCHER => $dispatcher,
     });
-
-    print "Pairing complete. Certificates stored.\n";
 }
 
 sub mode_pairing_status {
@@ -621,5 +696,9 @@ Options:
   --config <path>                Path to agent.conf
   --allowlist <path>             Path to scripts.conf
   --port <n>                     Override pairing port (default 7444)
+  --background                   Non-interactive pairing: print reqid and wait
+                                 for approval (for orchestrated installations)
+  --timeout <n>                  Seconds to wait for approval in background
+                                 mode (default 30, max 600)
 END
 }

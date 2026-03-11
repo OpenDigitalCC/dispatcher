@@ -124,28 +124,27 @@ sub pairing_status {
     return { paired => 1, expiry => $expiry };
 }
 
-# Connect to dispatcher pairing port, send CSR, wait for approval
-# Returns hashref: { ok => 1, cert_pem => '...', ca_pem => '...' }
-#               or { ok => 0, error => '...' }
-sub request_pairing {
+# Submit a pairing request and read the immediate pending acknowledgement.
+# Returns { ok => 1, reqid => '...', sock => $sock } with the socket still open,
+#      or { ok => 0, error => '...' }
+# The caller must call await_pairing_result($sock, $nonce) to get the cert.
+sub submit_pairing_request {
     my (%opts) = @_;
     my $dispatcher_host = $opts{dispatcher} or croak "dispatcher required";
     my $port            = $opts{port}       // 7444;
     my $csr_pem         = $opts{csr_pem}    or croak "csr_pem required";
     my $hostname        = $opts{hostname}   or croak "hostname required";
-    my $ca_cert         = $opts{ca_cert};   # optional: verify dispatcher cert
+    my $ca_cert         = $opts{ca_cert};
 
     require IO::Socket::SSL;
     require JSON;
 
-    # Generate a per-request nonce to verify the response is for this specific
-    # request and not a replayed or misrouted one.
     my $nonce = _gen_nonce();
 
     my %ssl_opts = (
         PeerHost        => $dispatcher_host,
         PeerPort        => $port,
-        Timeout         => 660,    # 11 minutes - longer than dispatcher's 10 min poll window
+        Timeout         => 660,
         SSL_verify_mode => $ca_cert
             ? IO::Socket::SSL::SSL_VERIFY_PEER()
             : IO::Socket::SSL::SSL_VERIFY_NONE(),
@@ -167,39 +166,48 @@ sub request_pairing {
                 "\r\n",
                 $payload;
 
-    # Read HTTP response headers line by line
-    my $status_line = <$sock>;
-    return { ok => 0, error => "no response from dispatcher" } unless $status_line;
-
-    my $content_length;
-    while (my $line = <$sock>) {
-        $line =~ s/\r\n$//;
-        $line =~ s/\n$//;
-        last if $line eq '';   # blank line = end of headers
-        if ($line =~ /^Content-Length:\s*(\d+)/i) {
-            $content_length = $1;
-        }
+    # Read the immediate pending acknowledgement from the dispatcher.
+    my $first = _read_http_response($sock);
+    unless ($first->{ok}) {
+        close $sock;
+        return { ok => 0, error => $first->{error} };
     }
 
-    return { ok => 0, error => "no Content-Length in pairing response" }
-        unless defined $content_length;
+    my $status = $first->{data}{status} // '';
+    unless ($status eq 'pending') {
+        close $sock;
+        return { ok => 0, error => $first->{data}{reason} // "unexpected status '$status'" };
+    }
 
-    # Read exactly content_length bytes - no waiting for EOF
-    my $body = '';
-    read $sock, $body, $content_length;
+    my $reqid = $first->{data}{reqid} // '';
+
+    return { ok => 1, reqid => $reqid, sock => $sock, nonce => $nonce };
+}
+
+# Read the approval or denial response from an open pairing socket.
+# $sock and $nonce must come from submit_pairing_request.
+# Returns { ok => 1, cert_pem => '...', ca_pem => '...', dispatcher_serial => '...', reqid => '...' }
+#      or { ok => 0, error => '...' }
+sub await_pairing_result {
+    my (%opts) = @_;
+    my $sock  = $opts{sock}  or croak "sock required";
+    my $nonce = $opts{nonce} or croak "nonce required";
+    my $reqid = $opts{reqid} // '';
+
+    my $second = _read_http_response($sock);
     close $sock;
 
-    return { ok => 0, error => "empty response body" } unless length $body;
+    return { ok => 0, error => $second->{error} } unless $second->{ok};
 
-    my $data = eval { JSON::decode_json($body) };
-    return { ok => 0, error => "bad JSON: $@" } if $@;
+    my $data = $second->{data};
 
-    if ($data->{status} eq 'approved') {
+    if (($data->{status} // '') eq 'approved') {
         if (($data->{nonce} // '') ne $nonce) {
             return { ok => 0, error => 'nonce mismatch in pairing response' };
         }
         return {
             ok                => 1,
+            reqid             => $reqid,
             cert_pem          => $data->{cert},
             ca_pem            => $data->{ca},
             dispatcher_serial => $data->{dispatcher_serial} // '',
@@ -207,6 +215,21 @@ sub request_pairing {
     }
 
     return { ok => 0, error => $data->{reason} // 'denied' };
+}
+
+# Convenience wrapper: submit and await in one call (interactive/non-background use).
+# Returns same structure as await_pairing_result.
+sub request_pairing {
+    my (%opts) = @_;
+
+    my $submitted = submit_pairing_request(%opts);
+    return $submitted unless $submitted->{ok};
+
+    return await_pairing_result(
+        sock  => $submitted->{sock},
+        nonce => $submitted->{nonce},
+        reqid => $submitted->{reqid},
+    );
 }
 
 # Load the stored dispatcher cert serial from file.
@@ -304,6 +327,39 @@ sub serial_to_hex {
     # integer coercion silently loses precision for large decimal strings.
     require Math::BigInt;
     return lc( Math::BigInt->new($serial)->as_hex =~ s/^0x//r );
+}
+
+# Read one HTTP/1.0-style response from an open socket.
+# Returns { ok => 1, data => $hashref } on success,
+#      or { ok => 0, error => '...' } on failure.
+sub _read_http_response {
+    my ($sock) = @_;
+
+    my $status_line = <$sock>;
+    return { ok => 0, error => 'no response from dispatcher' } unless $status_line;
+
+    my $content_length;
+    while (my $line = <$sock>) {
+        $line =~ s/\r\n$//;
+        $line =~ s/\n$//;
+        last if $line eq '';
+        if ($line =~ /^Content-Length:\s*(\d+)/i) {
+            $content_length = $1;
+        }
+    }
+
+    return { ok => 0, error => 'no Content-Length in pairing response' }
+        unless defined $content_length;
+
+    my $body = '';
+    read $sock, $body, $content_length;
+
+    return { ok => 0, error => 'empty response body' } unless length $body;
+
+    my $data = eval { JSON::decode_json($body) };
+    return { ok => 0, error => "bad JSON: $@" } if $@;
+
+    return { ok => 1, data => $data };
 }
 
 sub _gen_nonce {

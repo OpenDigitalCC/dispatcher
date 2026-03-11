@@ -433,6 +433,12 @@ sub _handle_pair_request {
     $log_fn->({ ACTION => 'pair-request', AGENT => $hostname, IP => $peer_ip, REQID => $reqid, STATUS => 'pending' });
     print "Pairing request queued: $hostname ($peer_ip) - ID: $reqid\n";
 
+    # Send reqid to agent immediately so orchestrators can use it to call
+    # 'dispatcher approve <reqid>' without waiting for the connection to close.
+    # The agent reads this first response, extracts the reqid, then reads
+    # a second response for the approval or denial.
+    _send_raw($conn, encode_json({ status => 'pending', reqid => $reqid }));
+
     # Poll for approval or denial (max 10 minutes)
     my $resp_approved = "$PAIRING_DIR/$reqid.approved";
     my $resp_denied   = "$PAIRING_DIR/$reqid.denied";

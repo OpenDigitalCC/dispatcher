@@ -558,6 +558,7 @@ waits for the operator to approve the request.
 
 ```bash
 dispatcher-agent request-pairing --dispatcher <host>
+dispatcher-agent request-pairing --dispatcher <host> --background [--timeout <n>]
 ```
 
 `--dispatcher <host>`
@@ -565,6 +566,18 @@ dispatcher-agent request-pairing --dispatcher <host>
 
 `--port <n>`
 : Override the pairing port on the dispatcher (default 7444).
+
+`--background`
+: Non-interactive mode for orchestrated installations. Prints the request
+  ID to stdout and exits immediately, leaving a background process to wait
+  for approval and store the certificate on receipt. See
+  [Orchestrated pairing](#orchestrated-pairing) below.
+
+`--timeout <n>`
+: How long (in seconds) the background process waits for approval before
+  giving up. Default: 30. Maximum: 600. If the timeout expires the
+  background process exits with code 2 and logs `ACTION=pair-timeout`.
+  Only valid with `--background`.
 
 The command blocks until the dispatcher approves or denies the request,
 or until the connection times out. On approval, the signed certificate
@@ -577,7 +590,86 @@ dispatcher, and that the correct address was specified.
 
 ---
 
-### pairing-status
+### Orchestrated pairing
+
+For automated provisioning workflows where interactive approval is not
+possible, `--background` separates the pairing request submission from the
+approval wait. The foreground process exits as soon as the dispatcher
+acknowledges the request, printing the request ID to stdout. A background
+process holds the connection open and writes the certificate when approval
+arrives.
+
+The orchestrator's responsibility is to capture the request ID and call
+`dispatcher approve` on the dispatcher host before the timeout expires.
+
+#### Flow
+
+On the agent host (as part of a provisioning script):
+
+```bash
+# Start pairing-mode on the dispatcher first, then:
+REQID=$(dispatcher-agent request-pairing --dispatcher dispatcher.example.com \
+    --background --timeout 60)
+echo "Request ID: $REQID"
+```
+
+The command exits 0 immediately, printing the request ID. The background
+process is now waiting for approval.
+
+On the dispatcher host (or via the orchestrator calling it remotely):
+
+```bash
+dispatcher approve "$REQID"
+```
+
+The background process receives the certificate, writes it to
+`/etc/dispatcher-agent/`, logs `ACTION=pair-complete`, and exits 0.
+
+Confirm pairing succeeded on the agent host:
+
+```bash
+dispatcher-agent pairing-status
+# Exits 0 if paired, 1 if not yet paired
+```
+
+#### Exit codes (background process)
+
+`0`
+: Approval received and certificates stored successfully.
+
+`2`
+: Timeout expired before approval arrived. Key and CSR have been
+  cleaned up. Re-run `request-pairing` to try again.
+
+`3`
+: Request was explicitly denied by the operator.
+
+#### Timing
+
+The background process holds the connection open for up to `--timeout`
+seconds (default 30, maximum 600). The dispatcher's own polling window is
+600 seconds — approval must arrive within whichever is shorter. For
+orchestrated workflows where the approval step may take time, increase
+`--timeout` accordingly:
+
+```bash
+REQID=$(dispatcher-agent request-pairing --dispatcher dispatcher.example.com \
+    --background --timeout 120)
+```
+
+#### Notes
+
+The background process inherits the connection socket from the foreground
+process — no reconnection occurs. The maximum `--timeout` of 600 seconds
+is enforced because the dispatcher closes the connection after its own
+600-second polling window, making longer waits unreliable.
+
+The request ID printed to stdout is the same ID shown by
+`dispatcher list-requests` on the dispatcher host. Both the confirmation
+code and the request ID are available via `list-requests` for verification
+before approving.
+
+---
 
 Report whether the agent is paired and show the certificate expiry date.
 
