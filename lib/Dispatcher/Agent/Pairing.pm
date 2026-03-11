@@ -125,6 +125,135 @@ sub pairing_status {
     return { paired => 1, expiry => $expiry };
 }
 
+# Two-phase pairing: submit CSR, get reqid, keep socket open.
+# Returns { ok => 1, reqid => '...', sock => $sock, nonce => '...' }
+#      or { ok => 0, error => '...' }
+sub submit_pairing_request {
+    my (%opts) = @_;
+    my $dispatcher_host = $opts{dispatcher} or croak "dispatcher required";
+    my $port            = $opts{port}       // 7444;
+    my $csr_pem         = $opts{csr_pem}    or croak "csr_pem required";
+    my $hostname        = $opts{hostname}   or croak "hostname required";
+    my $ca_cert         = $opts{ca_cert};
+
+    require IO::Socket::SSL;
+    require JSON;
+
+    my $nonce = _gen_nonce();
+
+    my %ssl_opts = (
+        PeerHost        => $dispatcher_host,
+        PeerPort        => $port,
+        Timeout         => 660,
+        SSL_verify_mode => $ca_cert
+            ? IO::Socket::SSL::SSL_VERIFY_PEER()
+            : IO::Socket::SSL::SSL_VERIFY_NONE(),
+    );
+    $ssl_opts{SSL_ca_file} = $ca_cert if $ca_cert;
+
+    my $sock = IO::Socket::SSL->new(%ssl_opts)
+        or return { ok => 0, error => "connect failed: $IO::Socket::SSL::SSL_ERROR" };
+
+    my $payload = JSON::encode_json({
+        hostname => $hostname,
+        csr      => $csr_pem,
+        nonce    => $nonce,
+    });
+
+    print $sock "POST /pair HTTP/1.0\r\n",
+                "Content-Type: application/json\r\n",
+                "Content-Length: ", length($payload), "\r\n",
+                "\r\n",
+                $payload;
+
+    # Read the immediate acknowledgement: {status: pending, reqid: ...}
+    my $status_line = <$sock>;
+    return { ok => 0, error => "no response from dispatcher" } unless $status_line;
+
+    my $content_length;
+    while (my $line = <$sock>) {
+        $line =~ s/\r\n$//;
+        $line =~ s/\n$//;
+        last if $line eq '';
+        if ($line =~ /^Content-Length:\s*(\d+)/i) {
+            $content_length = $1;
+        }
+    }
+
+    return { ok => 0, error => "no Content-Length in pairing acknowledgement" }
+        unless defined $content_length;
+
+    my $body = '';
+    read $sock, $body, $content_length;
+
+    return { ok => 0, error => "empty acknowledgement body" } unless length $body;
+
+    my $data = eval { JSON::decode_json($body) };
+    return { ok => 0, error => "bad JSON in acknowledgement: $@" } if $@;
+
+    if (($data->{status} // '') eq 'error') {
+        return { ok => 0, error => $data->{reason} // 'dispatcher returned error' };
+    }
+
+    unless (($data->{status} // '') eq 'pending' && $data->{reqid}) {
+        return { ok => 0, error => "unexpected acknowledgement: $body" };
+    }
+
+    # Socket stays open - dispatcher polls for approval and sends final response
+    return {
+        ok    => 1,
+        reqid => $data->{reqid},
+        sock  => $sock,
+        nonce => $nonce,
+    };
+}
+
+# Read the final approval/denial response on the open pairing socket.
+# Call after submit_pairing_request succeeds.
+# Returns { ok => 1, cert_pem => '...', ca_pem => '...', dispatcher_serial => '...' }
+#      or { ok => 0, error => '...' }
+sub await_pairing_result {
+    my (%opts) = @_;
+    my $sock  = $opts{sock}  or croak "sock required";
+    my $nonce = $opts{nonce} or croak "nonce required";
+
+    my $content_length;
+    while (my $line = <$sock>) {
+        $line =~ s/\r\n$//;
+        $line =~ s/\n$//;
+        last if $line eq '';
+        if ($line =~ /^Content-Length:\s*(\d+)/i) {
+            $content_length = $1;
+        }
+    }
+
+    return { ok => 0, error => "no Content-Length in pairing result" }
+        unless defined $content_length;
+
+    my $body = '';
+    read $sock, $body, $content_length;
+    close $sock;
+
+    return { ok => 0, error => "empty result body" } unless length $body;
+
+    my $data = eval { JSON::decode_json($body) };
+    return { ok => 0, error => "bad JSON in result: $@" } if $@;
+
+    if (($data->{status} // '') eq 'approved') {
+        if (($data->{nonce} // '') ne $nonce) {
+            return { ok => 0, error => 'nonce mismatch in pairing result' };
+        }
+        return {
+            ok                => 1,
+            cert_pem          => $data->{cert},
+            ca_pem            => $data->{ca},
+            dispatcher_serial => $data->{dispatcher_serial} // '',
+        };
+    }
+
+    return { ok => 0, error => $data->{reason} // 'denied' };
+}
+
 # Connect to dispatcher pairing port, send CSR, wait for approval
 # Returns hashref: { ok => 1, cert_pem => '...', ca_pem => '...' }
 #               or { ok => 0, error => '...' }
