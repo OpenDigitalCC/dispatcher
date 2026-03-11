@@ -49,8 +49,10 @@ sub main {
         'setup-ca'          => \&mode_setup_ca,
         'setup-dispatcher'  => \&mode_setup_dispatcher,
         'list-agents'       => \&mode_list_agents,
+        'list-locks'        => \&mode_list_locks,
         'rotate-cert'       => \&mode_rotate_cert,
         'serial-status'     => \&mode_serial_status,
+        'unpair'            => \&mode_unpair,
     );
 
     my $handler = $dispatch{$mode}
@@ -497,6 +499,52 @@ sub _parse_run_args {
     return (\@hosts, $script, \@script_args);
 }
 
+sub mode_list_locks {
+    my ($opts) = @_;
+    my $locks = Dispatcher::Lock::list_held();
+
+    if (!@$locks) {
+        print "No locks currently held.\n";
+        return;
+    }
+
+    if ($opts->{json}) {
+        print encode_json({ ok => 1, locks => $locks }), "\n";
+        return;
+    }
+
+    printf "%-30s  %s\n", 'HOST', 'SCRIPT';
+    printf "%s\n", '-' x 50;
+    for my $l (@$locks) {
+        printf "%-30s  %s\n", $l->{host}, $l->{script};
+    }
+}
+
+sub mode_unpair {
+    my ($opts, $hostname) = @_;
+    die "Usage: dispatcher unpair <hostname>\n" unless $hostname;
+
+    my $record = eval {
+        Dispatcher::Registry::remove_agent(hostname => $hostname)
+    };
+    if ($@) {
+        chomp(my $err = $@);
+        die "Unpair failed: $err\n";
+    }
+
+    my $expiry = $record->{expiry} // 'unknown';
+
+    Dispatcher::Log::log_action('INFO', {
+        ACTION => 'unpair',
+        AGENT  => $hostname,
+        EXPIRY => $expiry,
+    });
+
+    print "Unregistered '$hostname'.\n";
+    print "WARNING: Agent certificate remains valid until: $expiry\n";
+    print "Decommission the agent promptly or add its serial to the revocation list.\n";
+}
+
 sub usage {
     return <<'END';
 Usage: dispatcher <mode> [options] [args]
@@ -513,8 +561,10 @@ Modes:
   setup-ca                   One-time CA initialisation
   setup-dispatcher           Generate dispatcher key and certificate
   list-agents                List all registered (paired) agents
+  list-locks                 Show currently held script locks
   rotate-cert                Rotate dispatcher certificate and broadcast new serial
   serial-status              Show dispatcher serial and per-agent serial state
+  unpair <hostname>          Remove a paired agent from the registry
 
 Options:
   --config <path>            Path to dispatcher.conf

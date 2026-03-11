@@ -611,6 +611,30 @@ sub handle_capabilities {
         });
     }
 
+    # Auth hook - called after serial check, before building scripts list.
+    # username and token are not present on /capabilities requests (no body);
+    # hooks that require a token will correctly deny unauthenticated callers.
+    if ($config->{auth_hook}) {
+        my $auth = Dispatcher::Auth::check(
+            action    => 'discovery',
+            config    => $config,
+            script    => '',
+            args      => [],
+            username  => '',
+            token     => '',
+            source_ip => $peer,
+        );
+        unless ($auth->{ok}) {
+            Dispatcher::Log::log_action('WARNING', {
+                ACTION => 'capabilities-deny',
+                PEER   => $peer,
+                REASON => $auth->{reason},
+            });
+            _send_raw($conn, 403, encode_json({ error => 'not authorised' }));
+            return;
+        }
+    }
+
     my @scripts;
     for my $name (sort keys %$allowlist) {
         my $path = $allowlist->{$name};

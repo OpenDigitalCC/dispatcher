@@ -2,7 +2,7 @@ package Dispatcher::Lock;
 
 use strict;
 use warnings;
-use Fcntl  qw(LOCK_EX LOCK_NB);
+use Fcntl  qw(LOCK_EX LOCK_NB LOCK_UN);
 use File::Path qw(make_path);
 use Carp   qw(croak);
 
@@ -46,7 +46,7 @@ sub check_available {
             push @conflicts, "$host:$script";
         }
         # We don't hold the lock - release immediately
-        flock $fh, 8;   # LOCK_UN = 8
+        flock $fh, LOCK_UN;   # LOCK_UN = 8
         close $fh;
     }
 
@@ -106,7 +106,7 @@ sub acquire {
     if (@conflicts) {
         # Release any we did acquire before failing
         for my $fh (@handles) {
-            flock $fh, 8;
+            flock $fh, LOCK_UN;
             close $fh;
         }
         Dispatcher::Log::log_action('WARNING', {
@@ -136,7 +136,7 @@ sub release {
     croak "handles must be an arrayref" unless ref $handles eq 'ARRAY';
 
     for my $fh (@$handles) {
-        flock $fh, 8;   # LOCK_UN
+        flock $fh, LOCK_UN;   # LOCK_UN
         close $fh;
     }
 
@@ -145,6 +145,39 @@ sub release {
         HOSTS  => join(',', @$hosts),
         SCRIPT => $script,
     }) if @$hosts;
+}
+
+# Return list of currently held locks by probing each lock file.
+# A file that cannot be acquired non-blocking is held by another process.
+# Stale lock files (lockable or absent process) are silently skipped.
+#
+# Optional opts:
+#   lock_dir => $path   (default /var/lib/dispatcher/locks)
+#
+# Returns arrayref of hashrefs: { host => $str, script => $str }
+# sorted by host:script.
+sub list_held {
+    my (%opts) = @_;
+    my $dir = $opts{lock_dir} // $LOCK_DIR;
+
+    return [] unless -d $dir;
+
+    my @held;
+    opendir my $dh, $dir or croak "Cannot open lock dir '$dir': $!";
+    while (my $f = readdir $dh) {
+        next unless $f =~ /^(.+)--(.+)\.lock$/;
+        my ($host, $script) = ($1, $2);
+        my $path = "$dir/$f";
+        open my $fh, '>>', $path or next;
+        if (!flock $fh, LOCK_EX | LOCK_NB) {
+            push @held, { host => $host, script => $script };
+        }
+        flock $fh, LOCK_UN;
+        close $fh;
+    }
+    closedir $dh;
+
+    return [ sort { "$a->{host}:$a->{script}" cmp "$b->{host}:$b->{script}" } @held ];
 }
 
 # --- private ---
