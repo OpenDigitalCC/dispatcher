@@ -5,6 +5,7 @@ use warnings;
 use File::Temp qw(tempfile tempdir);
 use File::Basename qw(dirname);
 use Carp qw(croak);
+use Dispatcher::Log qw();
 
 
 # Generate a private key and CSR using openssl
@@ -124,27 +125,28 @@ sub pairing_status {
     return { paired => 1, expiry => $expiry };
 }
 
-# Submit a pairing request and read the immediate pending acknowledgement.
-# Returns { ok => 1, reqid => '...', sock => $sock } with the socket still open,
-#      or { ok => 0, error => '...' }
-# The caller must call await_pairing_result($sock, $nonce) to get the cert.
-sub submit_pairing_request {
+# Connect to dispatcher pairing port, send CSR, wait for approval
+# Returns hashref: { ok => 1, cert_pem => '...', ca_pem => '...' }
+#               or { ok => 0, error => '...' }
+sub request_pairing {
     my (%opts) = @_;
     my $dispatcher_host = $opts{dispatcher} or croak "dispatcher required";
     my $port            = $opts{port}       // 7444;
     my $csr_pem         = $opts{csr_pem}    or croak "csr_pem required";
     my $hostname        = $opts{hostname}   or croak "hostname required";
-    my $ca_cert         = $opts{ca_cert};
+    my $ca_cert         = $opts{ca_cert};   # optional: verify dispatcher cert
 
     require IO::Socket::SSL;
     require JSON;
 
+    # Generate a per-request nonce to verify the response is for this specific
+    # request and not a replayed or misrouted one.
     my $nonce = _gen_nonce();
 
     my %ssl_opts = (
         PeerHost        => $dispatcher_host,
         PeerPort        => $port,
-        Timeout         => 660,
+        Timeout         => 660,    # 11 minutes - longer than dispatcher's 10 min poll window
         SSL_verify_mode => $ca_cert
             ? IO::Socket::SSL::SSL_VERIFY_PEER()
             : IO::Socket::SSL::SSL_VERIFY_NONE(),
@@ -166,48 +168,39 @@ sub submit_pairing_request {
                 "\r\n",
                 $payload;
 
-    # Read the immediate pending acknowledgement from the dispatcher.
-    my $first = _read_http_response($sock);
-    unless ($first->{ok}) {
-        close $sock;
-        return { ok => 0, error => $first->{error} };
+    # Read HTTP response headers line by line
+    my $status_line = <$sock>;
+    return { ok => 0, error => "no response from dispatcher" } unless $status_line;
+
+    my $content_length;
+    while (my $line = <$sock>) {
+        $line =~ s/\r\n$//;
+        $line =~ s/\n$//;
+        last if $line eq '';   # blank line = end of headers
+        if ($line =~ /^Content-Length:\s*(\d+)/i) {
+            $content_length = $1;
+        }
     }
 
-    my $status = $first->{data}{status} // '';
-    unless ($status eq 'pending') {
-        close $sock;
-        return { ok => 0, error => $first->{data}{reason} // "unexpected status '$status'" };
-    }
+    return { ok => 0, error => "no Content-Length in pairing response" }
+        unless defined $content_length;
 
-    my $reqid = $first->{data}{reqid} // '';
-
-    return { ok => 1, reqid => $reqid, sock => $sock, nonce => $nonce };
-}
-
-# Read the approval or denial response from an open pairing socket.
-# $sock and $nonce must come from submit_pairing_request.
-# Returns { ok => 1, cert_pem => '...', ca_pem => '...', dispatcher_serial => '...', reqid => '...' }
-#      or { ok => 0, error => '...' }
-sub await_pairing_result {
-    my (%opts) = @_;
-    my $sock  = $opts{sock}  or croak "sock required";
-    my $nonce = $opts{nonce} or croak "nonce required";
-    my $reqid = $opts{reqid} // '';
-
-    my $second = _read_http_response($sock);
+    # Read exactly content_length bytes - no waiting for EOF
+    my $body = '';
+    read $sock, $body, $content_length;
     close $sock;
 
-    return { ok => 0, error => $second->{error} } unless $second->{ok};
+    return { ok => 0, error => "empty response body" } unless length $body;
 
-    my $data = $second->{data};
+    my $data = eval { JSON::decode_json($body) };
+    return { ok => 0, error => "bad JSON: $@" } if $@;
 
-    if (($data->{status} // '') eq 'approved') {
+    if ($data->{status} eq 'approved') {
         if (($data->{nonce} // '') ne $nonce) {
             return { ok => 0, error => 'nonce mismatch in pairing response' };
         }
         return {
             ok                => 1,
-            reqid             => $reqid,
             cert_pem          => $data->{cert},
             ca_pem            => $data->{ca},
             dispatcher_serial => $data->{dispatcher_serial} // '',
@@ -215,21 +208,6 @@ sub await_pairing_result {
     }
 
     return { ok => 0, error => $data->{reason} // 'denied' };
-}
-
-# Convenience wrapper: submit and await in one call (interactive/non-background use).
-# Returns same structure as await_pairing_result.
-sub request_pairing {
-    my (%opts) = @_;
-
-    my $submitted = submit_pairing_request(%opts);
-    return $submitted unless $submitted->{ok};
-
-    return await_pairing_result(
-        sock  => $submitted->{sock},
-        nonce => $submitted->{nonce},
-        reqid => $submitted->{reqid},
-    );
 }
 
 # Load the stored dispatcher cert serial from file.
@@ -311,55 +289,37 @@ sub serial_to_hex {
     return '' unless defined $serial && length $serial;
     $serial =~ s/^0x//i;
     $serial =~ s/^serial=//i;
+
+    # Strip colon separators (e.g. DE:AD:BE:EF from IO::Socket::SSL).
+    # OpenSSL prepends a 00 byte to positive-integer DER serials; strip it.
+    if ($serial =~ /:/) {
+        $serial =~ s/://g;
+        $serial = lc $serial;
+        $serial =~ s/^(?:00)+(?=.{2})//;  # strip leading 00 bytes (keep at least 2 hex chars)
+        return $serial;
+    }
+
     $serial = lc $serial;
-    $serial =~ s/://g;    # strip colon separators (e.g. DE:AD:BE:EF)
+
+    # A pure decimal string must be converted. Test explicitly: decimal strings
+    # contain only [0-9] and cannot contain [a-f], but digits-only strings also
+    # satisfy \A[0-9a-f]+\z so we must check for decimal first.
+    if ($serial =~ /\A[0-9]+\z/) {
+        # Cert serials can be up to 20 bytes (160 bits), requiring bignum
+        # arithmetic. We do not use sprintf '%x' because Perl's native integer
+        # coercion silently loses precision for large decimal strings.
+        require Math::BigInt;
+        return lc( Math::BigInt->new($serial)->as_hex =~ s/^0x//r );
+    }
 
     # If it contains only valid hex characters it is already hex.
-    # This covers pure-digit hex serials like "02" or "0a1b" which would
-    # otherwise be mistaken for decimal.
     if ($serial =~ /\A[0-9a-f]+\z/) {
         return $serial;
     }
 
-    # Contains non-hex characters - must be a large decimal string.
-    # Cert serials can be up to 20 bytes (160 bits), requiring bignum
-    # arithmetic. We do not fall back to sprintf '%x' because Perl's native
-    # integer coercion silently loses precision for large decimal strings.
+    # Contains non-hex characters - treat as large decimal via bignum.
     require Math::BigInt;
     return lc( Math::BigInt->new($serial)->as_hex =~ s/^0x//r );
-}
-
-# Read one HTTP/1.0-style response from an open socket.
-# Returns { ok => 1, data => $hashref } on success,
-#      or { ok => 0, error => '...' } on failure.
-sub _read_http_response {
-    my ($sock) = @_;
-
-    my $status_line = <$sock>;
-    return { ok => 0, error => 'no response from dispatcher' } unless $status_line;
-
-    my $content_length;
-    while (my $line = <$sock>) {
-        $line =~ s/\r\n$//;
-        $line =~ s/\n$//;
-        last if $line eq '';
-        if ($line =~ /^Content-Length:\s*(\d+)/i) {
-            $content_length = $1;
-        }
-    }
-
-    return { ok => 0, error => 'no Content-Length in pairing response' }
-        unless defined $content_length;
-
-    my $body = '';
-    read $sock, $body, $content_length;
-
-    return { ok => 0, error => 'empty response body' } unless length $body;
-
-    my $data = eval { JSON::decode_json($body) };
-    return { ok => 0, error => "bad JSON: $@" } if $@;
-
-    return { ok => 1, data => $data };
 }
 
 sub _gen_nonce {
