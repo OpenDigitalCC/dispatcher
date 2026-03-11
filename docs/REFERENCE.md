@@ -376,6 +376,10 @@ Key settings:
   Receives request context as JSON on stdin. See INSTALL.md for the full
   interface contract.
 
+---
+
+## agent.conf
+
 Configuration file for the `dispatcher-agent` process.
 Default path: `/etc/dispatcher-agent/agent.conf`.
 
@@ -717,6 +721,8 @@ before approving.
 
 ---
 
+### pairing-status
+
 Report whether the agent is paired and show the certificate expiry date.
 
 ```bash
@@ -863,7 +869,7 @@ and the files exist. Plain HTTP is used otherwise.
 Full endpoint documentation is in API.md. Summary:
 
 `GET /`
-: Returns a JSON index of all endpoints and spec URLs. No auth required.
+: Returns a JSON index of all endpoints and spec URLs. Auth applies as for all endpoints.
 
 `GET /health`
 : Returns `{ ok: true, version: "..." }`. Use for liveness checks.

@@ -174,6 +174,18 @@ that exits) from normal service operation. The container exits after requesting
 pairing - Docker's restart policy does not apply to a deliberate `exit 0`, so
 the container stays stopped until the operator approves and restarts it.
 
+For automated or orchestrated deployments, `--background` mode can be used
+instead. This prints the `reqid` and pairing code to stdout, then waits for
+approval without requiring an interactive terminal:
+
+```bash
+dispatcher-agent request-pairing --dispatcher "$DISPATCHER_HOST" --background
+```
+
+The container still exits after pairing; the `reqid` can be captured by the
+orchestration layer and passed to `dispatcher approve <reqid>` on the
+dispatcher. See REFERENCE.md `### Orchestrated pairing` for the full flow.
+
 ### docker-compose.yml (full stack)
 
 ```yaml
@@ -429,6 +441,54 @@ pairing request - set `hostname` in each container to something meaningful:
 agent-db:
   hostname: agent-db
 ```
+
+
+## Agent Tags
+
+Tags let you label agents with arbitrary key/value metadata - for example,
+environment, role, or location. They are returned in the `/capabilities`
+response and propagate through API discovery, making it straightforward to
+filter or identify agents without maintaining separate inventory.
+
+For container deployments, add a `[tags]` section to `agent.conf` on the
+config volume, or inject it via the entrypoint before starting the agent:
+
+```bash
+# In agent-entrypoint.sh, before exec dispatcher-agent serve
+cat >> /etc/dispatcher-agent/agent.conf <<EOF
+
+[tags]
+env  = ${AGENT_ENV:-production}
+role = ${AGENT_ROLE:-agent}
+EOF
+```
+
+Then pass values via container environment:
+
+```yaml
+agent-db:
+  hostname: agent-db
+  environment:
+    DISPATCHER_HOST: dispatcher
+    AGENT_ENV: production
+    AGENT_ROLE: database
+```
+
+Tags appear in API discovery responses:
+
+```json
+{
+  "agent-db": {
+    "host": "agent-db",
+    "status": "ok",
+    "tags": { "env": "production", "role": "database" },
+    "scripts": [...]
+  }
+}
+```
+
+An agent with no `[tags]` section returns `"tags": {}`. Tag values are
+plain strings; no reserved keys.
 
 
 ## Rebuilding Images

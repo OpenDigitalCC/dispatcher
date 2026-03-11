@@ -76,7 +76,7 @@ Configure a minimal hook that logs to syslog and permits all requests:
 ```bash
 cat > /etc/dispatcher/auth-hook << 'EOF'
 #!/bin/sh
-logger -t dispatcher-auth "hook called: SCRIPT=$DISPATCHER_SCRIPT USER=$DISPATCHER_USER"
+logger -t dispatcher-auth "hook called: SCRIPT=$DISPATCHER_SCRIPT USER=$DISPATCHER_USERNAME"
 exit 0
 EOF
 chmod 755 /etc/dispatcher/auth-hook
@@ -148,11 +148,11 @@ Pass
   minutes, then recover automatically.
 
 Fail
-: No block occurs. Check `disable_rate_limit` is not set in `agent.conf` on
+: No block occurs. Check `rate_limit_disable` is not set in `agent.conf` on
   a production agent.
 
 Note
-: Set `disable_rate_limit = 1` in `agent.conf` before running the integration
+: Set `rate_limit_disable = 1` in `agent.conf` before running the integration
   test suite, and remove it when done.
 
 

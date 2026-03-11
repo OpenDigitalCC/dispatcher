@@ -226,6 +226,7 @@ Response:
   "hosts": {
     "web-01": {
       "host": "web-01", "status": "ok", "version": "0.2.8",
+      "tags": { "env": "production", "role": "web" },
       "scripts": [
         { "name": "deploy", "path": "/opt/dispatcher-scripts/deploy.sh", "executable": true }
       ]
@@ -233,6 +234,9 @@ Response:
   }
 }
 ```
+
+`tags` is an object of key/value strings defined in the `[tags]` section of
+the agent's `agent.conf`. An agent with no tags configured returns `"tags": {}`.
 
 Results are keyed by hostname for direct lookup.
 

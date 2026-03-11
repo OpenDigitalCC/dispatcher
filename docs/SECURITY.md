@@ -174,6 +174,18 @@ Hook must not produce output
 : The hook's stdout and stderr are discarded. Audit logging within the hook
   should use syslog.
 
+Agent-side hook
+: Agents can independently run their own auth hook, configured via `auth_hook`
+  in `agent.conf`. This runs after the dispatcher's hook has already passed and
+  after allowlist validation on the agent, before the script is executed. It
+  receives the same request context including the forwarded `username` and
+  `token`. This enables multi-hop token validation: the dispatcher hook, the
+  agent hook, and the script itself can each independently verify that the token
+  is still valid and authorised for the stated purpose, without any hop trusting
+  the prior hop's check. If no agent hook is configured, the agent authorises
+  unconditionally at the agent level, relying on mTLS and the allowlist as its
+  primary controls. See REFERENCE.md for exit code semantics and context fields.
+
 
 ## File Permissions
 
@@ -227,7 +239,7 @@ SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
 CapabilityBoundingSet=
 AmbientCapabilities=
-RestrictAddressFamilies=AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes

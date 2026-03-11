@@ -6,7 +6,7 @@
 # and as a JSON object on stdin.
 #
 # Environment variables:
-#   DISPATCHER_ACTION      run | ping | api
+#   DISPATCHER_ACTION      run | ping
 #   DISPATCHER_SCRIPT      script name (empty for ping and api requests)
 #   DISPATCHER_HOSTS       comma-separated host list
 #   DISPATCHER_ARGS_JSON   script args as a JSON array (use this)
@@ -51,7 +51,7 @@
 # exit 0
 
 # Example 4: Restrict run actions to specific scripts
-# Allows ping and api actions freely; restricts run to named scripts.
+# Bypasses access checks for all non-run actions (e.g. ping); restricts run to named scripts.
 #
 # if [ "$DISPATCHER_ACTION" = "run" ]; then
 #     case "$DISPATCHER_SCRIPT" in

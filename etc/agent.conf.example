@@ -6,11 +6,10 @@ cert = /etc/dispatcher-agent/agent.crt
 key  = /etc/dispatcher-agent/agent.key
 ca   = /etc/dispatcher-agent/ca.crt
 
-# Dispatcher certificate CN for capabilities access control.
-# The /capabilities endpoint is restricted to connections presenting a cert
-# whose CN matches this value. Set to the CN used when running setup-dispatcher
-# on the dispatcher host (default: 'dispatcher').
-# dispatcher_cn = dispatcher
+# Pairing port (default: 7444).
+# Must match the --port value passed to dispatcher-agent request-pairing
+# and the port used by dispatcher pairing-mode on the dispatcher host.
+# pairing_port = 7444
 
 # Dispatcher certificate serial (written automatically at pairing time).
 # Path to a file containing the trusted dispatcher cert serial number (hex).
@@ -45,7 +44,7 @@ ca   = /etc/dispatcher-agent/ca.crt
 # independent downstream token validation separate from the dispatcher's
 # own auth hook.
 # Hook must be executable. Exit 0 = authorised, 1/2/3 = denied.
-# See /etc/dispatcher/auth-hook.example for the hook interface.
+# See REFERENCE.md for the hook interface and exit code semantics.
 #
 # auth_hook = /etc/dispatcher-agent/auth-hook
 

@@ -11,6 +11,7 @@ STOP=15
 AGENT_BIN="/usr/local/bin/dispatcher-agent"
 AGENT_USER="dispatcher-agent"
 AGENT_CONF="/etc/dispatcher-agent/agent.conf"
+AGENT_PIDFILE="/var/run/dispatcher-agent.pid"
 
 start_service() {
     # Refuse to start if binary or config are absent
@@ -21,6 +22,8 @@ start_service() {
     procd_set_param command "$AGENT_BIN" serve
 
     procd_set_param user "$AGENT_USER"
+
+    procd_set_param pidfile "$AGENT_PIDFILE"
 
     # Restart on failure: check every 3600s, restart after 5s, no retry limit
     procd_set_param respawn 3600 5 0
@@ -40,6 +43,6 @@ stop_service() {
 reload_service() {
     # Send SIGHUP to trigger config reload (allowlist, auth hook, tags)
     local pid
-    pid=$(pgrep -f "$AGENT_BIN serve" 2>/dev/null) || return 0
+    pid=$(cat "$AGENT_PIDFILE" 2>/dev/null) || return 0
     kill -HUP "$pid"
 }

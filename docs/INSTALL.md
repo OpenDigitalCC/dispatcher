@@ -513,7 +513,18 @@ ca   = /etc/dispatcher-agent/ca.crt
 script_dirs = /opt/dispatcher-scripts
 
 # Agent-side auth hook executable (optional)
-auth_hook = /etc/dispatcher-agent/auth-hook
+# auth_hook = /etc/dispatcher-agent/auth-hook
+
+# Pairing port (default: 7444)
+# pairing_port = 7444
+
+# Restrict connections to known dispatcher IPs (optional)
+# allowed_ips = 192.168.1.10, 10.0.0.0/8
+
+# Rate limiting (defaults shown - omit to use defaults)
+# rate_limit_volume = 10/60/300
+# rate_limit_probe  = 3/600/3600
+# rate_limit_disable = 1   # disable for testing only
 
 [tags]
 env  = prod
@@ -675,6 +686,16 @@ Pairing request missing from `list-requests`
 Cert renewal not occurring
 : Renewal is triggered by ping. Check `CERT EXPIRY` in ping output.
   Check dispatcher syslog for `ACTION=renew` and `ERR` lines.
+
+Connection blocked unexpectedly (`ACTION=rate-block` in syslog)
+: The agent has rate-limited the source IP. The volume threshold (default: 10
+  connections in 60 seconds) can be triggered by the integration test suite or
+  rapid repeated pings. The block expires automatically (default: 5 minutes for
+  volume, 1 hour for probe). To clear immediately, reload the agent:
+  `sudo systemctl reload dispatcher-agent` (rate limit state is held in memory
+  and reset on SIGHUP). To disable rate limiting during testing, set
+  `rate_limit_disable = 1` in `agent.conf` and reload. Remove it before
+  returning to production use.
 
 
 ## Uninstalling

@@ -136,6 +136,8 @@ t/
 install.sh                Installer: --agent | --dispatcher | --api | --uninstall | --run-tests
 README.md                 Project overview and quick start
 INSTALL.md                Full installation, configuration, and operational reference
+REFERENCE.md              Command, config, and syslog field reference
+API.md                    HTTP REST API reference and OpenAPI spec documentation
 DOCKER.md                 Docker deployment guide (Alpine containers, entrypoints, pairing)
 SECURITY.md               Security model, trust boundaries, file permissions
 DEVELOPER.md              This file
@@ -1673,6 +1675,8 @@ VERSION
 LICENCE
 README.md
 INSTALL.md
+REFERENCE.md
+API.md
 DOCKER.md
 SECURITY.md
 DEVELOPER.md

@@ -1,6 +1,6 @@
 [Unit]
 Description=Dispatcher API - HTTP API server for remote script execution
-Documentation=file:/usr/local/lib/dispatcher/DEVELOPER.md
+Documentation=https://github.com/yourorg/dispatcher
 After=network.target
 Wants=network.target
 
@@ -24,6 +24,7 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/var/lib/dispatcher
 
 [Install]
