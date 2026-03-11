@@ -163,6 +163,66 @@ to privileged tokens only. A standard operator token should not be able to call
 this script. Use a separate token issued to the dispatcher's own rotation
 machinery, and block it for all other callers in the hook.
 
+### Call rate limiting per agent
+
+Even with token restriction, a rotation machinery bug or misconfigured caller
+could issue rapid successive calls to `update-dispatcher-serial`. Each call
+writes the serial file and sends SIGHUP, clearing all rate-limit state on the
+agent. The following hook pattern adds a per-agent time-window limit on top of
+the token restriction.
+
+The hook uses a state file in a directory writable only by the hook's runtime
+user. The state file records the last accepted call time per agent hostname.
+Calls within the window are rejected with exit code 1 (deny, hook error logged).
+
+```bash
+#!/bin/bash
+# Auth hook with rate-limit on update-dispatcher-serial
+
+TOKEN_ROTATION="${ROTATION_TOKEN:-}"   # set in hook environment or config
+RATE_DIR="/var/lib/dispatcher/hook-rate"
+WINDOW_SECONDS=300   # one call per agent per 5 minutes
+
+# Only apply rate-limit logic to the target script
+if [ "$DISPATCHER_SCRIPT" != "update-dispatcher-serial" ]; then
+    # Pass all other scripts through to normal token validation
+    if [ "$DISPATCHER_TOKEN" = "$TOKEN_ROTATION" ]; then exit 0; fi
+    exit 1
+fi
+
+# Rotation token required
+if [ "$DISPATCHER_TOKEN" != "$TOKEN_ROTATION" ]; then
+    exit 1
+fi
+
+# Rate limit: one successful call per agent per window
+mkdir -p "$RATE_DIR"
+STATE_FILE="$RATE_DIR/${DISPATCHER_HOST//[^a-zA-Z0-9._-]/_}.last"
+NOW=$(date +%s)
+
+if [ -f "$STATE_FILE" ]; then
+    LAST=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
+    ELAPSED=$(( NOW - LAST ))
+    if [ "$ELAPSED" -lt "$WINDOW_SECONDS" ]; then
+        echo "rate-limited: last call ${ELAPSED}s ago, window ${WINDOW_SECONDS}s" >&2
+        exit 1
+    fi
+fi
+
+echo "$NOW" > "$STATE_FILE"
+exit 0
+```
+
+`DISPATCHER_HOST` is the target agent hostname as recorded in the registry —
+it is not caller-supplied and cannot be spoofed. The state directory should
+be `0700` owned by the user the hook runs as. The hook should be set `0700`
+with root ownership; its parent directory should not be writable by the
+dispatcher process.
+
+Note that `SIGHUP` from `update-dispatcher-serial` clears rate-limit state
+in the *agent's* connection limiter, not in this hook's state file. The two
+mechanisms are independent.
+
 
 ## CA Compromise Recovery
 
@@ -310,7 +370,64 @@ No dispatcher-side agent cert revocation
   is no equivalent mechanism on the dispatcher side to block a stolen agent
   cert from connecting to the dispatcher. An agent that has been decommissioned
   via `dispatcher unpair` has its cert left technically valid until natural
-  expiry. Decommission the host promptly after unpairing.
+  expiry. See Unpairing and Decommission below for the recommended workflow
+  to close this window promptly.
+
+
+## Unpairing and Decommission
+
+`dispatcher unpair <hostname>` removes the agent from the registry. The agent
+will no longer receive cert renewals and will become stale when the overlap
+window expires. However, the agent's certificate remains cryptographically
+valid until its natural expiry date, which is printed by the unpair command.
+During that window, a host holding a copy of the agent cert and key can still
+connect to the dispatcher on port 7443.
+
+The recommended workflow after unpairing is:
+
+1. Run `dispatcher unpair <hostname>`. Note the expiry date printed.
+
+2. Obtain the agent cert serial:
+
+   ```bash
+   openssl x509 -noout -serial -in /etc/dispatcher-agent/agent.crt
+   ```
+
+   If you no longer have access to the agent host, retrieve the serial from
+   the registry record before unpairing, or from the dispatcher's CA serial
+   log if available.
+
+3. Add the serial to the revocation list on every agent that the decommissioned
+   host could have reached. The format `serial=DEADBEEF` (direct openssl output)
+   is accepted as-is:
+
+   ```bash
+   echo "serial=DEADBEEF" >> /etc/dispatcher-agent/revoked-serials
+   systemctl reload dispatcher-agent
+   ```
+
+   For fleet-wide distribution, use `dispatcher run` to push the serial append
+   and SIGHUP to all remaining agents before the unpairing takes effect.
+
+4. Verify the serial appears in the revocation list on the affected agents:
+
+   ```bash
+   grep -i DEADBEEF /etc/dispatcher-agent/revoked-serials
+   ```
+
+5. Decommission or reimage the host promptly. Do not leave a host with a valid
+   agent cert and key accessible after unpairing — revocation on the agents
+   closes the inbound path, but the cert could be extracted and used elsewhere
+   if the host is not secured.
+
+If the agent cert and key have been confirmed destroyed (host reimaged, disk
+wiped), steps 2–4 are optional but recommended as defence in depth.
+
+The revocation list is checked on every incoming mTLS connection before any
+request is processed. Once the reload completes on each agent, the decommissioned
+cert is blocked immediately on reconnect. Any in-flight connection established
+before the reload completes will run to completion — restart the agent service
+rather than reloading if in-flight connections must also be terminated.
 
 
 ## Docker-Specific Security
