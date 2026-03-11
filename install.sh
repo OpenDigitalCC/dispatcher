@@ -277,6 +277,7 @@ check_perl_modules() {
         ["Time::Piece"]="perlbase-time"
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
+        ["Math::BigInt"]="perlbase-math"
     )
     declare -A OPENWRT_DISPATCHER_DEPS=(
         ["LWP::UserAgent"]="perl-www"
@@ -296,6 +297,7 @@ check_perl_modules() {
         ["IPC::Open2"]="perlbase-ipc"
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
+        ["Math::BigInt"]="perlbase-math"
     )
 
     # OpenWrt/opkg module => package (23.x and older; IO::Socket::SSL from community feed)
@@ -316,6 +318,7 @@ check_perl_modules() {
         ["Time::Piece"]="perlbase-time"
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
+        ["Math::BigInt"]="perlbase-math"
     )
     declare -A OPKG_DISPATCHER_DEPS=(
         ["LWP::UserAgent"]="perl-www"
@@ -335,6 +338,7 @@ check_perl_modules() {
         ["IPC::Open2"]="perlbase-ipc"
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
+        ["Math::BigInt"]="perlbase-math"
     )
 
     # Select the right map

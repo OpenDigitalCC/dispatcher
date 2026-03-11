@@ -72,12 +72,16 @@ SHIP_FILES=(
     install.sh
     VERSION
     LICENCE
+    COMMERCIAL_LICENCE.md
     README.md
-    docs/INSTALL.md
-    docs/DOCKER.md
-    docs/SECURITY.md
-    docs/DEVELOPER.md
+    docs/API.md
     docs/BACKGROUND.md
+    docs/DEVELOPER.md
+    docs/DOCKER.md
+    docs/INSTALL.md
+    docs/MANUAL-CHECKS.md
+    docs/REFERENCE.md
+    docs/SECURITY.md
 )
 
 SHIP_DIRS=(
@@ -201,6 +205,34 @@ comps.append(json.loads(sys.stdin.read()))
 print(json.dumps(comps))
 " <<< "$component")
     done < <(find "$STAGE/lib" -name '*.pm' -print0 | sort -z)
+
+    # Non-Perl lib assets (e.g. static JSON specs shipped inside lib/)
+    while IFS= read -r -d '' asset; do
+        local rel="${asset#$STAGE/}"
+        local name
+        name=$(basename "$asset")
+        local hash
+        hash=$(sha256sum "$asset" | awk '{print $1}')
+        local component
+        component=$(python3 -c "
+import json
+c = {
+    'type': 'file',
+    'name': '$name',
+    'version': '$VERSION',
+    'hashes': [{'alg': 'SHA-256', 'content': '$hash'}],
+    'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
+    'purl': 'pkg:generic/opendigital/$name@$VERSION'
+}
+print(json.dumps(c))
+")
+        components=$(python3 -c "
+import json, sys
+comps = json.loads('''$components''')
+comps.append(json.loads(sys.stdin.read()))
+print(json.dumps(comps))
+" <<< "$component")
+    done < <(find "$STAGE/lib" ! -name '*.pm' -type f -print0 | sort -z)
 
     echo "$components"
 }
