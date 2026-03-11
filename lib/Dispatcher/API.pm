@@ -266,6 +266,11 @@ sub _handle_ping {
         return;
     }
 
+    # The API server's SIGCHLD reaper is inherited by request-handler children.
+    # Engine forks grandchildren and collects them with waitpid. Without this
+    # guard the reaper steals grandchildren before waitpid can collect them,
+    # returning a partial results array. local restores the handler on scope exit.
+    local $SIG{CHLD} = 'DEFAULT';
     my $results = Dispatcher::Engine::ping_all(
         hosts  => $hosts,
         config => $config,
@@ -333,6 +338,11 @@ sub _handle_run {
     }
 
     my $reqid = Dispatcher::Engine::gen_reqid();
+    # The API server's SIGCHLD reaper is inherited by request-handler children.
+    # Engine forks grandchildren and collects them with waitpid. Without this
+    # guard the reaper steals grandchildren before waitpid can collect them,
+    # returning a partial results array. local restores the handler on scope exit.
+    local $SIG{CHLD} = 'DEFAULT';
     my $results = Dispatcher::Engine::dispatch_all(
         hosts    => $hosts,
         script   => $script,
@@ -389,6 +399,11 @@ sub _handle_discovery {
         return;
     }
 
+    # The API server's SIGCHLD reaper is inherited by request-handler children.
+    # Engine forks grandchildren and collects them with waitpid. Without this
+    # guard the reaper steals grandchildren before waitpid can collect them,
+    # returning a partial results array. local restores the handler on scope exit.
+    local $SIG{CHLD} = 'DEFAULT';
     my $results = Dispatcher::Engine::capabilities_all(
         hosts  => $hosts,
         config => $config,
@@ -464,6 +479,11 @@ sub _handle_openapi_live {
 
     my @scripts;
     if (@$hostnames) {
+        # The API server's SIGCHLD reaper is inherited by request-handler children.
+        # Engine forks grandchildren and collects them with waitpid. Without this
+        # guard the reaper steals grandchildren before waitpid can collect them,
+        # returning a partial results array. local restores the handler on scope exit.
+        local $SIG{CHLD} = 'DEFAULT';
         my $results = Dispatcher::Engine::capabilities_all(
             hosts  => $hostnames,
             config => $config,
