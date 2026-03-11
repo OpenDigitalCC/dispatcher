@@ -21,6 +21,7 @@ use strict;
 use warnings;
 use Test::More;
 use File::Temp  qw(tempdir tempfile);
+use File::Copy  qw();
 use File::Glob  qw(bsd_glob);
 use FindBin     qw($Bin);
 use lib "$Bin/../lib";
@@ -32,6 +33,11 @@ Dispatcher::Log::init('test');
 
 # Scratch dir used by tests that need a directory path but no real CA
 my $scratch = tempdir(CLEANUP => 1);
+
+# Plant placeholder CA files so sign_csr's CA existence checks pass,
+# allowing the size/format guards beyond them to be reached.
+{ open my $fh, '>', "$scratch/ca.key" or die "cannot write ca.key: $!"; print $fh "placeholder\n" }
+{ open my $fh, '>', "$scratch/ca.crt" or die "cannot write ca.crt: $!"; print $fh "placeholder\n" }
 
 # ---------------------------------------------------------------------------
 # Finding 6 – days validation (croaks before any file I/O)

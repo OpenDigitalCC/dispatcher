@@ -36,7 +36,7 @@ use Dispatcher::Engine qw();
 
 {
     my $id = Dispatcher::Engine::gen_reqid();
-    like $id, qr/^[0-9a-f]{8}$/, 'gen_reqid: 8 hex chars';
+    like $id, qr/^[0-9a-f]{16}$/, 'gen_reqid: 16 hex chars';
 }
 
 {
