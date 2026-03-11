@@ -202,6 +202,16 @@ sub mode_request_pairing {
           . "the connection expiring before approval is received.\n";
     }
 
+    # Pre-flight: verify the cert directory exists and is writable before
+    # generating the key or connecting to the dispatcher. Without this check,
+    # a non-root run fails with a cryptic rename error inside store_certs after
+    # the full pairing connection has already completed.
+    my $cert_dir = '/etc/dispatcher-agent';
+    die "Cert directory '$cert_dir' does not exist - has the agent been installed?\n"
+        unless -d $cert_dir;
+    die "Cannot write to '$cert_dir' - re-run as root or with sudo\n"
+        unless -w $cert_dir;
+
     my $host = hostname();
 
     print "Generating key and CSR for '$host'...\n" unless $background;
@@ -617,6 +627,7 @@ sub handle_capabilities {
         host    => hostname(),
         version => $VERSION,
         scripts => \@scripts,
+        tags    => $config->{tags} // {},
     });
 }
 

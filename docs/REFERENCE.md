@@ -433,7 +433,21 @@ Key settings:
 `auth_hook`
 : Path to an executable called before every `run` request on the agent,
   after allowlist validation. Enables independent downstream token validation
-  separate from the dispatcher's own hook. Exit 0 = authorised, 1/2/3 = denied.
+  separate from the dispatcher's own hook.
+
+  The hook receives request context as a JSON object on stdin and as individual
+  environment variables. Exit codes:
+
+  - `0` - authorised, request proceeds
+  - `1` - denied (generic refusal)
+  - `2` - bad credentials (token not recognised or expired)
+  - `3` - insufficient privilege (credentials valid but not permitted for this script)
+
+  If no hook is configured, the request is authorised unconditionally - the agent
+  relies on mTLS for identity; the hook is for additional policy enforcement only.
+
+  See the [Auth hook (agent-side)] section under `dispatcher-agent` for context
+  fields, environment variables, and differences from the dispatcher-side hook.
 
 `pairing_port`
 : Port the agent listens on during pairing. Default: 7444. Must match the
@@ -495,6 +509,38 @@ handshakes — consistent with certificate probing or brute-force attempts.
   ```
   rate_limit_disable = 1
   ```
+
+### Agent tags
+
+Arbitrary key/value metadata attached to the agent and returned in the
+`/capabilities` response. Used by the API and any tooling that queries
+agent capabilities to filter or label agents by environment, role, or
+location without requiring separate inventory.
+
+Defined in a `[tags]` section in `agent.conf`:
+
+```ini
+[tags]
+env = production
+role = database
+location = ams1
+```
+
+Tags are returned as a JSON object in the `tags` field of the
+`/capabilities` response:
+
+```json
+{
+  "status": "ok",
+  "host": "db1.example.com",
+  "version": "1.0.0",
+  "scripts": [...],
+  "tags": { "env": "production", "role": "database", "location": "ams1" }
+}
+```
+
+Tag keys and values are arbitrary strings. No reserved keys. An agent
+with no `[tags]` section returns `"tags": {}`.
 
 ---
 
@@ -679,6 +725,99 @@ dispatcher-agent pairing-status
 
 Exits 0 if paired, 1 if not paired. Suitable for use in scripts and
 health checks.
+
+---
+
+### Auth hook (agent-side)
+
+When `auth_hook` is configured in `agent.conf`, the hook is executed after
+every `run` request passes allowlist validation, before the script is
+spawned. It provides an independent authorisation layer separate from the
+dispatcher's own hook.
+
+#### Context fields
+
+The hook receives a JSON object on stdin:
+
+```json
+{
+  "action":     "run",
+  "script":     "backup-db",
+  "args":       ["--full"],
+  "username":   "alice",
+  "token":      "eyJ...",
+  "source_ip":  "10.0.0.5",
+  "timestamp":  "2025-01-15T12:00:00Z"
+}
+```
+
+`action` is always `"run"` on the agent side. The agent does not call the
+hook for `ping` requests - those are handled before the hook path is reached.
+
+#### Environment variables
+
+The same context is available as environment variables:
+
+`DISPATCHER_ACTION`
+: Always `run` on the agent.
+
+`DISPATCHER_SCRIPT`
+: The script name from the allowlist.
+
+`DISPATCHER_ARGS`
+: Space-joined argument string. Deprecated - lossy if arguments contain
+  spaces. Prefer `DISPATCHER_ARGS_JSON`.
+
+`DISPATCHER_ARGS_JSON`
+: JSON array of arguments. Reliable for all argument values.
+
+`DISPATCHER_USERNAME`
+: Username passed by the dispatcher in the request body.
+
+`DISPATCHER_TOKEN`
+: Token passed by the dispatcher in the request body.
+
+`DISPATCHER_SOURCE_IP`
+: IP address of the dispatcher connection.
+
+`DISPATCHER_TIMESTAMP`
+: ISO 8601 UTC timestamp when the hook was invoked.
+
+#### Exit codes
+
+`0`
+: Authorised. Script execution proceeds.
+
+`1`
+: Denied - generic refusal. Logged as `reason=denied`.
+
+`2`
+: Bad credentials - token not recognised or expired. Logged as
+  `reason=bad credentials`.
+
+`3`
+: Insufficient privilege - credentials valid but not permitted for this
+  script or action. Logged as `reason=insufficient privilege`.
+
+Any other non-zero exit code is treated as denied with reason `hook exited N`.
+
+#### Differences from the dispatcher-side hook
+
+The dispatcher-side hook (configured in `dispatcher.conf`) runs on the
+control host before dispatch and covers both `run` and `ping` actions
+across all target hosts. The agent-side hook runs on each managed host
+independently, covering only `run` requests for that agent.
+
+A request passes both hooks before any script is executed. The hooks are
+independent - there is no shared state between them.
+
+The agent hook does not receive a `hosts` field; the agent is unaware of
+which other hosts are targeted in the same dispatcher invocation.
+
+If no hook is configured on the agent, the request is authorised
+unconditionally at the agent level. The agent relies on mTLS and the
+allowlist as its primary access controls; the hook is for supplementary
+policy enforcement such as token validation or time-of-day restrictions.
 
 ---
 
