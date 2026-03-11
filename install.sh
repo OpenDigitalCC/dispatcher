@@ -277,7 +277,6 @@ check_perl_modules() {
         ["Time::Piece"]="perlbase-time"
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
-        ["Math::BigInt"]="perlbase-math"
     )
     declare -A OPENWRT_DISPATCHER_DEPS=(
         ["LWP::UserAgent"]="perl-www"
@@ -297,7 +296,6 @@ check_perl_modules() {
         ["IPC::Open2"]="perlbase-ipc"
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
-        ["Math::BigInt"]="perlbase-math"
     )
 
     # OpenWrt/opkg module => package (23.x and older; IO::Socket::SSL from community feed)
@@ -318,7 +316,6 @@ check_perl_modules() {
         ["Time::Piece"]="perlbase-time"
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
-        ["Math::BigInt"]="perlbase-math"
     )
     declare -A OPKG_DISPATCHER_DEPS=(
         ["LWP::UserAgent"]="perl-www"
@@ -338,7 +335,6 @@ check_perl_modules() {
         ["IPC::Open2"]="perlbase-ipc"
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
-        ["Math::BigInt"]="perlbase-math"
     )
 
     # Select the right map
@@ -427,15 +423,8 @@ EOF
 # --- test runner ---
 
 run_tests() {
-    info "Running test suite..."
+    info "Running test suite (v${RELEASE_VERSION})..."
     cd "$SOURCE_DIR"
-
-    # Test::More is not available on OpenWrt. Unit tests are a dispatcher-host
-    # and Debian/Alpine agent concern; skip gracefully rather than failing.
-    if ! perl -e 'use Test::More' &>/dev/null 2>&1; then
-        warn "Test::More not available - skipping test suite (expected on OpenWrt agent installations)."
-        return 0
-    fi
 
     if command -v prove &>/dev/null; then
         prove -Ilib t/ && info "All tests passed." || die "Test suite failed."
@@ -487,9 +476,6 @@ install_agent() {
         "$BIN_DIR/dispatcher-agent"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
         "$BIN_DIR/dispatcher-agent"
-
-    safe_install 755 "$SOURCE_DIR/bin/update-dispatcher-serial" \
-        "$BIN_DIR/update-dispatcher-serial"
 
     # Config directory - readable by agent group, not world
     mkdir -p "$AGENT_CONF_DIR"
@@ -637,7 +623,6 @@ uninstall() {
         "$BIN_DIR/dispatcher-agent"
         "$BIN_DIR/dispatcher"
         "$BIN_DIR/dispatcher-api"
-        "$BIN_DIR/update-dispatcher-serial"
     )
 
     if [[ "$HAS_SYSTEMD" == true ]]; then
@@ -895,12 +880,9 @@ case "$ROLE" in
         print_next_steps_dispatcher
         ;;
     api)
-        # API requires the dispatcher role to already be installed on this host.
-        # Check for both the dispatcher binary and its config directory - the
-        # binary is always installed unconditionally; the conf dir is created
-        # even if setup-ca/setup-dispatcher have not yet been run.
-        if [[ ! -x "$BIN_DIR/dispatcher" ]] || [[ ! -d "$DISPATCHER_CONF_DIR" ]]; then
-            die "--api requires --dispatcher to be installed first on this host."
+        # API requires the dispatcher role to already be installed
+        if [[ ! -f "$DISPATCHER_CONF_DIR/dispatcher.conf" ]]; then
+            die "--api requires --dispatcher to be installed first."
         fi
         install_api
         print_next_steps_api
