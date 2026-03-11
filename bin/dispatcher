@@ -218,11 +218,12 @@ sub mode_pairing {
     };
 
     Dispatcher::Pairing::run_pairing_mode(
-        port   => $opts->{port} // $PAIR_PORT,
-        ca_dir => '/etc/dispatcher',
-        cert   => $config->{cert},
-        key    => $config->{key},
-        log_fn => sub { Dispatcher::Log::log_action('INFO', $_[0]) },
+        port      => $opts->{port} // $PAIR_PORT,
+        ca_dir    => '/etc/dispatcher',
+        cert      => $config->{cert},
+        key       => $config->{key},
+        max_queue => $config->{pairing_max_queue} // 10,
+        log_fn    => sub { Dispatcher::Log::log_action('INFO', $_[0]) },
     );
 }
 

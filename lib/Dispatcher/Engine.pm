@@ -277,9 +277,14 @@ sub parse_host {
     return ($host_str, $default_port // $DEFAULT_PORT);
 }
 
-# Generate a random 8-hex-digit request ID.
+# Generate a cryptographically random 16-hex-character request ID.
 sub gen_reqid {
-    return sprintf '%08x', int(rand(0xffffffff));
+    open my $fh, '<:raw', '/dev/urandom'
+        or return sprintf '%08x%08x', int(rand(0xffffffff)), int(rand(0xffffffff));
+    my $buf;
+    sysread $fh, $buf, 8;
+    close $fh;
+    return unpack 'H*', $buf;
 }
 
 # --- private ---

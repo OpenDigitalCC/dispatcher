@@ -8,10 +8,7 @@ use Fcntl       qw(:flock);
 use JSON        qw(encode_json decode_json);
 use POSIX       qw(strftime);
 use Carp        qw(croak);
-use Time::HiRes qw();
 
-
-my $_reqid_counter = 0;
 
 my $PAIRING_DIR = '/var/lib/dispatcher/pairing';
 
@@ -19,11 +16,12 @@ my $PAIRING_DIR = '/var/lib/dispatcher/pairing';
 # Blocks until interrupted (SIGINT/SIGTERM)
 sub run_pairing_mode {
     my (%opts) = @_;
-    my $port    = $opts{port}    // 7444;
-    my $ca_dir  = $opts{ca_dir}  // '/etc/dispatcher';
-    my $cert    = $opts{cert}    or croak "cert required";
-    my $key     = $opts{key}     or croak "key required";
-    my $log_fn  = $opts{log_fn}  // sub {};
+    my $port      = $opts{port}      // 7444;
+    my $ca_dir    = $opts{ca_dir}    // '/etc/dispatcher';
+    my $cert      = $opts{cert}      or croak "cert required";
+    my $key       = $opts{key}       or croak "key required";
+    my $log_fn    = $opts{log_fn}    // sub {};
+    my $max_queue = $opts{max_queue} // 10;
 
     make_path($PAIRING_DIR) unless -d $PAIRING_DIR;
 
@@ -86,7 +84,7 @@ sub run_pairing_mode {
                 }
                 if ($pid == 0) {
                     $server->close;
-                    _handle_pair_request($conn, $peer_ip, $log_fn);
+                    _handle_pair_request($conn, $peer_ip, $log_fn, $max_queue);
                     $conn->close;
                     exit 0;
                 }
@@ -403,7 +401,8 @@ sub _do_deny {
 }
 
 sub _handle_pair_request {
-    my ($conn, $peer_ip, $log_fn) = @_;
+    my ($conn, $peer_ip, $log_fn, $max_queue) = @_;
+    $max_queue //= 10;
 
     # Read raw HTTP request
     my $raw = '';
@@ -430,6 +429,18 @@ sub _handle_pair_request {
     my $nonce    = $data->{nonce} // '';
     my $received = strftime('%Y-%m-%dT%H:%M:%SZ', gmtime);
     my $code     = _pairing_code($csr);
+
+    # Queue depth check - expire stale entries first, then count remaining
+    _expire_stale_requests($PAIRING_DIR);
+    my @pending = glob "$PAIRING_DIR/*.json";
+    if (@pending >= $max_queue) {
+        _send_raw($conn, encode_json({
+            status => 'error',
+            reason => 'pairing queue full',
+        }));
+        $log_fn->({ ACTION => 'pair-reject', IP => $peer_ip, REASON => 'queue-full' });
+        return;
+    }
 
     # Queue the request
     make_path($PAIRING_DIR) unless -d $PAIRING_DIR;
@@ -490,10 +501,12 @@ sub _send_raw {
 }
 
 sub _gen_reqid {
-    my $t   = int(Time::HiRes::time() * 1000) & 0xffff;
-    my $pid = $$ & 0xffff;
-    my $seq = (++$_reqid_counter) & 0xffff;
-    return sprintf '%04x%04x%04x', $t, $pid, $seq;
+    open my $fh, '<:raw', '/dev/urandom'
+        or die "Cannot open /dev/urandom: $!";
+    my $buf;
+    sysread $fh, $buf, 8;
+    close $fh;
+    return unpack 'H*', $buf;
 }
 
 # Delete pending .json request files older than 10 minutes that have no
