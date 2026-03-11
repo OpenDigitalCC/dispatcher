@@ -430,6 +430,13 @@ run_tests() {
     info "Running test suite..."
     cd "$SOURCE_DIR"
 
+    # Test::More is not available on OpenWrt. Unit tests are a dispatcher-host
+    # and Debian/Alpine agent concern; skip gracefully rather than failing.
+    if ! perl -e 'use Test::More' &>/dev/null 2>&1; then
+        warn "Test::More not available - skipping test suite (expected on OpenWrt agent installations)."
+        return 0
+    fi
+
     if command -v prove &>/dev/null; then
         prove -Ilib t/ && info "All tests passed." || die "Test suite failed."
     else
