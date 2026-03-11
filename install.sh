@@ -427,14 +427,14 @@ run_tests() {
     cd "$SOURCE_DIR"
 
     if command -v prove &>/dev/null; then
-        prove -Ilib t/ && info "All tests passed." || die "Test suite failed."
+        prove -Ilib t/ && info "All tests passed (v${RELEASE_VERSION})." || die "Test suite failed."
     else
         # prove is in perl-utils on Alpine; fall back to running files directly
         local failed=0
         for t in t/*.t; do
             perl -Ilib "$t" || failed=1
         done
-        [[ $failed -eq 0 ]] && info "All tests passed." || die "Test suite failed."
+        [[ $failed -eq 0 ]] && info "All tests passed (v${RELEASE_VERSION})." || die "Test suite failed."
     fi
 }
 
