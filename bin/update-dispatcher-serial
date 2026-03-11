@@ -52,6 +52,13 @@ if ! echo "$NEW_SERIAL" | grep -qE '^[0-9a-fA-F]+$'; then
     exit 1
 fi
 
+# Validate: length must be 8–40 hex characters (4–20 octets, per RFC 5280)
+SERIAL_LEN="${#NEW_SERIAL}"
+if [ "$SERIAL_LEN" -lt 8 ] || [ "$SERIAL_LEN" -gt 40 ]; then
+    echo "Invalid serial length: expected 8–40 hex characters, got $SERIAL_LEN" >&2
+    exit 1
+fi
+
 # Normalise to lowercase
 NEW_SERIAL="${NEW_SERIAL,,}"
 

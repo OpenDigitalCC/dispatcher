@@ -78,6 +78,102 @@ subtest 'rejects non-hex serial' => sub {
     }
 };
 
+# ---------------------------------------------------------------------------
+# Serial length validation
+# ---------------------------------------------------------------------------
+
+subtest 'rejects serial shorter than 8 hex characters' => sub {
+    for my $bad ('', 'a', 'ab', 'abcdef', '1234567') {
+        next if $bad eq '';   # covered by empty serial test above
+        my ($rc, $out, $err) = run_script(serial => $bad);
+        is $rc, 1, "exits 1 for serial of length " . length($bad) . " ('$bad')";
+        like $err || $out, qr/length|8.*40|short/i,
+            'error message mentions length';
+    }
+};
+
+subtest 'rejects serial longer than 40 hex characters' => sub {
+    my $long41 = 'a' x 41;
+    my ($rc, $out, $err) = run_script(serial => $long41);
+    is $rc, 1, 'exits 1 for 41-character serial';
+    like $err || $out, qr/length|8.*40|long/i,
+        'error message mentions length';
+
+    my $long80 = 'b' x 80;
+    ($rc, $out, $err) = run_script(serial => $long80);
+    is $rc, 1, 'exits 1 for 80-character serial';
+};
+
+subtest 'accepts serial of minimum length (8 chars)' => sub {
+    my $dir   = tempdir(CLEANUP => 1);
+    my $sfile = "$dir/dispatcher-serial";
+    my $pfile = "$dir/dispatcher-agent.pid";
+    open my $fh, '>', $pfile or die $!;
+    print $fh getpid(), "\n";
+    close $fh;
+
+    my ($rc, $out, $err) = run_script(
+        serial      => 'deadbeef',   # exactly 8 chars
+        serial_file => $sfile,
+        pid_file    => $pfile,
+    );
+    is $rc, 0, 'exits 0 for 8-character serial';
+};
+
+subtest 'accepts serial of typical length (20 chars)' => sub {
+    my $dir   = tempdir(CLEANUP => 1);
+    my $sfile = "$dir/dispatcher-serial";
+    my $pfile = "$dir/dispatcher-agent.pid";
+    open my $fh, '>', $pfile or die $!;
+    print $fh getpid(), "\n";
+    close $fh;
+
+    my ($rc, $out, $err) = run_script(
+        serial      => 'a' x 20,
+        serial_file => $sfile,
+        pid_file    => $pfile,
+    );
+    is $rc, 0, 'exits 0 for 20-character serial';
+};
+
+subtest 'accepts serial of maximum length (40 chars)' => sub {
+    my $dir   = tempdir(CLEANUP => 1);
+    my $sfile = "$dir/dispatcher-serial";
+    my $pfile = "$dir/dispatcher-agent.pid";
+    open my $fh, '>', $pfile or die $!;
+    print $fh getpid(), "\n";
+    close $fh;
+
+    my ($rc, $out, $err) = run_script(
+        serial      => 'f' x 40,   # exactly 40 chars
+        serial_file => $sfile,
+        pid_file    => $pfile,
+    );
+    is $rc, 0, 'exits 0 for 40-character serial';
+};
+
+subtest 'uppercase serial normalised to lowercase in output file' => sub {
+    my $dir   = tempdir(CLEANUP => 1);
+    my $sfile = "$dir/dispatcher-serial";
+    my $pfile = "$dir/dispatcher-agent.pid";
+    open my $fh, '>', $pfile or die $!;
+    print $fh getpid(), "\n";
+    close $fh;
+
+    run_script(
+        serial      => 'DEADBEEF01234567',
+        serial_file => $sfile,
+        pid_file    => $pfile,
+    );
+    my $content = do { local $/; open my $rfh, '<', $sfile or die $!; <$rfh> };
+    chomp $content;
+    is $content, 'deadbeef01234567', 'uppercase serial stored as lowercase';
+};
+
+# ---------------------------------------------------------------------------
+# Valid lowercase hex serial (original tests continue below)
+# ---------------------------------------------------------------------------
+
 subtest 'accepts valid lowercase hex serial' => sub {
     my $dir    = tempdir(CLEANUP => 1);
     my $sfile  = "$dir/dispatcher-serial";

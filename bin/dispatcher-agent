@@ -400,10 +400,15 @@ sub handle_connection {
 
     # Read headers
     my %headers;
+    my $header_count = 0;
     while (my $line = <$conn>) {
         $line =~ s/\r\n$//;
         $line =~ s/\n$//;
         last if $line eq '';
+        if (++$header_count > 32) {
+            _send_raw($conn, 431, encode_json({ error => 'too many headers' }));
+            return;
+        }
         if ($line =~ /^([^:]+):\s*(.*)$/) {
             $headers{ lc $1 } = $2;
         }
@@ -662,7 +667,13 @@ sub _send_json {
 
 sub _send_raw {
     my ($conn, $code, $body) = @_;
-    my %status_text = (200 => 'OK', 400 => 'Bad Request', 404 => 'Not Found');
+    my %status_text = (
+        200 => 'OK',
+        400 => 'Bad Request',
+        404 => 'Not Found',
+        413 => 'Content Too Large',
+        431 => 'Request Header Fields Too Large',
+    );
     my $text = $status_text{$code} // 'Error';
     print $conn
         "HTTP/1.0 $code $text\r\n",

@@ -43,6 +43,9 @@ sub dispatch_all {
     croak "hosts must be an arrayref" unless ref $hosts eq 'ARRAY';
     croak "args must be an arrayref"  unless ref $args  eq 'ARRAY';
 
+    my $max_hosts = $opts{max_hosts} // 500;
+    croak "too many hosts (max $max_hosts)" if @$hosts > $max_hosts;
+
     Dispatcher::Log::log_action('INFO', {
         ACTION => 'dispatch',
         SCRIPT => $script,
@@ -122,6 +125,9 @@ sub ping_all {
     my $port   = $opts{port}   // $DEFAULT_PORT;
 
     croak "hosts must be an arrayref" unless ref $hosts eq 'ARRAY';
+
+    my $max_hosts = $opts{max_hosts} // 500;
+    croak "too many hosts (max $max_hosts)" if @$hosts > $max_hosts;
 
     my @results;
     my %pipes;
@@ -212,6 +218,9 @@ sub capabilities_all {
     my $port   = $opts{port}   // $DEFAULT_PORT;
 
     croak "hosts must be an arrayref" unless ref $hosts eq 'ARRAY';
+
+    my $max_hosts = $opts{max_hosts} // 500;
+    croak "too many hosts (max $max_hosts)" if @$hosts > $max_hosts;
 
     my @results;
     my %pipes;
