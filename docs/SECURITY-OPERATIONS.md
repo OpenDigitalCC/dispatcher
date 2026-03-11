@@ -149,21 +149,19 @@ the API directly - requires a lookup in the hook's own store).
 
 ## `update-dispatcher-serial` Security
 
-The `update-dispatcher-serial` script writes its argument directly to
-`/etc/dispatcher-agent/dispatcher-serial`. It accepts whatever string is
-passed. An API caller with access to this script can write an arbitrary value,
-causing all subsequent `/run` and `/ping` operations to return 403 until the
-correct serial is restored.
+The `update-dispatcher-serial` script validates that its argument is a
+lowercase hex string of 8–40 characters before writing to
+`/etc/dispatcher-agent/dispatcher-serial`. Arguments that fail the hex pattern
+check or fall outside the length range are rejected with a non-zero exit and
+an error message; no file is written.
 
-Two controls are recommended:
-
-- The script should validate that its argument is a plausible lowercase hex
-  string before writing. A one-line check (`[[ "$1" =~ ^[0-9a-f]+$ ]]`) is
-  sufficient to prevent obviously malformed values.
-- The auth hook should restrict invocation of `update-dispatcher-serial` to
-  privileged tokens only. A standard operator token should not be able to call
-  this script. Use a separate token issued to the dispatcher's own rotation
-  machinery, and block it for all other callers in the hook.
+Despite this validation, an API caller with access to this script can still
+write a plausible-looking but incorrect hex serial, causing all subsequent
+`/run` and `/ping` operations to return 403 until the correct serial is
+restored. The auth hook should restrict invocation of `update-dispatcher-serial`
+to privileged tokens only. A standard operator token should not be able to call
+this script. Use a separate token issued to the dispatcher's own rotation
+machinery, and block it for all other callers in the hook.
 
 
 ## CA Compromise Recovery
@@ -274,13 +272,6 @@ Operational signals worth alerting on:
 
 ## Known Limitations
 
-HTTP header size
-: The agent limits request bodies to 1 MB but does not limit the size of HTTP
-  headers. A peer with a valid CA-signed cert can send a request with a large
-  number of header lines before any `Content-Length` is encountered. The header
-  reader loops line-by-line with no cap on total header bytes. This is a known
-  gap; a future release will add a header size limit.
-
 Script stdin pipe
 : The agent writes JSON context to the script's stdin pipe before waiting for
   the script to exit. If the script does not read stdin and the pipe buffer
@@ -290,13 +281,6 @@ Script stdin pipe
   bears repeating: it is a script author responsibility, not something the
   agent can enforce.
 
-API host count
-: The API `POST /run` and `GET /discovery` endpoints accept host arrays with
-  no upper bound. Each host forks a child process. Very large arrays can
-  exhaust process table and memory on the dispatcher host. A reverse proxy
-  with a request body size limit provides an effective cap. A hard limit in
-  the API layer is planned for a future release.
-
 Request result access
 : `GET /status/{reqid}` returns stored run results to any authenticated caller,
   not only the original submitter. Result access is not logged with the caller's
@@ -304,13 +288,6 @@ Request result access
   entropy below). Sensitive results should not be left in the result store;
   design scripts to minimise what they return via stdout if the results will be
   stored.
-
-Reqid entropy
-: The reqid format is `TTTTPPPPSSSS` - a timestamp fragment, PID component,
-  and per-process counter, each encoded as hex. With knowledge of the
-  approximate time of a request, the enumeration space for the timestamp
-  component is predictable. This is a known limitation; improved reqid entropy
-  is planned for a future release.
 
 Rate state persistence
 : Rate limit state is held in memory and cleared on SIGHUP or agent restart.

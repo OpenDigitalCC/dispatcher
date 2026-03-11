@@ -78,6 +78,15 @@ Stale request cleanup
 : Pending requests older than 10 minutes with no approval or denial are
   automatically deleted from the pairing queue.
 
+Queue depth limit
+: The pairing queue is capped at 10 pending requests by default (configurable
+  via `pairing_max_queue` in `dispatcher.conf`). Once the cap is reached,
+  further connection attempts are rejected immediately with a structured error
+  response. Stale expiry runs before the count is checked, so aged-out entries
+  do not consume quota. This prevents a flood of pairing requests from an
+  attacker across multiple source IPs from burying a legitimate request in
+  `list-requests` output.
+
 Operator review
 : The operator is the last line of defence for pairing. Always verify the
   hostname and source IP displayed in `list-requests` or the interactive prompt
@@ -463,6 +472,12 @@ Request body size limit
   body is read. No legitimate Dispatcher request approaches this limit - the
   largest legitimate body (a `/renew-complete` cert delivery) is under 10 KB.
 
+HTTP header count limit
+: The agent limits incoming requests to 32 header lines. Any request exceeding
+  this is rejected with HTTP 431 before the body is read or any handler is
+  invoked. This applies to all connections including those from peers with a
+  valid CA-signed cert.
+
 Argument validation scope
 : Dispatcher does not validate script argument values. Validation of arguments
   is the responsibility of the allowlisted script itself and the auth hook.
@@ -512,6 +527,9 @@ limitations, Docker-specific notes), see SECURITY-OPERATIONS.md.
 | Argument bypass via DISPATCHER_ARGS | Use `DISPATCHER_ARGS_JSON`; `DISPATCHER_ARGS` is deprecated |
 | Script outside approved directories | `script_dirs` check at load and exec time |
 | Connection flood from valid cert | Rate limiting: volume block at 10 conn/60s (5 min), probe block at 3 failures/600s (1 hr) |
+| Pairing queue flood | Queue depth capped at 10 (configurable via `pairing_max_queue`); stale expiry runs first |
+| Header flood from valid cert | HTTP 431 after 32 header lines; connection closed before body is read |
+| API host count exhaustion | 500-host ceiling per request (configurable via `max_hosts` parameter) |
 | Port scan or TLS probe from unexpected host | IP allowlist (`allowed_ips` in `agent.conf`); connection closed before any request |
 | TLS downgrade or weak cipher negotiation | TLS 1.2 minimum; ECDHE+AEAD ciphers only; CBC, RC4, export-grade excluded |
 | Memory exhaustion via large request body | Body size limit: 1 MB ceiling checked before read; 413 returned on excess |
