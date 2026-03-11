@@ -60,11 +60,13 @@ for my $fn (qw(generate_ca generate_dispatcher_cert sign_csr)) {
 }
 
 subtest 'days validation: sign_csr accepts days => 1 (fires before openssl with bad CA)' => sub {
-    # days=1 passes the guard; croak comes from missing CA key, not days check
+    # days=1 passes the guard; croak comes from missing CA key, not days check.
+    # Use a fresh empty dir so the CA existence check fires as intended.
+    my $empty = tempdir(CLEANUP => 1);
     eval {
         Dispatcher::CA::sign_csr(
             csr_pem => "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n",
-            ca_dir  => $scratch,
+            ca_dir  => $empty,
             days    => 1,
         );
     };
@@ -147,11 +149,13 @@ subtest 'CSR format: non-PEM content rejected' => sub {
 };
 
 subtest 'CSR format: valid PEM header passes guard' => sub {
-    # Passes the format guard; croak comes from missing CA key, not format check
+    # Passes the format guard; croak comes from missing CA key, not format check.
+    # Use a fresh empty dir so the CA existence check fires as intended.
+    my $empty = tempdir(CLEANUP => 1);
     eval {
         Dispatcher::CA::sign_csr(
             csr_pem => "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n",
-            ca_dir  => $scratch,
+            ca_dir  => $empty,
             days    => 1,
         );
     };
@@ -234,6 +238,8 @@ SKIP: {
     subtest '_run_or_die: croak message includes openssl stderr output' => sub {
         # A structurally valid PEM header but with garbage base64 content.
         # Passes the format guard, reaches openssl, openssl writes to stderr.
+        # _run_or_die captures fd 2 via POSIX::dup2 so the child process
+        # stderr is redirected into the temp file and included in the croak.
         my $bad_csr = "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n";
         eval {
             Dispatcher::CA::sign_csr(
@@ -273,7 +279,7 @@ SKIP: {
 
         my @after = (bsd_glob("$ca_dir/*.csr"), bsd_glob("$ca_dir/*.crt"));
         is scalar @after, scalar @before,
-            'UNLINK=>1 cleaned up temp files from ca_dir after failed call';
+            'File::Temp object destructor cleaned up temp files from ca_dir after failed call';
     };
 
     # --- Finding 2: oversized CSR does not create temp file ---

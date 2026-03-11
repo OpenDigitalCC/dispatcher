@@ -130,13 +130,18 @@ sub sign_csr {
     croak "Invalid CSR format"
         unless $csr_pem =~ /\A-----BEGIN CERTIFICATE REQUEST-----/;
 
-    # Write CSR to temp file
-    my ($csr_fh, $csr_path) = tempfile(SUFFIX => '.csr', DIR => $ca_dir, UNLINK => 1);
-    print $csr_fh $csr_pem;
-    close $csr_fh;
+    # Write CSR to temp file.
+    # File::Temp->new returns an object; the file is unlinked when the object
+    # goes out of scope (success or croak), unlike list-form tempfile() which
+    # only unlinks at END.
+    my $csr_tmp = File::Temp->new(SUFFIX => '.csr', DIR => $ca_dir, UNLINK => 1);
+    my $csr_path = $csr_tmp->filename;
+    print $csr_tmp $csr_pem;
+    close $csr_tmp;
 
-    my ($cert_fh, $cert_path) = tempfile(SUFFIX => '.crt', DIR => $ca_dir, UNLINK => 1);
-    close $cert_fh;
+    my $cert_tmp  = File::Temp->new(SUFFIX => '.crt', DIR => $ca_dir, UNLINK => 1);
+    my $cert_path = $cert_tmp->filename;
+    close $cert_tmp;
 
     _run_or_die(
         'openssl', 'x509', '-req',
@@ -169,11 +174,28 @@ sub read_ca_cert {
 
 sub _run_or_die {
     my @cmd = @_;
+
+    # Capture openssl stderr by redirecting fd 2 at the OS level.
+    # open(local *STDERR, ...) only redirects Perl's STDERR glob; system()
+    # inherits the original fd 2 from the OS regardless of that redirect.
+    # POSIX::dup2 operates on raw file descriptors so the child sees the
+    # redirect.
     my ($err_fh, $err_path) = tempfile(UNLINK => 1);
+    my $err_fileno = fileno($err_fh);
+
+    require POSIX;
+    my $saved_fd2 = POSIX::dup(2)
+        or croak "Cannot dup stderr: $!";
+    POSIX::dup2($err_fileno, 2)
+        or do { POSIX::close($saved_fd2); croak "Cannot redirect stderr: $!" };
     close $err_fh;
-    open(local *STDERR, '>', $err_path)
-        or croak "Cannot redirect stderr: $!";
+
     my $rc = system(@cmd);
+
+    # Restore fd 2 before any further output
+    POSIX::dup2($saved_fd2, 2);
+    POSIX::close($saved_fd2);
+
     if ($rc != 0) {
         my $stderr = _slurp($err_path);
         $stderr =~ s/\s+$//;
