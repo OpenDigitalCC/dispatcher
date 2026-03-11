@@ -895,9 +895,12 @@ case "$ROLE" in
         print_next_steps_dispatcher
         ;;
     api)
-        # API requires the dispatcher role to already be installed
-        if [[ ! -f "$DISPATCHER_CONF_DIR/dispatcher.conf" ]]; then
-            die "--api requires --dispatcher to be installed first."
+        # API requires the dispatcher role to already be installed on this host.
+        # Check for both the dispatcher binary and its config directory - the
+        # binary is always installed unconditionally; the conf dir is created
+        # even if setup-ca/setup-dispatcher have not yet been run.
+        if [[ ! -x "$BIN_DIR/dispatcher" ]] || [[ ! -d "$DISPATCHER_CONF_DIR" ]]; then
+            die "--api requires --dispatcher to be installed first on this host."
         fi
         install_api
         print_next_steps_api
