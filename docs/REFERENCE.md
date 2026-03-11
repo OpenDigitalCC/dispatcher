@@ -204,6 +204,23 @@ dispatcher list-agents --json
 
 Output columns: hostname, IP address, paired timestamp, cert expiry.
 
+With `--json`, returns an array of objects with fields:
+
+`hostname`
+: Agent hostname as registered at pairing time.
+
+`ip`
+: IP address of the agent at last contact.
+
+`paired_at`
+: ISO 8601 timestamp of when the agent was paired.
+
+`cert_expiry`
+: ISO 8601 timestamp of the agent certificate's notAfter date.
+
+`serial`
+: Truncated hex serial of the agent's current certificate.
+
 ---
 
 ### setup-ca
@@ -330,6 +347,8 @@ Key settings:
   api_auth_default = allow
   ```
 
+### Cert rotation settings
+
 `cert_days`
 : Lifetime of the dispatcher certificate in days. Default: 365. Applied when
   generating a new cert via `setup-dispatcher` or automatic rotation.
@@ -415,6 +434,67 @@ Key settings:
 : Path to an executable called before every `run` request on the agent,
   after allowlist validation. Enables independent downstream token validation
   separate from the dispatcher's own hook. Exit 0 = authorised, 1/2/3 = denied.
+
+`pairing_port`
+: Port the agent listens on during pairing. Default: 7444. Must match the
+  `--port` value passed to `dispatcher-agent request-pairing` and the port
+  used by `dispatcher pairing-mode`.
+
+  ```
+  pairing_port = 7444
+  ```
+
+`allowed_ips`
+: Comma-separated list of IP addresses or CIDR prefixes (/8, /16, /24)
+  permitted to connect to the agent's mTLS port. Connections from addresses
+  not on the list are dropped immediately after the TCP accept, before the
+  TLS handshake. If unset, all source addresses are accepted.
+
+  ```
+  allowed_ips = 192.168.1.0/24, 10.0.0.1
+  ```
+
+  Invalid entries are logged as `ACTION=config-warn` at load time and
+  silently skipped.
+
+### Rate limiting settings
+
+The agent applies two independent rate limits per source IP. Both are
+tracked in memory and reset on agent restart or SIGHUP.
+
+The volume threshold blocks IPs that open an unusually high number of
+connections in a short window — consistent with port scanning or connection
+flooding. The probe threshold blocks IPs that repeatedly fail TLS
+handshakes — consistent with certificate probing or brute-force attempts.
+
+`rate_limit_volume`
+: Volume threshold in the format `limit/window/block`. Blocks a source IP
+  for `block` seconds when it opens more than `limit` connections within
+  `window` seconds. Default: `10/60/300` (10 connections in 60 seconds
+  triggers a 5-minute block).
+
+  ```
+  rate_limit_volume = 10/60/300
+  ```
+
+`rate_limit_probe`
+: Probe threshold in the format `limit/window/block`. Blocks a source IP
+  for `block` seconds when it produces more than `limit` TLS handshake
+  failures within `window` seconds. Default: `3/600/3600` (3 failures in
+  10 minutes triggers a 1-hour block).
+
+  ```
+  rate_limit_probe = 3/600/3600
+  ```
+
+`rate_limit_disable`
+: Set to `1` to disable all rate limiting. Intended for use during the
+  integration test suite, which opens many connections rapidly from
+  localhost. Do not set in production.
+
+  ```
+  rate_limit_disable = 1
+  ```
 
 ---
 
@@ -524,6 +604,10 @@ Checks performed:
 - `agent.conf` parses without error and required keys are present
 - `scripts.conf` allowlist loads and all listed scripts are executable
 - Pairing certificates are present and not expired
+- If `script_dirs` is configured, all scripts in `scripts.conf` fall under
+  one of the permitted directories
+- If `revoked_serials` is configured, the file is readable and all entries
+  are valid serial formats
 
 Exit code is 0 if all checks pass. Use this after installation or
 configuration changes to confirm the agent will start cleanly.
@@ -625,6 +709,45 @@ when all per-host results have been collected. `lock-conflict` is logged
 when a run is rejected because the script is already locked on one or more
 of the requested hosts.
 
+Key fields logged on security and access events (agent side):
+
+```
+ACTION=rate-block PEER=<ip> REASON="volume threshold"|"probe threshold"
+ACTION=cert-revoked PEER=<ip> SERIAL=<hex>
+ACTION=serial-reject PEER=<ip> REQID=<id>
+ACTION=ip-block PEER=<ip>
+```
+
+`rate-block` is logged when a source IP is blocked by the volume or probe
+rate limiter. `cert-revoked` is logged when a connecting peer presents a
+certificate whose serial appears in the revocation list. `serial-reject` is
+logged when the dispatcher's cert serial does not match the stored value on
+`/run` or `/ping` requests. `ip-block` is logged when a source IP is
+rejected by the `allowed_ips` allowlist.
+
+Key fields logged on pairing events (agent side):
+
+```
+ACTION=pair-complete PEER=<ip> REQID=<id>
+ACTION=pair-denied PEER=<ip> REQID=<id>
+```
+
+Key fields logged on configuration and startup events:
+
+```
+ACTION=start PORT=<n>
+ACTION=config-warn PATH=<path> REASON=<text>
+ACTION=rate-evict PEER=<ip>
+```
+
+`config-warn` is logged at startup when `agent.conf` or `scripts.conf`
+contains an entry that is invalid but non-fatal — for example, an
+unrecognised CIDR prefix length in `allowed_ips`, or an invalid serial
+format in the revocation list. The entry is skipped and the agent
+continues loading. `rate-evict` is logged when an entry is removed from
+the in-memory rate limit table to make room for a new source IP (LRU
+eviction).
+
 To correlate a dispatcher log entry with agent log entries, filter both
 sides by `REQID`:
 
@@ -633,6 +756,31 @@ grep 'REQID=a1b2c3d4' /var/log/syslog
 ```
 
 See DEVELOPER.md for the full syslog field reference.
+
+---
+
+## Managing long-running processes
+
+When a script is expected to run longer than `read_timeout`, the dispatcher
+will report a timeout and return a non-zero exit, but the script continues
+running on the agent. There is no mechanism to cancel it remotely.
+
+To run a long-lived process and retrieve its output later:
+
+- Have the script start the process in the background (e.g. with `nohup` or
+  `systemd-run`) and return immediately with a job identifier or PID written
+  to a known path.
+- Use a second allowlisted script to poll status or retrieve output by
+  reading that path.
+- Raise `read_timeout` in `dispatcher.conf` if the script must complete
+  within a single dispatcher invocation and the runtime is known and bounded.
+
+The agent logs `ACTION=run` only when the script process exits. If the
+dispatcher times out before the script completes, no `ACTION=run` entry
+appears in the agent's syslog until the script eventually exits. An operator
+cannot determine from syslog alone that a script is currently running —
+only that it was started (from the dispatcher-side `ACTION=run` entry) and
+has not yet completed.
 
 ---
 
