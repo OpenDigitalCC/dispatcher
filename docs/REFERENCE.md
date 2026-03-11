@@ -38,11 +38,15 @@ These options apply to all modes.
 `--json`
 : Output results as JSON. Applies to `run`, `ping`, and `list-agents`.
 
-`--username <name>`
-: Username to include in the request context sent to agents. Defaults to
-  `$USER`. Consumed by auth hooks on the agent side for access control.
-  Can also be set with `--username` on the command line to identify the
-  operator explicitly.
+`--username <n>`
+: Username to include in the request context. Defaults to `$USER`. This is an
+  advisory field - it is forwarded to auth hooks and to the agent unchanged,
+  but is not authenticated or verified by Dispatcher. Its intended use is to
+  carry an identity assertion that the auth hook can forward to an external
+  authentication service alongside the token, allowing that service to verify
+  whether the claimed identity is consistent with the token's authority. Do
+  not use `username` alone as an access control basis. See
+  SECURITY-OPERATIONS.md for the recommended pattern.
 
 `--token <token>`
 : Auth token to include in the request context. Defaults to the

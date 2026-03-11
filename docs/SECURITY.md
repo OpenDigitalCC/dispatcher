@@ -123,8 +123,11 @@ Allowlist is server-enforced
 
 JSON context on stdin
 : Scripts receive full request context as JSON on stdin (script name, args,
-  reqid, peer IP, username, token, timestamp). Scripts that do not need stdin
-  should add `exec 0</dev/null` to prevent unexpected blocking.
+  reqid, peer IP, username, token, timestamp). If a script does not read
+  stdin and the pipe buffer fills, the agent child process blocks on the pipe
+  write until the script exits. Scripts that do not use stdin context must
+  include `exec 0</dev/null` as their first line to prevent this. This is
+  not enforced by the agent; it is a script author requirement.
 
 
 ## Auth Hook
@@ -140,6 +143,18 @@ Default auth mode
   requests are rejected without a hook. Set to `allow` for isolated networks
   where credential checking is not needed. This setting has no effect when a
   hook is configured.
+
+`username` is advisory
+: The `username` field is a caller-supplied string. Dispatcher does not
+  authenticate it or verify it matches any local or remote account. It is
+  forwarded unchanged to the hook and to the agent. Its intended purpose is
+  to carry an identity assertion that the hook can forward to an external
+  authentication service alongside the token - the service validates whether
+  the claimed identity is consistent with the token's authority. A hook that
+  grants elevated permissions based solely on `username` without validating
+  it via the token or an external mechanism can be bypassed by any caller
+  that sets the field to a privileged value. See SECURITY-OPERATIONS.md for
+  the recommended pattern.
 
 Argument inspection
 : Always use `DISPATCHER_ARGS_JSON` in hook scripts to inspect script
@@ -163,8 +178,9 @@ Hook isolation
 
 Token logging
 : Tokens are never logged by the dispatcher or the agent. They appear in the
-  hook's environment and in JSON stdin, both of which are under operator
-  control.
+  hook's environment and in JSON stdin. Do not log environment variables within
+  the hook; log only specific fields from stdin. A hook that logs `env` output
+  exposes the token in syslog.
 
 Token in CLI
 : Pass tokens via `DISPATCHER_TOKEN` environment variable rather than `--token`
@@ -176,15 +192,15 @@ Hook must not produce output
 
 Agent-side hook
 : Agents can independently run their own auth hook, configured via `auth_hook`
-  in `agent.conf`. This runs after the dispatcher's hook has already passed and
-  after allowlist validation on the agent, before the script is executed. It
-  receives the same request context including the forwarded `username` and
-  `token`. This enables multi-hop token validation: the dispatcher hook, the
-  agent hook, and the script itself can each independently verify that the token
-  is still valid and authorised for the stated purpose, without any hop trusting
-  the prior hop's check. If no agent hook is configured, the agent authorises
-  unconditionally at the agent level, relying on mTLS and the allowlist as its
-  primary controls. See REFERENCE.md for exit code semantics and context fields.
+  in `agent.conf`. This runs after allowlist validation on the agent, before
+  the script is executed. It covers `run` requests only - `ping` requests do
+  not invoke the agent hook. The hook receives the same request context
+  including the forwarded `username` and `token`. It does not receive a
+  `hosts` field; the agent is unaware of which other agents are targeted in
+  the same invocation. For source-based restriction on the agent, use
+  `allowed_ips` in `agent.conf` or `DISPATCHER_SOURCE_IP` in the hook.
+  If no agent hook is configured, the agent authorises unconditionally at
+  the agent level, relying on mTLS and the allowlist as its primary controls.
 
 
 ## File Permissions
@@ -249,7 +265,12 @@ MemoryDenyWriteExecute=yes
 set, preventing any allowlisted script from acquiring capabilities regardless
 of file capability bits. `MemoryDenyWriteExecute=yes` is safe for the current
 bash-only script inventory but must be removed if a JIT-compiled runtime
-(Java, Node, Python with JIT) is added to the allowlist.
+(Java, Node.js, Python with JIT) is added to the allowlist - there is no
+detection mechanism for this conflict at load time; the operator must review
+this directive when adding new allowlist entries. `AF_UNIX` is required
+in `RestrictAddressFamilies` because the agent connects to `/dev/log` via a
+Unix domain socket to deliver syslog messages - omitting it silently blocks
+all logging.
 
 
 ## Dispatcher Serial Tracking and Cert Rotation
@@ -268,6 +289,15 @@ receive the updated serial. Applying the serial check to the renewal endpoints
 would cause every agent to reject the serial broadcast, breaking the rotation
 mechanism. The renewal endpoints require a valid CA-signed cert (mTLS still
 applies) but do not require serial match. See Cert Rotation below.
+
+The window during which these endpoints are reachable by any CA-signed cert is
+the duration of the serial broadcast - on a well-connected fleet this is
+seconds; on a slow fleet it is bounded by the dispatcher's connection timeout.
+A host with a valid CA-signed cert calling `/renew-complete` during this window
+could attempt to deliver a replacement cert, but only if it already holds a
+cert signed by the private CA. If an attacker has a CA-signed cert, `/run` is
+the more direct path; `/renew` abuse does not represent a meaningful
+escalation.
 
 The dispatcher cert is renewed automatically before expiry. The renewal
 process and the serial tracking work together to rotate credentials without
@@ -404,6 +434,12 @@ Connection rate limiting
   failures within 600 seconds is blocked for 1 hour (probe threshold). Blocks
   are held in the agent process memory and cleared on SIGHUP. The block state
   is logged at the point the threshold is crossed; repeat checks are silent.
+  Rate state is not persisted across reloads - `update-dispatcher-serial`
+  sends SIGHUP as part of normal rotation and clears all rate blocks as a
+  side effect. A legitimate dispatcher that triggers the probe block due to a
+  cert misconfiguration can be unblocked immediately with
+  `systemctl reload dispatcher-agent`. Thresholds are configurable via
+  `rate_limit_volume` and `rate_limit_probe` in `agent.conf`.
 
 IP allowlist
 : If `allowed_ips` is set in `agent.conf`, the agent enforces an IP allowlist
@@ -443,11 +479,21 @@ where the API is reachable from outside the dispatcher host:
 
 - Configure an auth hook. Without a hook, `api_auth_default = deny` blocks all
   requests. Set `api_auth_default = allow` only on isolated networks.
-- Consider placing the API behind a reverse proxy (nginx, caddy) that handles
-  TLS termination and optional IP allowlisting.
+- Place the API behind a reverse proxy (nginx, caddy) that handles TLS
+  termination and request rate limiting. The API has no built-in rate limiting
+  and no host count cap - a reverse proxy is the appropriate layer for both.
 - Enable TLS on the API by setting `api_cert` and `api_key` in
   `dispatcher.conf` - use a cert from a public CA if external clients will
   not have the private CA cert.
+
+`GET /health` bypasses auth and returns the API version string. This endpoint
+is publicly accessible on any externally-bound deployment. Version disclosure
+is low risk in a private deployment but should be considered for
+internet-facing deployments - place the API behind a proxy that strips or
+restricts the `/health` path if version disclosure is a concern.
+
+For operational security guidance (monitoring, incident response, known
+limitations, Docker-specific notes), see SECURITY-OPERATIONS.md.
 
 
 ## Threat Summary
@@ -479,3 +525,11 @@ where the API is reachable from outside the dispatcher host:
 | Compromised dispatcher cert | Add serial to revoked-serials on all agents; reload |
 | Token leaking via logs | Tokens never logged by dispatcher or agent |
 | Token leaking via ps | Use `DISPATCHER_TOKEN` env var not `--token` flag |
+
+
+## Further Reading
+
+SECURITY-OPERATIONS.md covers the operational side of a running deployment:
+monitoring and alerting recommendations, dispatcher host security requirements,
+token and credential lifecycle, auth hook operational guidance, CA compromise
+recovery procedure, known limitations, and Docker-specific security notes.
