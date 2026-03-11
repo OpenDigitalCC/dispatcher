@@ -22,6 +22,12 @@ sub generate_ca {
     my $force = $opts{force} // 0;
     my $ca_dir = $opts{ca_dir} // $CA_DIR;
 
+    croak "days must be a positive integer"
+        unless defined $days && $days =~ /^\d+$/ && $days > 0;
+
+    croak "Invalid CN: must contain only word characters, spaces, hyphens, and dots"
+        unless $cn =~ /^[\w\s\-\.]+$/;
+
     my $ca_key  = "$ca_dir/ca.key";
     my $ca_cert = "$ca_dir/ca.crt";
 
@@ -56,6 +62,9 @@ sub generate_dispatcher_cert {
     my $bits   = $opts{bits}   // 4096;
     my $ca_dir = $opts{ca_dir} // $CA_DIR;
     my $force  = $opts{force}  // 0;
+
+    croak "days must be a positive integer"
+        unless defined $days && $days =~ /^\d+$/ && $days > 0;
 
     my $ca_key   = "$ca_dir/ca.key";
     my $ca_cert  = "$ca_dir/ca.crt";
@@ -105,6 +114,9 @@ sub sign_csr {
     my $ca_dir   = $opts{ca_dir}   // $CA_DIR;
     my $out_path = $opts{out_path};
 
+    croak "days must be a positive integer"
+        unless defined $days && $days =~ /^\d+$/ && $days > 0;
+
     my $ca_key   = "$ca_dir/ca.key";
     my $ca_cert  = "$ca_dir/ca.crt";
     my $serial   = "$ca_dir/ca.serial";
@@ -112,12 +124,18 @@ sub sign_csr {
     croak "CA key not found at '$ca_key'"   unless -f $ca_key;
     croak "CA cert not found at '$ca_cert'" unless -f $ca_cert;
 
+    croak "CSR exceeds maximum size"
+        unless length($csr_pem) <= 10_240;
+
+    croak "Invalid CSR format"
+        unless $csr_pem =~ /\A-----BEGIN CERTIFICATE REQUEST-----/;
+
     # Write CSR to temp file
-    my ($csr_fh, $csr_path) = tempfile(SUFFIX => '.csr', UNLINK => 1);
+    my ($csr_fh, $csr_path) = tempfile(SUFFIX => '.csr', DIR => $ca_dir, UNLINK => 1);
     print $csr_fh $csr_pem;
     close $csr_fh;
 
-    my ($cert_fh, $cert_path) = tempfile(SUFFIX => '.crt', UNLINK => 1);
+    my ($cert_fh, $cert_path) = tempfile(SUFFIX => '.crt', DIR => $ca_dir, UNLINK => 1);
     close $cert_fh;
 
     _run_or_die(
@@ -151,8 +169,16 @@ sub read_ca_cert {
 
 sub _run_or_die {
     my @cmd = @_;
-    system(@cmd) == 0
-        or croak "Command failed (@cmd): exit $?";
+    my ($err_fh, $err_path) = tempfile(UNLINK => 1);
+    close $err_fh;
+    open(local *STDERR, '>', $err_path)
+        or croak "Cannot redirect stderr: $!";
+    my $rc = system(@cmd);
+    if ($rc != 0) {
+        my $stderr = _slurp($err_path);
+        $stderr =~ s/\s+$//;
+        croak "Command failed (@cmd): exit $?\n$stderr";
+    }
 }
 
 sub _slurp {

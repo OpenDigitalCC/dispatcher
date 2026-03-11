@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use File::Path  qw(make_path);
 use File::Temp  qw(tempfile);
+use Fcntl       qw(:flock);
 use JSON        qw(encode_json decode_json);
 use POSIX       qw(strftime);
 use Carp        qw(croak);
@@ -207,10 +208,22 @@ sub approve_request {
     my $req = decode_json(_slurp($req_file));
 
     require Dispatcher::CA;
+
+    # Serialise concurrent signing through an exclusive lock on ca.serial.
+    # Prevents duplicate serial numbers when multiple pairing approvals race.
+    my $serial_file = "$ca_dir/ca.serial";
+    open my $serial_lock, '<', $serial_file
+        or croak "Cannot open serial file for locking: $!";
+    flock $serial_lock, LOCK_EX
+        or croak "Cannot lock serial file: $!";
+
     my $cert_pem = Dispatcher::CA::sign_csr(
         csr_pem => $req->{csr},
         ca_dir  => $ca_dir,
     );
+
+    flock $serial_lock, LOCK_UN;
+    close $serial_lock;
     my $ca_pem = Dispatcher::CA::read_ca_cert(ca_dir => $ca_dir);
 
     # Read the dispatcher cert serial so the agent can store it and use it
