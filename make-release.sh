@@ -349,6 +349,13 @@ while IFS= read -r old; do
     info "Removed previous tarball: $old"
 done < <(find . -maxdepth 1 -name 'dispatcher-*.tar.gz' | sort)
 
+# Remove any previously committed tarballs from git index (they should not
+# be tracked; committed accidentally or from an earlier release workflow).
+while IFS= read -r tracked; do
+    git rm --cached --quiet "$tracked" "${tracked}.sha256" 2>/dev/null || true
+    info "Removed from git index: $tracked"
+done < <(git ls-files 'dispatcher-*.tar.gz')
+
 tar -czf "$TARBALL" -C "$STAGE_DIR" "$RELEASE_NAME"
 
 TARBALL_HASH=$(sha256sum "$TARBALL" | awk '{print $1}')
