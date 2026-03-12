@@ -19,6 +19,7 @@ use File::Temp  qw(tempdir);
 use JSON        qw(encode_json decode_json);
 use FindBin     qw($Bin);
 use lib         "$Bin/../lib";
+use Socket      qw(AF_UNIX SOCK_STREAM);
 
 use Dispatcher::Pairing qw();
 use Dispatcher::Log     qw();
@@ -69,11 +70,10 @@ sub call_handle {
 
     require IO::Socket;
     my ($client, $server);
-    IO::Socket->socketpair($client, $server,
-        IO::Socket::AF_UNIX(),
-        IO::Socket::SOCK_STREAM(),
-        0,
-    ) or die "socketpair: $!";
+    socketpair($client, $server, AF_UNIX, SOCK_STREAM, 0)
+        or die "socketpair: $!";
+    bless $client, 'IO::Socket';
+    bless $server, 'IO::Socket';
 
     print $server $request;
     $server->shutdown(1);
