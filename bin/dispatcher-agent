@@ -398,7 +398,6 @@ sub handle_connection {
 
     my ($method, $path) = split ' ', $request_line;
 
-    # Read headers
     my %headers;
     my $header_count = 0;
     while (my $line = <$conn>) {
