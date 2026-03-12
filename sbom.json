@@ -1,20 +1,20 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.6",
-  "serialNumber": "urn:uuid:8275edd0-0340-4f02-855f-9cd0a91e4602",
+  "serialNumber": "urn:uuid:65ad154b-c9cc-4f40-aa71-1c2dbd7cd66a",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-03-11T12:12:38Z",
+    "timestamp": "2026-03-12T05:54:10Z",
     "tools": [
       {
         "name": "make-release.sh",
-        "version": "0.5.1"
+        "version": "0.5.2"
       }
     ],
     "component": {
       "type": "application",
       "name": "dispatcher",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "description": "Perl mTLS remote script execution system",
       "licenses": [
         {
@@ -35,11 +35,11 @@
     {
       "type": "file",
       "name": "dispatcher",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "38136e01b768d10a0525afcda881e90718828eda516bb2f44c4e31456dabb8c9"
+          "content": "2bb5eac9c228890386b7245c5ab0974cf400c2e043963d01172e4f8981fb78fb"
         }
       ],
       "licenses": [
@@ -49,16 +49,16 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/dispatcher-dispatcher@0.5.1"
+      "purl": "pkg:generic/opendigital/dispatcher-dispatcher@0.5.2"
     },
     {
       "type": "file",
       "name": "dispatcher-agent",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "454a4b5f48573765626bda75fb07be42cd45e88edc0978ed455d25ee1f322448"
+          "content": "33b873fa0f153335a8ede6c3a37b7e6609859c9b17290800aa2665c5dbda00c3"
         }
       ],
       "licenses": [
@@ -68,16 +68,16 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/dispatcher-dispatcher-agent@0.5.1"
+      "purl": "pkg:generic/opendigital/dispatcher-dispatcher-agent@0.5.2"
     },
     {
       "type": "file",
       "name": "dispatcher-api",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "c8c578578d20ada30fd10ef0b1670ae161338790365c2f107c4a57655f6e5969"
+          "content": "665c927c46a630bfe512358c989924780c3b88e3d44de36daa3719a74a2f8449"
         }
       ],
       "licenses": [
@@ -87,12 +87,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/dispatcher-dispatcher-api@0.5.1"
+      "purl": "pkg:generic/opendigital/dispatcher-dispatcher-api@0.5.2"
     },
     {
       "type": "file",
       "name": "update-dispatcher-serial",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -106,12 +106,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/dispatcher-update-dispatcher-serial@0.5.1"
+      "purl": "pkg:generic/opendigital/dispatcher-update-dispatcher-serial@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Agent::Config",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -125,12 +125,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Agent::Config@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Agent::Config@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Agent::Pairing",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -144,12 +144,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Agent::Pairing@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Agent::Pairing@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Agent::RateLimit",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -163,16 +163,16 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Agent::RateLimit@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Agent::RateLimit@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Agent::Runner",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "8aa5026882b3f9ac3ee7cce6aa177c45118da8e737fbaa01e6b4e3ff5c9db7a6"
+          "content": "14308e451857a6d5231d5ea19481dfbb23e5d4fbfb7f4e9729d23c7201927c5e"
         }
       ],
       "licenses": [
@@ -182,12 +182,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Agent::Runner@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Agent::Runner@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::API",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -201,12 +201,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::API@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::API@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Auth",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -220,12 +220,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Auth@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Auth@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::CA",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -239,12 +239,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::CA@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::CA@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Engine",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -258,12 +258,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Engine@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Engine@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Lock",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -277,12 +277,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Lock@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Lock@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Log",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -296,12 +296,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Log@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Log@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Output",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -315,12 +315,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Output@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Output@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Pairing",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -334,12 +334,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Pairing@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Pairing@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Registry",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -353,12 +353,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Registry@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Registry@0.5.2"
     },
     {
       "type": "library",
       "name": "Dispatcher::Rotation",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -372,12 +372,12 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/Dispatcher::Rotation@0.5.1"
+      "purl": "pkg:generic/opendigital/Dispatcher::Rotation@0.5.2"
     },
     {
       "type": "file",
       "name": "openapi.json",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -391,7 +391,7 @@
           }
         }
       ],
-      "purl": "pkg:generic/opendigital/openapi.json@0.5.1"
+      "purl": "pkg:generic/opendigital/openapi.json@0.5.2"
     },
     {
       "type": "library",
