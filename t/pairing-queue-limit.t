@@ -72,8 +72,8 @@ sub call_handle {
         IO::Socket::AF_UNIX(), IO::Socket::SOCK_STREAM(), 0,
     ) or die "socketpair: $!";
 
-    print $server $request;
-    $server->shutdown(1);
+    print $client $request;
+    $client->shutdown(1);
 
     # Background denier: watches for any new .json in pairing_dir and writes
     # a .denied file so the poll loop exits promptly.
@@ -139,7 +139,7 @@ sub populate_queue {
     my ($dir, $n, %opts) = @_;
     my $stale = $opts{stale} // 0;
     for my $i (1..$n) {
-        my $id   = sprintf('test%012d', $i);
+        my $id   = sprintf('%016x', $i);
         my $path = "$dir/${id}.json";
         open my $fh, '>', $path or die "Cannot write $path: $!";
         print $fh encode_json({
@@ -275,12 +275,12 @@ SKIP: {
 # ---------------------------------------------------------------------------
 
 subtest 'run_pairing_mode: accepts max_queue parameter' => sub {
+    # Verify max_queue is accepted as a valid parameter.
+    # Pass no cert/key so run_pairing_mode croaks on the 'cert required'
+    # guard before reaching any I/O. The test only checks that the croak
+    # is not about max_queue being unknown.
     eval {
         Dispatcher::Pairing::run_pairing_mode(
-            port      => 19744,
-            cert      => '/nonexistent/dispatcher.crt',
-            key       => '/nonexistent/dispatcher.key',
-            ca_dir    => '/nonexistent',
             max_queue => 20,
             log_fn    => sub {},
         );
