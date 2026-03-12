@@ -31,6 +31,9 @@
 
 set -euo pipefail
 
+# Prevent BASH_ENV from auto-sourcing lib.sh if set from a prior test session.
+unset BASH_ENV ENV
+
 SCRIPT_DIR="/opt/dispatcher-scripts"
 CONF="/etc/dispatcher-agent/scripts.conf"
 
