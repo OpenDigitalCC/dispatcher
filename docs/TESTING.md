@@ -130,6 +130,27 @@ Scripts installed:
 | `allowlist-reload-check` | Added manually by test 09 to verify SIGHUP reload |
 | `update-dispatcher-serial` | Serial update script; must be in allowlist for cert rotation |
 
+The following are installed by `setup-agent-scripts.sh --install-auth-test` only,
+and removed by `--remove-auth-test`.
+
+| Name | Purpose |
+| --- | --- |
+| `auth-status-dump` | Outputs `/tmp/dispatcher-auth-test-status`; used by test 15 to retrieve hook-received context without SSH |
+
+The accompanying hook (`/etc/dispatcher-agent/auth-context-check.sh`) is also
+written by `--install-auth-test` and registered in `agent.conf` as `auth_hook`.
+It records all `DISPATCHER_*` env vars to the status file on every call before
+applying its known-value policy. `auth-status-dump` is always permitted through
+so the test can retrieve results regardless of the policy outcome.
+
+```bash
+# Install
+sudo bash t/integration/setup-agent-scripts.sh --install-auth-test
+
+# Remove and restore agent.conf
+sudo bash t/integration/setup-agent-scripts.sh --remove-auth-test
+```
+
 
 ### Running the Suite
 
@@ -184,9 +205,12 @@ likely cause and the fix.
 | `10-timeout-behaviour.sh` | Read timeout fires for slow scripts; long-running scripts complete within extended timeout |
 | `11-api-status.sh` | API `/run`, `/ping`, `/status/{reqid}`, 404 on unknown reqid, multi-host result storage |
 | `12-serial-check.sh` | Serial check on `/ping` and `/run`; 403 when serial file absent (requires SSH) |
+| `15-agent-auth-context.sh` | Agent-side auth hook receives correct context fields (action, script, username, token, source IP); requires `--install-auth-test` setup — skips cleanly if not configured |
 
 Files that require SSH to the agent host skip gracefully when SSH is not
-available, reporting `SKIP` rather than `FAIL`.
+available, reporting `SKIP` rather than `FAIL`. File 15 does not require SSH;
+it uses a pre-installed hook and a dedicated allowlisted script to retrieve
+results via dispatch.
 
 
 ### Environment Variables
@@ -401,6 +425,12 @@ If a new test needs a script that does not already exist on agents, add it to
 `setup-agent-scripts.sh`. Follow the existing pattern: write the script with
 `cat > "$SCRIPT_DIR/name.sh" << 'EOF'`, set permissions with `chmod 0755`,
 and add the allowlist entry with `append_if_missing`.
+
+If the script is only needed for a specific optional test (one that modifies
+`agent.conf` or installs a hook), add it under a named mode flag rather than
+the default install path. See the `--install-auth-test` / `--remove-auth-test`
+pattern for reference. The test file should detect whether the optional script
+is present in the allowlist and skip cleanly if not, rather than failing.
 
 Document the new script in the scripts table in this guide.
 

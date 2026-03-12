@@ -68,10 +68,22 @@ Fail
 ## 3. Auth Hook Invocation
 
 Confirms the auth hook is called for every `run` and `ping` request, and that
-its exit code is respected. The automated suite covers hook invocation where
-SSH is available; this check covers deployments without SSH access to the agent.
+its exit code is respected.
 
-Configure a minimal hook that logs to syslog and permits all requests:
+For deployments with SSH access to the agent, test 08 (`08-auth-hook.sh`) in
+the integration suite covers hook invocation and denial end-to-end.
+
+For deployments without SSH access, test 15 (`15-agent-auth-context.sh`)
+provides equivalent coverage using a pre-installed hook and a dedicated
+allowlisted script to retrieve results via dispatch. Install it with:
+
+```bash
+sudo bash t/integration/setup-agent-scripts.sh --install-auth-test
+sudo bash t/integration/15-agent-auth-context.sh
+```
+
+For a quick manual check on any deployment, configure a minimal hook that logs
+to syslog and permits all requests:
 
 ```bash
 cat > /etc/dispatcher/auth-hook << 'EOF'
@@ -82,7 +94,7 @@ EOF
 chmod 755 /etc/dispatcher/auth-hook
 ```
 
-Run a script, then check the log on the dispatcher host:
+Run a script, then check the log on the agent host:
 
 ```bash
 sudo dispatcher run <agent> env-dump
@@ -94,8 +106,8 @@ Pass
   all subsequent requests to return a permission error.
 
 Fail
-: No log entry. Check `auth_hook` path in `dispatcher.conf` and that the hook
-  is executable.
+: No log entry. Check `auth_hook` path in `agent.conf` and that the hook is
+  executable.
 
 
 ## 4. Allowlist SIGHUP Reload
