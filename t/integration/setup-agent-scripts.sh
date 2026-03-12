@@ -5,12 +5,27 @@
 # Run this on each agent host before running the integration tests.
 #
 # Usage:
-#   sudo bash setup-agent-scripts.sh
+#   sudo bash setup-agent-scripts.sh                      # install standard test scripts
+#   sudo bash setup-agent-scripts.sh --install-auth-test  # also install auth context test hook
+#   sudo bash setup-agent-scripts.sh --remove-auth-test   # remove auth context test hook and restore agent.conf
 #
-# What it does:
+# Default (no args):
 #   - Writes test scripts to /opt/dispatcher-scripts/
 #   - Appends entries to /etc/dispatcher-agent/scripts.conf (if not present)
 #   - Sends SIGHUP to reload the allowlist
+#
+# --install-auth-test additionally:
+#   - Writes the auth-context-check hook to /etc/dispatcher-agent/auth-context-check.sh
+#   - Writes auth-status-dump script to /opt/dispatcher-scripts/
+#   - Appends auth-status-dump to scripts.conf
+#   - Backs up agent.conf and appends auth_hook line
+#   - Sends SIGHUP to reload
+#
+# --remove-auth-test:
+#   - Removes the auth-context-check hook file
+#   - Removes auth-status-dump script and its allowlist entry from scripts.conf
+#   - Restores agent.conf from backup, or strips the auth_hook line if no backup exists
+#   - Sends SIGHUP to reload
 #
 # Safe to run multiple times - checks before appending.
 
@@ -225,5 +240,158 @@ reload_agent() {
 }
 
 reload_agent
+
+# --- auth context test hook (optional) ---
+
+AGENT_CONF="/etc/dispatcher-agent/agent.conf"
+AGENT_CONF_BACKUP="/etc/dispatcher-agent/agent.conf.before-auth-test"
+HOOK_PATH="/etc/dispatcher-agent/auth-context-check.sh"
+STATUS_FILE="/tmp/dispatcher-auth-test-status"
+AUTH_STATUS_DUMP="$SCRIPT_DIR/auth-status-dump.sh"
+
+install_auth_test() {
+    echo ""
+    echo "Installing auth context test hook ..."
+
+    # Write hook: records all context env vars to status file, then applies policy.
+    # auth-status-dump is allowed through unconditionally so the test can read results.
+    # All other scripts check the known test values and write an exit code to the
+    # status file so the integration test can distinguish per-field failures.
+    cat > "$HOOK_PATH" << 'EOF'
+#!/bin/sh
+# auth-context-check.sh
+# Installed by: setup-agent-scripts.sh --install-auth-test
+# Removed by:   setup-agent-scripts.sh --remove-auth-test
+#
+# Records received context to STATUS_FILE then applies known-value policy.
+# auth-status-dump is always allowed through so the test can retrieve results.
+# Exit codes for policy failures use distinct values to identify the failing field.
+
+STATUS_FILE="/tmp/dispatcher-auth-test-status"
+
+# Always record what was received
+cat > "$STATUS_FILE" << VARS
+DISPATCHER_ACTION=$DISPATCHER_ACTION
+DISPATCHER_SCRIPT=$DISPATCHER_SCRIPT
+DISPATCHER_USERNAME=$DISPATCHER_USERNAME
+DISPATCHER_TOKEN=$DISPATCHER_TOKEN
+DISPATCHER_SOURCE_IP=$DISPATCHER_SOURCE_IP
+DISPATCHER_ARGS_JSON=$DISPATCHER_ARGS_JSON
+VARS
+
+# Allow auth-status-dump through unconditionally so the test can retrieve results
+if [ "$DISPATCHER_SCRIPT" = "auth-status-dump" ]; then
+    exit 0
+fi
+
+# Apply known-value policy for all other scripts
+[ "$DISPATCHER_ACTION"   = "run"              ] || exit 11
+[ "$DISPATCHER_USERNAME" = "test-user"        ] || exit 13
+[ "$DISPATCHER_TOKEN"    = "test-token-value" ] || exit 14
+[ -n "$DISPATCHER_SOURCE_IP"                  ] || exit 15
+exit 0
+EOF
+    chmod 0755 "$HOOK_PATH"
+    echo "  Hook written: $HOOK_PATH"
+
+    # Write auth-status-dump script
+    cat > "$AUTH_STATUS_DUMP" << 'EOF'
+#!/bin/sh
+# Outputs the auth context status file written by auth-context-check.sh.
+# Used by integration test 15 to read hook-received values without SSH.
+exec 0</dev/null
+STATUS_FILE="/tmp/dispatcher-auth-test-status"
+if [ -f "$STATUS_FILE" ]; then
+    cat "$STATUS_FILE"
+else
+    echo "STATUS_FILE_NOT_FOUND"
+    exit 1
+fi
+EOF
+    chmod 0755 "$AUTH_STATUS_DUMP"
+    echo "  Script written: $AUTH_STATUS_DUMP"
+
+    # Add to allowlist
+    append_if_missing "auth-status-dump" "$AUTH_STATUS_DUMP"
+
+    # Patch agent.conf
+    if grep -qE "^auth_hook\s*=" "$AGENT_CONF" 2>/dev/null; then
+        echo "  auth_hook already set in $AGENT_CONF — not overwriting"
+        echo "  WARNING: ensure it points to $HOOK_PATH for test 15 to work"
+    else
+        cp "$AGENT_CONF" "$AGENT_CONF_BACKUP"
+        echo "  Backed up agent.conf to $AGENT_CONF_BACKUP"
+        echo "auth_hook = $HOOK_PATH" >> "$AGENT_CONF"
+        echo "  Appended: auth_hook = $HOOK_PATH"
+    fi
+
+    reload_agent
+    echo "Auth context test hook installed."
+    echo "Run integration test 15-agent-auth-context.sh to verify."
+}
+
+remove_auth_test() {
+    echo ""
+    echo "Removing auth context test hook ..."
+
+    # Remove hook file
+    if [ -f "$HOOK_PATH" ]; then
+        rm -f "$HOOK_PATH"
+        echo "  Removed: $HOOK_PATH"
+    else
+        echo "  Hook not found, skipping: $HOOK_PATH"
+    fi
+
+    # Remove auth-status-dump script
+    if [ -f "$AUTH_STATUS_DUMP" ]; then
+        rm -f "$AUTH_STATUS_DUMP"
+        echo "  Removed: $AUTH_STATUS_DUMP"
+    else
+        echo "  auth-status-dump not found, skipping"
+    fi
+
+    # Remove auth-status-dump from allowlist
+    if grep -qE "^auth-status-dump\s*=" "$CONF" 2>/dev/null; then
+        sed -i "/^auth-status-dump\s*=/d" "$CONF"
+        echo "  Removed auth-status-dump from $CONF"
+    else
+        echo "  auth-status-dump not in $CONF, skipping"
+    fi
+
+    # Restore agent.conf
+    if [ -f "$AGENT_CONF_BACKUP" ]; then
+        cp "$AGENT_CONF_BACKUP" "$AGENT_CONF"
+        rm -f "$AGENT_CONF_BACKUP"
+        echo "  Restored agent.conf from backup"
+    else
+        # No backup — just strip the auth_hook line if it points to our hook
+        if grep -qE "^auth_hook\s*=\s*${HOOK_PATH}" "$AGENT_CONF" 2>/dev/null; then
+            sed -i "/^auth_hook\s*=\s*${HOOK_PATH}/d" "$AGENT_CONF"
+            echo "  Removed auth_hook line from agent.conf (no backup found)"
+        else
+            echo "  auth_hook not set to test hook in agent.conf, not modified"
+        fi
+    fi
+
+    # Remove status file
+    rm -f "$STATUS_FILE"
+
+    reload_agent
+    echo "Auth context test hook removed."
+}
+
+# --- mode dispatch ---
+
+MODE="${1:-}"
+case "$MODE" in
+    --install-auth-test) install_auth_test ;;
+    --remove-auth-test)  remove_auth_test ;;
+    "")                  : ;;  # default install already complete above
+    *)
+        echo "Unknown argument: $MODE"
+        echo "Usage: $0 [--install-auth-test|--remove-auth-test]"
+        exit 1
+        ;;
+esac
 
 echo "Done. Verify with: sudo dispatcher-agent ping-self"

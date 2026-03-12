@@ -35,6 +35,7 @@ TESTS=(
     10-timeout-behaviour.sh
     11-api-status.sh
     12-serial-check.sh
+    15-agent-auth-context.sh
 )
 
 if [ "$#" -gt 0 ]; then
