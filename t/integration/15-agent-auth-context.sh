@@ -19,9 +19,10 @@
 #   even for denied requests.
 #
 # Requires:
-#   setup-agent-scripts.sh --install-auth-test run on AGENT1 before this test.
-#   The test detects whether auth-status-dump is configured and skips cleanly
-#   if the setup step has not been run.
+#   setup-agent-scripts.sh --install-auth-test run on at least one registered
+#   agent before this test. The test scans all reachable agents for one with
+#   auth-status-dump in its allowlist and runs against that agent. Skips
+#   cleanly if no qualifying agent is found.
 #
 # Cleanup:
 #   This test does not modify agent state. The hook and agent.conf changes
@@ -33,15 +34,26 @@ source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
 
 require_agents 1
 
-# --- detect whether --install-auth-test has been run ---
+# --- find an agent with auth-status-dump configured ---
 #
-# Probe the allowlist via dispatcher list-scripts (or equivalent).
-# If auth-status-dump is not in the allowlist, the hook setup has not been
-# run and all tests in this file are skipped.
+# Attempt to dispatch auth-status-dump against each reachable agent.
+# The first agent that returns exit 0 is used for all tests.
+# If no agent responds successfully, the setup step has not been run
+# and the entire file skips cleanly.
 
-if ! sudo "$DISPATCHER" list-scripts "$AGENT1" 2>/dev/null | grep -q "^auth-status-dump"; then
+AUTH_AGENT=""
+for _candidate in "${AGENTS[@]}"; do
+    if sudo "$DISPATCHER" run "$_candidate" auth-status-dump \
+            --username "test-user" --token "test-token-value" \
+            > /dev/null 2>&1; then
+        AUTH_AGENT="$_candidate"
+        break
+    fi
+done
+
+if [ -z "$AUTH_AGENT" ]; then
     skip "Agent auth context tests" \
-        "auth-status-dump not in allowlist on $AGENT1 — run: sudo bash setup-agent-scripts.sh --install-auth-test"
+        "auth-status-dump not available on any agent — run: sudo bash setup-agent-scripts.sh --install-auth-test"
     summary
     exit 0
 fi
@@ -49,7 +61,7 @@ fi
 # --- helper: read status file from agent via dispatch ---
 
 read_status_file() {
-    run_dispatcher run "$AGENT1" auth-status-dump \
+    run_dispatcher run "$AUTH_AGENT" auth-status-dump \
         --username "test-user" --token "test-token-value"
     echo "$OUT"
 }
@@ -64,7 +76,7 @@ assert_agents_reachable
 describe "Auth context: passing request with known values"
 # ============================================================
 
-run_dispatcher run "$AGENT1" args-echo \
+run_dispatcher run "$AUTH_AGENT" args-echo \
     --username "test-user" --token "test-token-value" -- first second
 
 assert_exit 0 "$RC" "dispatch with correct values succeeds"
@@ -140,7 +152,7 @@ assert_agents_reachable
 describe "Auth context: wrong username is denied"
 # ============================================================
 
-run_dispatcher run "$AGENT1" args-echo \
+run_dispatcher run "$AUTH_AGENT" args-echo \
     --username "wrong-user" --token "test-token-value" -- probe
 
 assert_exit 1 "$RC" "wrong username: dispatcher exits non-zero"
@@ -158,7 +170,7 @@ assert_agents_reachable
 describe "Auth context: wrong token is denied"
 # ============================================================
 
-run_dispatcher run "$AGENT1" args-echo \
+run_dispatcher run "$AUTH_AGENT" args-echo \
     --username "test-user" --token "wrong-token" -- probe
 
 assert_exit 1 "$RC" "wrong token: dispatcher exits non-zero"
@@ -176,7 +188,7 @@ assert_agents_reachable
 describe "Auth context: missing token is denied"
 # ============================================================
 
-run_dispatcher run "$AGENT1" args-echo \
+run_dispatcher run "$AUTH_AGENT" args-echo \
     --username "test-user" -- probe
 
 assert_exit 1 "$RC" "missing token: dispatcher exits non-zero"
@@ -194,7 +206,11 @@ assert_agents_reachable
 describe "Auth context: missing username is denied"
 # ============================================================
 
-run_dispatcher run "$AGENT1" args-echo \
+# When --username is omitted, the dispatcher substitutes the invoking user
+# (typically root when run via sudo). The hook receives a non-empty username
+# that does not match the approved value and correctly denies.
+
+run_dispatcher run "$AUTH_AGENT" args-echo \
     --token "test-token-value" -- probe
 
 assert_exit 1 "$RC" "missing username: dispatcher exits non-zero"
@@ -202,10 +218,10 @@ assert_not_contains "$OUT" "[1] probe" "missing username: script did not execute
 
 STATUS=$(read_status_file)
 RECORDED_USER=$(parse_field "$STATUS" "DISPATCHER_USERNAME")
-[ -z "$RECORDED_USER" ] \
-    && pass "missing username: hook received empty username before denying" \
-    || fail "missing username: hook received empty username before denying" \
-            "got: '$RECORDED_USER'"
+[ "$RECORDED_USER" != "test-user" ] \
+    && pass "missing username: hook received non-approved username before denying ($RECORDED_USER)" \
+    || fail "missing username: hook received non-approved username before denying" \
+            "got approved value 'test-user' — username was not substituted"
 
 # ============================================================
 assert_agents_reachable
@@ -213,7 +229,7 @@ describe "Auth context: source IP is consistent across requests"
 # ============================================================
 
 # Run a second passing request and confirm source IP matches the first.
-run_dispatcher run "$AGENT1" args-echo \
+run_dispatcher run "$AUTH_AGENT" args-echo \
     --username "test-user" --token "test-token-value" -- verify
 
 assert_exit 0 "$RC" "second passing request succeeds"

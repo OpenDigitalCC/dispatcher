@@ -254,9 +254,8 @@ install_auth_test() {
     echo "Installing auth context test hook ..."
 
     # Write hook: records all context env vars to status file, then applies policy.
-    # auth-status-dump is allowed through unconditionally so the test can read results.
-    # All other scripts check the known test values and write an exit code to the
-    # status file so the integration test can distinguish per-field failures.
+    # auth-status-dump is allowed through without touching the status file, so
+    # the test can read back results from the preceding call undisturbed.
     cat > "$HOOK_PATH" << 'EOF'
 #!/bin/sh
 # auth-context-check.sh
@@ -264,12 +263,19 @@ install_auth_test() {
 # Removed by:   setup-agent-scripts.sh --remove-auth-test
 #
 # Records received context to STATUS_FILE then applies known-value policy.
-# auth-status-dump is always allowed through so the test can retrieve results.
+# auth-status-dump is always allowed through without touching the status file,
+# so the test can retrieve results from the preceding call.
 # Exit codes for policy failures use distinct values to identify the failing field.
 
 STATUS_FILE="/tmp/dispatcher-auth-test-status"
 
-# Always record what was received
+# Allow auth-status-dump through without recording - preserves the status
+# file written by the preceding call so the test can read it back.
+if [ "$DISPATCHER_SCRIPT" = "auth-status-dump" ]; then
+    exit 0
+fi
+
+# Record what was received for all other scripts
 cat > "$STATUS_FILE" << VARS
 DISPATCHER_ACTION=$DISPATCHER_ACTION
 DISPATCHER_SCRIPT=$DISPATCHER_SCRIPT
@@ -279,12 +285,7 @@ DISPATCHER_SOURCE_IP=$DISPATCHER_SOURCE_IP
 DISPATCHER_ARGS_JSON=$DISPATCHER_ARGS_JSON
 VARS
 
-# Allow auth-status-dump through unconditionally so the test can retrieve results
-if [ "$DISPATCHER_SCRIPT" = "auth-status-dump" ]; then
-    exit 0
-fi
-
-# Apply known-value policy for all other scripts
+# Apply known-value policy
 [ "$DISPATCHER_ACTION"   = "run"              ] || exit 11
 [ "$DISPATCHER_USERNAME" = "test-user"        ] || exit 13
 [ "$DISPATCHER_TOKEN"    = "test-token-value" ] || exit 14
