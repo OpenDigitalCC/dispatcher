@@ -37,15 +37,18 @@ require_agents 1
 # --- find an agent with auth-status-dump configured ---
 #
 # Attempt to dispatch auth-status-dump against each reachable agent.
-# The first agent that returns exit 0 is used for all tests.
-# If no agent responds successfully, the setup step has not been run
-# and the entire file skips cleanly.
+# The script exits 1 if the status file does not yet exist (no prior call),
+# so we accept both exit 0 and exit 1 as evidence the script is present and
+# reachable. Exit 1 from a missing status file produces "STATUS_FILE_NOT_FOUND"
+# on stdout; a true "not permitted" denial produces no stdout and a dispatcher
+# error on stderr. We distinguish these by checking stdout content.
 
 AUTH_AGENT=""
 for _candidate in "${AGENTS[@]}"; do
-    if sudo "$DISPATCHER" run "$_candidate" auth-status-dump \
-            --username "test-user" --token "test-token-value" \
-            > /dev/null 2>&1; then
+    _probe_out=$(sudo "$DISPATCHER" run "$_candidate" auth-status-dump \
+        --username "test-user" --token "test-token-value" 2>/dev/null || true)
+    # Accept if script ran: output is either status vars or STATUS_FILE_NOT_FOUND
+    if echo "$_probe_out" | grep -qE "^DISPATCHER_|STATUS_FILE_NOT_FOUND"; then
         AUTH_AGENT="$_candidate"
         break
     fi
