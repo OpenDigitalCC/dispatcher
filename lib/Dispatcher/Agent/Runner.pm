@@ -92,7 +92,6 @@ sub _write_stdin {
     my $flags = fcntl($fh, F_GETFL, 0) or return;
     fcntl($fh, F_SETFL, $flags | O_NONBLOCK) or return;
 
-    binmode $fh, ':utf8';
     my $deadline = time + $timeout;
     my $offset   = 0;
     my $len      = length $data;
