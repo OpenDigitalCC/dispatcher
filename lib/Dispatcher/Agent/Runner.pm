@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use JSON   qw(encode_json);
 use POSIX  qw(WIFEXITED WEXITSTATUS EINTR EAGAIN);
+use Fcntl  qw(F_GETFL F_SETFL O_NONBLOCK);
 
 
 # Execute a script with no shell, capture stdout/stderr/exit.
@@ -88,10 +89,8 @@ sub _write_stdin {
     my ($fh, $data, $timeout) = @_;
     $timeout //= 10;
 
-    require Fcntl;
-    my $flags = 0;
-    Fcntl::fcntl($fh, Fcntl::F_GETFL(), $flags) or return;
-    Fcntl::fcntl($fh, Fcntl::F_SETFL(), $flags | Fcntl::O_NONBLOCK()) or return;
+    my $flags = fcntl($fh, F_GETFL, 0) or return;
+    fcntl($fh, F_SETFL, $flags | O_NONBLOCK) or return;
 
     binmode $fh, ':utf8';
     my $deadline = time + $timeout;
