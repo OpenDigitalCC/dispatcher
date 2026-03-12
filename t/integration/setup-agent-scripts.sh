@@ -362,6 +362,8 @@ remove_auth_test() {
     # Restore agent.conf
     if [ -f "$AGENT_CONF_BACKUP" ]; then
         cp "$AGENT_CONF_BACKUP" "$AGENT_CONF"
+        chown root:dispatcher-agent "$AGENT_CONF"
+        chmod 640 "$AGENT_CONF"
         rm -f "$AGENT_CONF_BACKUP"
         echo "  Restored agent.conf from backup"
     else
