@@ -313,6 +313,15 @@ Security-relevant `ACTION=` values to alert on:
 : Configuration problems at load time. Should not occur in a healthy
   deployment after initial setup. Investigate immediately.
 
+`ACTION=stdin-timeout`
+: The agent timed out writing the JSON context to a script's stdin pipe.
+  The script did not read stdin within the configured window (`stdin_timeout`
+  in `agent.conf`, default 10 seconds). The script continues to run and
+  receives EOF on stdin. Occasional occurrences from scripts that discard
+  stdin are harmless. Repeated occurrences from the same script may indicate
+  the script is hanging on startup before reading stdin, or that the context
+  payload has grown beyond the pipe buffer and the script is slow to read it.
+
 Operational signals worth alerting on:
 
 - All agents returning `ACTION=serial-reject` simultaneously after a rotation
@@ -331,15 +340,6 @@ Operational signals worth alerting on:
 
 
 ## Known Limitations
-
-Script stdin pipe
-: The agent writes JSON context to the script's stdin pipe before waiting for
-  the script to exit. If the script does not read stdin and the pipe buffer
-  fills, the agent child process blocks on the write until the script exits or
-  the pipe is drained. Scripts that do not use stdin context must include
-  `exec 0</dev/null` to prevent this. This is documented in SECURITY.md but
-  bears repeating: it is a script author responsibility, not something the
-  agent can enforce.
 
 Request result access
 : `GET /status/{reqid}` returns stored run results to any authenticated caller,

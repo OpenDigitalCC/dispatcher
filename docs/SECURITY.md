@@ -132,16 +132,17 @@ Allowlist is server-enforced
 
 JSON context on stdin
 : Scripts receive full request context as JSON on stdin (script name, args,
-  reqid, peer IP, username, token, timestamp). If a script does not read
-  stdin and the pipe buffer fills, the agent child process blocks on the pipe
-  write until the script exits. Scripts that do not use stdin context must
-  include `exec 0</dev/null` as their first line to prevent this. This is
-  not enforced by the agent; it is a script author requirement.
+  reqid, peer IP, username, token, timestamp). The agent writes this context
+  with a non-blocking write loop and a configurable timeout (`stdin_timeout`
+  in `agent.conf`, default 10 seconds). If the script does not read stdin and
+  the pipe buffer fills, the agent logs `ACTION=stdin-timeout` and closes the
+  write end, delivering EOF to the script. The script continues to execute.
+  Scripts that do not use stdin context do not need any special handling.
 
 
 ## Auth Hook
 
-The auth hook is called before every `run`, `ping`, and API request. It is
+The auth hook is called before every `run`, `ping`, `capabilities`, and API request. It is
 the sole access control policy engine - dispatcher has no built-in ACLs.
 
 Default auth mode
