@@ -427,7 +427,12 @@ run_tests() {
     cd "$SOURCE_DIR"
 
     if command -v prove &>/dev/null; then
-        prove -Ilib t/ && info "All tests passed (v${RELEASE_VERSION})." || die "Test suite failed."
+        prove -Ilib t/
+        local prove_exit
+        prove_exit=$?
+        echo ""
+        echo "Test Summary Report for v${RELEASE_VERSION}"
+        [[ $prove_exit -eq 0 ]] && info "All tests passed (v${RELEASE_VERSION})." || die "Test suite failed."
     else
         # prove is in perl-utils on Alpine; fall back to running files directly
         local failed=0
