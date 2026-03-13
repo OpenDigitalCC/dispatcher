@@ -279,48 +279,13 @@ must be configured in the operator's log management tooling (Graylog,
 Elasticsearch, Loki, syslog-ng filters, etc.). Dispatcher does not include
 a monitoring component.
 
-Security-relevant `ACTION=` values to alert on:
+The complete alert pattern reference — covering security events, execution
+failures, rotation events, and configuration problems — is in LOGGING.md.
 
-`ACTION=rate-block`
-: A source IP has been blocked by the volume or probe rate limiter. Occasional
-  occurrences may indicate misconfigured clients or cert errors. Sustained
-  occurrences from the same IP indicate active scanning or probing.
-
-`ACTION=serial-reject`
-: The dispatcher's cert serial does not match the stored value on the agent.
-  This should not occur during normal operation after a complete rotation
-  broadcast. Occurrences may indicate a stale agent or, in the worst case,
-  a connection attempt from a cert that is not the current dispatcher cert.
-
-`ACTION=cert-revoked`
-: A connecting peer presented a cert that is in the revocation list. This
-  indicates an active connection attempt from a revoked credential. Treat
-  as a security event and investigate the source IP.
-
-`ACTION=ip-block`
-: A connection from an IP outside the `allowed_ips` allowlist. Expected if
-  `allowed_ips` is configured and a misconfigured or unexpected source
-  attempts a connection. Unexpected occurrences on a network where source
-  IPs should be stable indicate traffic from an unexpected source.
-
-`ACTION=deny` (repeated, same PEER)
-: Repeated script denials from the same dispatcher IP indicate a dispatcher
-  attempting to run a script that is not in the agent's allowlist. May
-  indicate misconfiguration or an attempt to reach a script that has been
-  removed.
-
-`ACTION=config-warn`
-: Configuration problems at load time. Should not occur in a healthy
-  deployment after initial setup. Investigate immediately.
-
-`ACTION=stdin-timeout`
-: The agent timed out writing the JSON context to a script's stdin pipe.
-  The script did not read stdin within the configured window (`stdin_timeout`
-  in `agent.conf`, default 10 seconds). The script continues to run and
-  receives EOF on stdin. Occasional occurrences from scripts that discard
-  stdin are harmless. Repeated occurrences from the same script may indicate
-  the script is hanging on startup before reading stdin, or that the context
-  payload has grown beyond the pipe buffer and the script is slow to read it.
+Key security-relevant actions to alert on: `rate-block`, `serial-reject`,
+`revoked-cert`, `ip-block`, `deny` (repeated, same PEER). Key rotation
+signals: `serial-stale`, `serial-broadcast-fail` (repeated for same agent),
+`cert-rotation-fail`. These are documented in full in LOGGING.md.
 
 Operational signals worth alerting on:
 
@@ -329,7 +294,9 @@ Operational signals worth alerting on:
   `dispatcher serial-status` and `dispatcher rotate-cert` immediately.
 - A sudden increase in `ACTION=run EXIT=non-zero` across multiple agents may
   indicate a script was modified or a dependency broke. Correlate with
-  deployment events.
+  deployment events. Note that non-zero exit is logged at INFO priority on
+  both dispatcher and agent — alert on the EXIT value itself, not the
+  log priority level.
 
 `cert_overlap_days` calibration
 : The default overlap window is 30 days. If agents in your fleet are routinely

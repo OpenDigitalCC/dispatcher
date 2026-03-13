@@ -81,68 +81,6 @@ function-based design
   library modules; the `bin/` scripts handle argument parsing and output only.
 
 
-## File Map
-
-```
-bin/
-  dispatcher              CLI for the control host
-  dispatcher-agent        Daemon for remote hosts
-  dispatcher-api          HTTP API server for the control host
-
-lib/Dispatcher/
-  Log.pm                  Structured syslog
-  CA.pm                   CA and cert signing via openssl subprocess
-  Pairing.pm              Dispatcher-side pairing server and approval queue
-  Registry.pm             Persistent agent store (written at pairing, read by API)
-  Rotation.pm             Dispatcher cert rotation, serial broadcast, overlap tracking
-  Engine.pm               Parallel dispatch, ping, capabilities, and cert renewal
-  Auth.pm                 Auth hook runner
-  Lock.pm                 flock-based host:script concurrency control
-  Output.pm               Output formatting for CLI tables
-  API.pm                  HTTP API server (fork-per-request)
-  Agent/
-    Config.pm             Config and allowlist loading and validation
-    Pairing.pm            Agent-side: key/CSR generation, pairing request, cert storage
-    Runner.pm             Script execution via fork/exec
-
-etc/
-  agent.conf.example           Template for /etc/dispatcher-agent/agent.conf
-  dispatcher.conf.example      Template for /etc/dispatcher/dispatcher.conf
-  scripts.conf.example         Template for /etc/dispatcher-agent/scripts.conf
-  auth-hook.example            Always-authorise hook template
-  dispatcher-agent.service     Systemd unit for agent
-  dispatcher-api.service       Systemd unit for API server
-
-t/
-  agent-config.t          Tests for Dispatcher::Agent::Config
-  agent-run.t             Tests for Dispatcher::Agent::Runner
-  auth.t                  Tests for Dispatcher::Auth
-  auth-hook.t             Integration: auth hook exit codes and context passing
-  dispatcher-cli.t        Tests for CLI argument parsing and output formatting
-  engine.t                Tests for Dispatcher::Engine
-  lock.t                  Tests for Dispatcher::Lock
-  lock-holder.pl          Test helper: acquires a lock and holds until stdin closes
-  log.t                   Tests for Dispatcher::Log
-  output.t                Tests for Dispatcher::Output
-  pairing-csr.t           Tests for Dispatcher::Agent::Pairing (key/CSR/nonce)
-  pairing-dispatcher.t    Tests for Dispatcher::Pairing (stale expiry, nonce storage)
-  registry.t              Tests for Dispatcher::Registry
-  registry-serial.t       Tests for serial tracking fields in Dispatcher::Registry
-  renewal.t               Tests for cert renewal functions in Dispatcher::Engine
-  rotation.t              Tests for Dispatcher::Rotation
-  serial-normalisation.t  Tests for Dispatcher::Agent::Pairing::serial_to_hex
-  update-dispatcher-serial.t  Tests for the update-dispatcher-serial script
-
-install.sh                Installer: --agent | --dispatcher | --api | --uninstall | --run-tests
-README.md                 Project overview and quick start
-INSTALL.md                Full installation, configuration, and operational reference
-REFERENCE.md              Command, config, and syslog field reference
-API.md                    HTTP REST API reference and OpenAPI spec documentation
-DOCKER.md                 Docker deployment guide (Alpine containers, entrypoints, pairing)
-SECURITY.md               Security model, trust boundaries, file permissions
-DEVELOPER.md              This file
-```
-
 
 ## Ports
 
@@ -556,9 +494,10 @@ Functions:
 : Parses `"hostname"` or `"hostname:port"`. Returns `($host, $port)`.
 
 `gen_reqid()`
-: Returns a 12-hex-character ID composed of a `Time::HiRes` timestamp fragment,
-  PID, and a per-process counter. Format: `TTTTPPPPSSSS`. IDs are opaque
-  strings; no code assumes fixed length.
+: Returns a 16-hex-character cryptographically random request ID. Generated
+  by reading 8 bytes from `/dev/urandom` and unpacking as hex. IDs are
+  opaque strings; no code assumes a fixed structure or derives meaning from
+  their content.
 
 Private functions (not part of public API but documented for extension):
 
@@ -1092,14 +1031,16 @@ sub mode_serve {
   yet set).
 
 Testability
-: `bin/dispatcher-agent` calls `main()` unconditionally at the top level - it
-  does **not** use the `main() unless caller` idiom used by `bin/dispatcher`.
-  This means it cannot be `do`'d by test files without executing. The test
-  files `agent-config.t` and `agent-run.t` test `Dispatcher::Agent::Config`
-  and `Dispatcher::Agent::Runner` directly by loading those modules - they do
-  not load the binary. Functions defined in the binary itself (such as
-  `_peer_serial`, `handle_connection`, `handle_capabilities`) are not unit
-  tested independently; they are covered by integration tests.
+: `bin/dispatcher-agent` calls `main()` unconditionally — it does not use
+  the `main() unless caller` idiom used by `bin/dispatcher`. This is a
+  deliberate design choice: functions defined in the binary (`_peer_serial`,
+  `handle_connection`, `handle_capabilities`) are covered by integration
+  tests, which exercise them through the full accept-loop path. Unit tests
+  target `Dispatcher::Agent::Config`, `Dispatcher::Agent::Runner`, and other
+  library modules directly. This boundary keeps integration test coverage
+  where it is most meaningful for the binary's concurrent, socket-driven
+  logic, and keeps unit test coverage targeted at the library modules where
+  pure-function testing is practical.
 
 `_peer_serial` helper
 : Extracts the peer certificate serial from an accepted `IO::Socket::SSL`
@@ -1280,44 +1221,26 @@ Lock conflict response (409):
 
 ## Syslog Format
 
-All log lines follow `ACTION=value KEY=value KEY=value` with ACTION first and
-all remaining keys alphabetical. Values containing spaces are quoted.
+All log lines follow `ACTION=value KEY=value KEY=value` with `ACTION` first
+and all remaining keys in the order they are passed to `log_action`. Values
+containing spaces are quoted.
 
-Dispatcher examples:
+The full action catalogue — every action, its fields, priorities, example
+log lines, field glossary, and alert pattern reference — is in LOGGING.md.
+Add new actions there when introducing new log calls.
+
+Quick examples for orientation:
 
 ```
 dispatcher[1234]: ACTION=dispatch HOSTS=agent-host-02 REQID=a3f9b2c10001 SCRIPT=backup-mysql
 dispatcher[1234]: ACTION=run EXIT=0 REQID=a3f9b2c10001 RTT=87ms SCRIPT=backup-mysql TARGET=agent-host-02:7443
 dispatcher[1234]: ACTION=pair-approve AGENT=agent-host-01 REQID=fa5e74630001
-dispatcher[1234]: ACTION=auth AUTHACTION=run IP=127.0.0.1 RESULT=pass USER=alice
-dispatcher[1234]: ACTION=unpair AGENT=agent-host-01 EXPIRY="Jun  7 16:28:00 2027 GMT"
-dispatcher[1234]: ACTION=renew REQID=c1d2e3f40001 STATUS=starting TARGET=agent-host-01:7443
-dispatcher[1234]: ACTION=renew-complete EXPIRY="Jun  7 16:28:00 2028 GMT" REQID=c1d2e3f40001 TARGET=agent-host-01:7443
-dispatcher[1234]: ACTION=lock-acquire HOST=agent-host-01 SCRIPT=backup-mysql
-```
-
-Agent examples:
-
-```
-dispatcher-agent[5678]: ACTION=start PORT=7443
 dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.0.2.11 REQID=a3f9b2c10001 SCRIPT=backup-mysql
-dispatcher-agent[5678]: ACTION=deny PEER=192.0.2.11 REQID=b1c2d3e40001 SCRIPT=not-in-allowlist
-dispatcher-agent[5678]: ACTION=ping PEER=192.0.2.11 REQID=b7c3d1e40001
-dispatcher-agent[5678]: ACTION=capabilities PEER=192.0.2.11 SCRIPTS=3
-dispatcher-agent[5678]: ACTION=renew PEER=192.0.2.11 REQID=c1d2e3f40001 STATUS=csr-generated
-dispatcher-agent[5678]: ACTION=renew-complete PEER=192.0.2.11 REQID=c1d2e3f40001 STATUS=cert-stored
-```
-
-API examples:
-
-```
-dispatcher-api[9012]: ACTION=api-start PORT=7445 TLS=no
 dispatcher-api[9012]: ACTION=api-request LEN=25 METHOD=POST PATH=/ping PEER=127.0.0.1
-dispatcher-api[9012]: ACTION=auth AUTHACTION=ping IP=127.0.0.1 RESULT=pass USER=(none)
 ```
 
-The REQID field appears in both dispatcher and agent log lines for the same
-operation, enabling cross-host log correlation.
+The `REQID` field appears in both dispatcher and agent log lines for the
+same operation, enabling cross-host log correlation.
 
 
 ## Automatic Cert Renewal

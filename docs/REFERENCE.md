@@ -466,6 +466,18 @@ Key settings:
   pairing_port = 7444
   ```
 
+`pairing_max_queue`
+: Maximum number of pairing requests held in the queue at one time. When
+  the limit is reached, incoming requests are rejected immediately with
+  `ACTION=pair-reject REASON=queue-full`. Default: 10. Raise this value
+  only on deployments where many agents are paired concurrently; the queue
+  is normally short-lived as each request is approved or denied within
+  seconds.
+
+  ```
+  pairing_max_queue = 10
+  ```
+
 `allowed_ips`
 : Comma-separated list of IP addresses or CIDR prefixes (/8, /16, /24)
   permitted to connect to the agent's mTLS port. Connections from addresses
@@ -909,85 +921,25 @@ found, 409 lock conflict, 500 server error.
 ## Syslog
 
 Both binaries log structured key=value records to syslog under the
-`daemon` facility. The agent logs script execution under the tag
-`dispatcher-agent`; scripts themselves may log under any tag they choose.
+`daemon` facility. The dispatcher and dispatcher-api log under the tag
+`dispatcher`; the agent logs under `dispatcher-agent`. Scripts themselves
+may log under any tag they choose.
 
-Key fields logged on `run` (dispatcher side, logged on response received):
+All log entries use the `ACTION=<name>` field to identify the event type.
+The full action catalogue — fields, priorities, example lines, and
+alerting guidance — is in LOGGING.md.
 
-```
-ACTION=run EXIT=<n> SCRIPT=<n> TARGET=<host:port> RTT=<ms> REQID=<id>
-```
-
-Key fields logged on `run` (agent side, logged at script completion):
-
-```
-ACTION=run EXIT=<n> SCRIPT=<n> PEER=<ip> REQID=<id>
-```
-
-The agent logs `ACTION=run` only when the script exits. There is no
-start-of-execution log entry. If the dispatcher's `read_timeout` fires
-before the script exits, the dispatcher logs a timeout error and moves
-on, but the agent logs nothing until the script completes. An operator
-cannot determine from syslog alone that a script is currently running on
-an agent.
-
-Key fields logged on `ping`:
+Key quick-reference patterns for common operations:
 
 ```
+ACTION=run EXIT=<n> SCRIPT=<name> TARGET=<host:port> RTT=<ms> REQID=<id>   (dispatcher)
+ACTION=run EXIT=<n> SCRIPT=<name> PEER=<ip> REQID=<id>                      (agent)
 ACTION=ping STATUS=ok|error PEER=<ip> REQID=<id> RTT=<ms>
-```
-
-Key fields logged on lock events (dispatcher side):
-
-```
-ACTION=lock-acquire SCRIPT=<n> HOST=<host>
-ACTION=lock-release SCRIPT=<n> HOST=<host>
-ACTION=lock-conflict SCRIPT=<n> HOSTS=<host,...>
-```
-
-`lock-acquire` is logged when a dispatch begins. `lock-release` is logged
-when all per-host results have been collected. `lock-conflict` is logged
-when a run is rejected because the script is already locked on one or more
-of the requested hosts.
-
-Key fields logged on security and access events (agent side):
-
-```
-ACTION=rate-block PEER=<ip> REASON="volume threshold"|"probe threshold"
-ACTION=cert-revoked PEER=<ip> SERIAL=<hex>
+ACTION=revoked-cert PEER=<ip> SERIAL=<hex>
 ACTION=serial-reject PEER=<ip> REQID=<id>
+ACTION=rate-block PEER=<ip> REASON=volume|probe
 ACTION=ip-block PEER=<ip>
 ```
-
-`rate-block` is logged when a source IP is blocked by the volume or probe
-rate limiter. `cert-revoked` is logged when a connecting peer presents a
-certificate whose serial appears in the revocation list. `serial-reject` is
-logged when the dispatcher's cert serial does not match the stored value on
-`/run` or `/ping` requests. `ip-block` is logged when a source IP is
-rejected by the `allowed_ips` allowlist.
-
-Key fields logged on pairing events (agent side):
-
-```
-ACTION=pair-complete PEER=<ip> REQID=<id>
-ACTION=pair-denied PEER=<ip> REQID=<id>
-```
-
-Key fields logged on configuration and startup events:
-
-```
-ACTION=start PORT=<n>
-ACTION=config-warn PATH=<path> REASON=<text>
-ACTION=rate-evict PEER=<ip>
-```
-
-`config-warn` is logged at startup when `agent.conf` or `scripts.conf`
-contains an entry that is invalid but non-fatal — for example, an
-unrecognised CIDR prefix length in `allowed_ips`, or an invalid serial
-format in the revocation list. The entry is skipped and the agent
-continues loading. `rate-evict` is logged when an entry is removed from
-the in-memory rate limit table to make room for a new source IP (LRU
-eviction).
 
 To correlate a dispatcher log entry with agent log entries, filter both
 sides by `REQID`:
@@ -996,7 +948,8 @@ sides by `REQID`:
 grep 'REQID=a1b2c3d4' /var/log/syslog
 ```
 
-See DEVELOPER.md for the full syslog field reference.
+See LOGGING.md for the complete action reference, field glossary, and
+alert pattern tables.
 
 ---
 

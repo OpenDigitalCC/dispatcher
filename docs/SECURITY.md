@@ -142,8 +142,18 @@ JSON context on stdin
 
 ## Auth Hook
 
-The auth hook is called before every `run`, `ping`, `capabilities`, and API request. It is
-the sole access control policy engine - dispatcher has no built-in ACLs.
+Two separate hooks exist with different scopes.
+
+The dispatcher-side hook (configured via `auth_hook` in `dispatcher.conf`)
+is called before every `run`, `ping`, `capabilities`, and API request. It
+is the sole access control policy engine for the dispatcher — dispatcher
+has no built-in ACLs.
+
+The agent-side hook (configured via `auth_hook` in `agent.conf`) is called
+after allowlist validation on the agent, before script execution. It covers
+`run` requests only — `ping` and `capabilities` requests do not invoke the
+agent hook. The hooks are independent: both can be configured simultaneously,
+or only one, or neither.
 
 Default auth mode
 : When no hook is configured, behaviour depends on the caller. CLI invocations
@@ -201,16 +211,16 @@ Hook must not produce output
   should use syslog.
 
 Agent-side hook
-: Agents can independently run their own auth hook, configured via `auth_hook`
-  in `agent.conf`. This runs after allowlist validation on the agent, before
-  the script is executed. It covers `run` requests only - `ping` requests do
-  not invoke the agent hook. The hook receives the same request context
-  including the forwarded `username` and `token`. It does not receive a
-  `hosts` field; the agent is unaware of which other agents are targeted in
-  the same invocation. For source-based restriction on the agent, use
-  `allowed_ips` in `agent.conf` or `DISPATCHER_SOURCE_IP` in the hook.
-  If no agent hook is configured, the agent authorises unconditionally at
-  the agent level, relying on mTLS and the allowlist as its primary controls.
+: The agent-side hook (configured via `auth_hook` in `agent.conf`) runs
+  after allowlist validation, before script execution. It covers `run`
+  requests only — `ping` and `capabilities` do not invoke it. The hook
+  receives the same request context including the forwarded `username` and
+  `token`. It does not receive a `hosts` field; the agent is unaware of
+  which other agents are targeted in the same invocation. For
+  source-based restriction on the agent, use `allowed_ips` in `agent.conf`
+  or `DISPATCHER_SOURCE_IP` in the hook. If no agent hook is configured,
+  the agent authorises unconditionally at the agent level, relying on
+  mTLS and the allowlist as its primary controls.
 
 
 ## File Permissions
@@ -530,7 +540,7 @@ limitations, Docker-specific notes), see SECURITY-OPERATIONS.md.
 | Connection flood from valid cert | Rate limiting: volume block at 10 conn/60s (5 min), probe block at 3 failures/600s (1 hr) |
 | Pairing queue flood | Queue depth capped at 10 (configurable via `pairing_max_queue`); stale expiry runs first |
 | Header flood from valid cert | HTTP 431 after 32 header lines; connection closed before body is read |
-| API host count exhaustion | 500-host ceiling per request (configurable via `max_hosts` parameter) |
+| API host count exhaustion | 500-host ceiling per request (fixed Engine limit; not user-configurable) |
 | Port scan or TLS probe from unexpected host | IP allowlist (`allowed_ips` in `agent.conf`); connection closed before any request |
 | TLS downgrade or weak cipher negotiation | TLS 1.2 minimum; ECDHE+AEAD ciphers only; CBC, RC4, export-grade excluded |
 | Memory exhaustion via large request body | Body size limit: 1 MB ceiling checked before read; 413 returned on excess |
