@@ -31,7 +31,7 @@ sub main {
     GetOptions(
         'config=s'      => \$CONFIG_PATH,
         'allowlist=s'   => \$ALLOWLIST_PATH,
-        'ctrl-exec=s'  => \$opts{ctrl-exec},
+        'ctrl-exec=s'  => \$opts{'ctrl-exec'},
         'port=i'        => \$opts{port},
         'background'    => \$opts{background},
         'timeout=i'     => \$opts{timeout},
@@ -191,7 +191,7 @@ sub mode_serve {
 sub mode_request_pairing {
     my ($opts) = @_;
 
-    my $ctrl-exec  = $opts->{ctrl-exec}
+    my $ctrl_exec_host  = $opts->{'ctrl-exec'}
         or die "--ctrl-exec <host> required for request-pairing\n";
     my $background  = $opts->{background} // 0;
     my $timeout     = $opts->{timeout}    // 30;
@@ -223,12 +223,12 @@ sub mode_request_pairing {
         my $pairing_code = _pairing_code($pair->{csr_pem});
         print "Pairing code: $pairing_code\n";
         print "  Verify this code matches the ctrl-exec display before approving.\n\n";
-        print "Connecting to ctrl-exec at $ctrl-exec for pairing...\n";
+        print "Connecting to ctrl-exec at $ctrl_exec_host for pairing...\n";
     }
 
     # Submit the CSR. The ctrl-exec queues it and returns a reqid immediately.
     my $submitted = Exec::Agent::AgentPairing::submit_pairing_request(
-        ctrl-exec => $ctrl-exec,
+        'ctrl-exec' => $ctrl_exec_host,
         port       => $opts->{port} // 7444,
         csr_pem    => $pair->{csr_pem},
         hostname   => $host,
@@ -237,11 +237,11 @@ sub mode_request_pairing {
     unless ($submitted->{ok}) {
         my $err = $submitted->{error} // 'unknown error';
         if ($err =~ /IO::Socket::IP configuration failed|Name or service not known|Temporary failure in name resolution/i) {
-            die "Pairing failed: could not resolve ctrl-exec hostname '$ctrl-exec'.\n"
+            die "Pairing failed: could not resolve ctrl-exec hostname '$ctrl_exec_host'.\n"
               . "Check the hostname is correct or use an IP address instead.\n";
         }
         if ($err =~ /connect failed|connection refused|No route to host/i) {
-            die "Pairing failed: could not connect to ctrl-exec at $ctrl-exec.\n"
+            die "Pairing failed: could not connect to ctrl-exec at $ctrl_exec_host.\n"
               . "Check the ctrl-exec address is correct and pairing mode is active:\n"
               . "  sudo ctrl-exec pairing-mode\n";
         }
@@ -291,7 +291,7 @@ sub mode_request_pairing {
             exit 3;
         }
 
-        _store_pairing_result($result, $pair->{key_pem}, $ctrl-exec);
+        _store_pairing_result($result, $pair->{key_pem}, $ctrl_exec_host);
         return;
     }
 
@@ -307,12 +307,12 @@ sub mode_request_pairing {
         die "Pairing failed: $err\n";
     }
 
-    _store_pairing_result($result, $pair->{key_pem}, $ctrl-exec);
+    _store_pairing_result($result, $pair->{key_pem}, $ctrl_exec_host);
     print "Pairing complete. Certificates stored.\n";
 }
 
 sub _store_pairing_result {
-    my ($result, $key_pem, $ctrl-exec) = @_;
+    my ($result, $key_pem, $ctrl_exec_host) = @_;
 
     Exec::Agent::AgentPairing::store_certs(
         cert_pem          => $result->{cert_pem},
@@ -324,7 +324,7 @@ sub _store_pairing_result {
     Exec::Log::log_action('INFO', {
         ACTION     => 'pair-complete',
         STATUS     => 'approved',
-        DISPATCHER => $ctrl-exec,
+        DISPATCHER => $ctrl_exec_host,
     });
 }
 
