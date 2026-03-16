@@ -1,7 +1,7 @@
 ---
 title: ctrl-exec - Logging Reference
 subtitle: Complete reference for structured syslog output from ctrl-exec and ctrl-exec-agent
-brand: xisl
+brand: odcc
 ---
 
 # ctrl-exec - Logging Reference

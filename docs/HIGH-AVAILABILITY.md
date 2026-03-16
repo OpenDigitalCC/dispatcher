@@ -1,7 +1,7 @@
 ---
 title: ctrl-exec - High Availability
 subtitle: Running redundant ctrl-exec instances with shared state
-brand: xisl
+brand: odcc
 ---
 
 # ctrl-exec - High Availability
