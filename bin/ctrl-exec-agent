@@ -45,7 +45,8 @@ sub main {
         serve             => \&mode_serve,
         'request-pairing' => \&mode_request_pairing,
         'pairing-status'  => \&mode_pairing_status,
-        'ping-self'       => \&mode_ping_self,
+        'self-check'      => \&mode_self_check,
+        'self-ping'       => \&mode_self_ping,
     );
 
     my $handler = $dispatch{$mode}
@@ -339,7 +340,7 @@ sub mode_pairing_status {
     }
 }
 
-sub mode_ping_self {
+sub mode_self_check {
     print "Checking config...\n";
     my $config = eval { Exec::Agent::Config::load_config($CONFIG_PATH) };
     if ($@) { print "Config error: $@\n"; exit 1; }
@@ -365,6 +366,76 @@ sub mode_ping_self {
 
     print "Self-check complete.\n";
 }
+
+sub mode_self_ping {
+    print "Checking config...\n";
+    my $config = eval { Exec::Agent::Config::load_config($CONFIG_PATH) };
+    if ($@) { print "Config error: $@\n"; exit 1; }
+    my $port = $config->{port} // 7443;
+    print "  Config OK (port $port)\n";
+
+    # Pairing and cert status
+    my $status = Exec::Agent::AgentPairing::pairing_status();
+    if ($status->{paired}) {
+        print "  Paired: yes (cert expires $status->{expiry})\n";
+    }
+    else {
+        print "  Paired: no - $status->{reason}\n";
+        print "  Cannot self-ping: agent not paired.\n";
+        exit 1;
+    }
+
+    # Attempt mTLS connection to self on loopback
+    print "Connecting to 127.0.0.1:$port...\n";
+    require IO::Socket::SSL;
+    require JSON;
+
+    my $conn = IO::Socket::SSL->new(
+        PeerHost        => '127.0.0.1',
+        PeerPort        => $port,
+        SSL_cert_file   => $config->{cert},
+        SSL_key_file    => $config->{key},
+        SSL_ca_file     => $config->{ca},
+        SSL_verify_mode => IO::Socket::SSL::SSL_VERIFY_PEER(),
+        Timeout         => 5,
+    );
+
+    unless ($conn) {
+        my $err = $IO::Socket::SSL::SSL_ERROR // $@;
+        if ($err =~ /connection refused/i) {
+            print "  Port $port: not listening - is the agent running?\n";
+        } else {
+            print "  mTLS handshake failed: $err\n";
+        }
+        exit 1;
+    }
+
+    print "  Port $port: listening\n";
+    print "  mTLS handshake: OK\n";
+
+    # Send a ping request
+    my $reqid = sprintf('%08x', int(rand(0xffffffff)));
+    my $body  = JSON::encode_json({ reqid => $reqid });
+    print $conn "POST /ping HTTP/1.0\r\n";
+    print $conn "Content-Type: application/json\r\n";
+    print $conn "Content-Length: " . length($body) . "\r\n";
+    print $conn "\r\n";
+    print $conn $body;
+
+    my $response = '';
+    while (my $line = <$conn>) { $response .= $line; }
+    close $conn;
+
+    if ($response =~ /"status"\s*:\s*"ok"/) {
+        print "  Ping response: OK\n";
+    } else {
+        print "  Ping response: unexpected - $response\n";
+        exit 1;
+    }
+
+    print "Self-ping complete.\n";
+}
+
 
 # --- connection handler (runs in forked child) ---
 # Reads raw HTTP/1.0 request from IO::Socket::SSL, dispatches, sends response.
@@ -738,7 +809,8 @@ Modes:
   request-pairing --ctrl-exec <host>
                                  Request pairing with a ctrl-exec host
   pairing-status                 Show pairing/cert status
-  ping-self                      Validate local config and certs
+  self-check                     Validate local config and certs
+  self-ping                      Connect to self on port 7443, verify mTLS and pairing
 
 Options:
   --config <path>                Path to agent.conf
