@@ -11,7 +11,7 @@ use lib "$Bin/../lib";
 open my $saved_stderr, '>&', \*STDERR;
 open STDERR, '>', '/dev/null';
 
-use Dispatcher::Lock qw();
+use Exec::Lock qw();
 
 my $tmpdir  = tempdir(CLEANUP => 1);
 my $dir     = "$tmpdir/locks";
@@ -41,39 +41,39 @@ sub stop_holder {
 # --- argument validation ---
 
 {
-    eval { Dispatcher::Lock::check_available(script => 'x', lock_dir => $dir) };
+    eval { Exec::Lock::check_available(script => 'x', lock_dir => $dir) };
     like $@, qr/hosts required/, 'check_available: dies without hosts';
 }
 
 {
-    eval { Dispatcher::Lock::check_available(hosts => ['h'], lock_dir => $dir) };
+    eval { Exec::Lock::check_available(hosts => ['h'], lock_dir => $dir) };
     like $@, qr/script required/, 'check_available: dies without script';
 }
 
 {
-    eval { Dispatcher::Lock::check_available(hosts => 'bad', script => 'x', lock_dir => $dir) };
+    eval { Exec::Lock::check_available(hosts => 'bad', script => 'x', lock_dir => $dir) };
     like $@, qr/hosts must be an arrayref/, 'check_available: dies if hosts not arrayref';
 }
 
 {
-    eval { Dispatcher::Lock::acquire(script => 'x', lock_dir => $dir) };
+    eval { Exec::Lock::acquire(script => 'x', lock_dir => $dir) };
     like $@, qr/hosts required/, 'acquire: dies without hosts';
 }
 
 {
-    eval { Dispatcher::Lock::acquire(hosts => ['h'], lock_dir => $dir) };
+    eval { Exec::Lock::acquire(hosts => ['h'], lock_dir => $dir) };
     like $@, qr/script required/, 'acquire: dies without script';
 }
 
 {
-    eval { Dispatcher::Lock::release(hosts => [], script => 'x') };
+    eval { Exec::Lock::release(hosts => [], script => 'x') };
     like $@, qr/handles required/, 'release: dies without handles';
 }
 
 # --- check_available: no conflict ---
 
 {
-    my $result = Dispatcher::Lock::check_available(
+    my $result = Exec::Lock::check_available(
         hosts    => ['host-a'],
         script   => 'backup',
         lock_dir => $dir,
@@ -82,7 +82,7 @@ sub stop_holder {
 }
 
 {
-    my $result = Dispatcher::Lock::check_available(
+    my $result = Exec::Lock::check_available(
         hosts    => ['host-a', 'host-b'],
         script   => 'backup',
         lock_dir => $dir,
@@ -93,7 +93,7 @@ sub stop_holder {
 # --- acquire and release ---
 
 {
-    my $result = Dispatcher::Lock::acquire(
+    my $result = Exec::Lock::acquire(
         hosts    => ['host-a'],
         script   => 'backup',
         lock_dir => $dir,
@@ -102,20 +102,20 @@ sub stop_holder {
     ok ref $result->{handles} eq 'ARRAY', 'acquire: returns handles arrayref';
     is scalar @{ $result->{handles} }, 1, 'acquire: one handle per host';
 
-    Dispatcher::Lock::release(
+    Exec::Lock::release(
         handles => $result->{handles},
         hosts   => ['host-a'],
         script  => 'backup',
     );
 
     # After release, should be acquirable again
-    my $result2 = Dispatcher::Lock::acquire(
+    my $result2 = Exec::Lock::acquire(
         hosts    => ['host-a'],
         script   => 'backup',
         lock_dir => $dir,
     );
     ok $result2->{ok}, 'acquire: succeeds again after release';
-    Dispatcher::Lock::release(
+    Exec::Lock::release(
         handles => $result2->{handles},
         hosts   => ['host-a'],
         script  => 'backup',
@@ -131,7 +131,7 @@ sub stop_holder {
 {
     my ($pid, $child_in, $child_out) = start_holder('host-c', 'deploy');
 
-    my $check = Dispatcher::Lock::check_available(
+    my $check = Exec::Lock::check_available(
         hosts    => ['host-c'],
         script   => 'deploy',
         lock_dir => $dir,
@@ -140,7 +140,7 @@ sub stop_holder {
     is scalar @{ $check->{conflicts} }, 1,      'check_available: one conflict';
     is $check->{conflicts}[0], 'host-c:deploy', 'check_available: correct conflict pair';
 
-    my $acq = Dispatcher::Lock::acquire(
+    my $acq = Exec::Lock::acquire(
         hosts    => ['host-c'],
         script   => 'deploy',
         lock_dir => $dir,
@@ -150,7 +150,7 @@ sub stop_holder {
 
     stop_holder($pid, $child_in, $child_out);
 
-    my $after = Dispatcher::Lock::check_available(
+    my $after = Exec::Lock::check_available(
         hosts    => ['host-c'],
         script   => 'deploy',
         lock_dir => $dir,
@@ -163,7 +163,7 @@ sub stop_holder {
 {
     my ($pid, $child_in, $child_out) = start_holder('host-d', 'sync');
 
-    my $check = Dispatcher::Lock::check_available(
+    my $check = Exec::Lock::check_available(
         hosts    => ['host-d', 'host-e'],
         script   => 'sync',
         lock_dir => $dir,
@@ -172,7 +172,7 @@ sub stop_holder {
     is scalar @{ $check->{conflicts} }, 1,    'multi-host: only one conflict reported';
     is $check->{conflicts}[0], 'host-d:sync', 'multi-host: correct conflicting pair';
 
-    my $acq = Dispatcher::Lock::acquire(
+    my $acq = Exec::Lock::acquire(
         hosts    => ['host-d', 'host-e'],
         script   => 'sync',
         lock_dir => $dir,
@@ -182,7 +182,7 @@ sub stop_holder {
     stop_holder($pid, $child_in, $child_out);
 
     # host-e must be free - acquire rolled back on conflict
-    my $e_check = Dispatcher::Lock::check_available(
+    my $e_check = Exec::Lock::check_available(
         hosts    => ['host-e'],
         script   => 'sync',
         lock_dir => $dir,

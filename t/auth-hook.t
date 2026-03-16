@@ -1,13 +1,13 @@
 #!/usr/bin/perl
 # t/auth-hook.t
 #
-# Unit tests for Dispatcher::Auth::check.
+# Unit tests for Exec::Auth::check.
 #
 # Tests the hook runner in isolation: exit code handling, reason string
 # mapping, environment variable delivery, stdin content, SIGPIPE safety,
 # api_auth_default behaviour, and failure modes.
 #
-# No running dispatcher or agent required.
+# No running ctrl-exec or agent required.
 
 use strict;
 use warnings;
@@ -17,7 +17,7 @@ use JSON qw(decode_json encode_json);
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::Auth qw();
+use Exec::Auth qw();
 
 unless (system('bash --version >/dev/null 2>&1') == 0) {
     plan skip_all => 'bash not available';
@@ -70,13 +70,13 @@ sub run_args {
 # ---------------------------------------------------------------------------
 
 subtest 'no hook, cli caller: passes unconditionally' => sub {
-    my $r = Dispatcher::Auth::check(action => 'run', config => {}, caller => 'cli',
+    my $r = Exec::Auth::check(action => 'run', config => {}, caller => 'cli',
         run_args());
     is $r->{ok}, 1, 'cli passes with no hook';
 };
 
 subtest 'no hook, cli caller: ping also passes' => sub {
-    my $r = Dispatcher::Auth::check(action => 'ping', config => {}, caller => 'cli',
+    my $r = Exec::Auth::check(action => 'ping', config => {}, caller => 'cli',
         hosts => ['web-01'], source_ip => '127.0.0.1');
     is $r->{ok}, 1, 'ping passes for cli with no hook';
 };
@@ -86,20 +86,20 @@ subtest 'no hook, cli caller: ping also passes' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'no hook, api caller, api_auth_default = deny: request denied' => sub {
-    my $r = Dispatcher::Auth::check(action => 'run', caller => 'api',
+    my $r = Exec::Auth::check(action => 'run', caller => 'api',
         config => { api_auth_default => 'deny' }, run_args());
     is $r->{ok}, 0, 'api denied when no hook and default=deny';
     ok defined $r->{reason}, "reason present: $r->{reason}";
 };
 
 subtest 'no hook, api caller, default omitted: denied (default is deny)' => sub {
-    my $r = Dispatcher::Auth::check(action => 'run', caller => 'api',
+    my $r = Exec::Auth::check(action => 'run', caller => 'api',
         config => {}, run_args());
     is $r->{ok}, 0, 'api denied when no hook and no default (implicit deny)';
 };
 
 subtest 'no hook, api caller, api_auth_default = allow: request passes' => sub {
-    my $r = Dispatcher::Auth::check(action => 'run', caller => 'api',
+    my $r = Exec::Auth::check(action => 'run', caller => 'api',
         config => { api_auth_default => 'allow' }, run_args());
     is $r->{ok}, 1, 'api passes when no hook and default=allow';
 };
@@ -109,40 +109,40 @@ subtest 'no hook, api caller, api_auth_default = allow: request passes' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'hook exit 0: authorised' => sub {
-    my $r = Dispatcher::Auth::check(config => { auth_hook => make_hook(0) }, run_args());
+    my $r = Exec::Auth::check(config => { auth_hook => make_hook(0) }, run_args());
     is $r->{ok}, 1, 'ok => 1 for exit 0';
     ok !defined $r->{reason}, 'no reason on pass';
 };
 
 subtest 'hook exit 1: denied - generic' => sub {
-    my $r = Dispatcher::Auth::check(config => { auth_hook => make_hook(1) }, run_args());
+    my $r = Exec::Auth::check(config => { auth_hook => make_hook(1) }, run_args());
     is $r->{ok},   0, 'ok => 0';
     is $r->{code}, 1, 'code => 1';
     like $r->{reason}, qr/denied/i, "reason mentions denial: $r->{reason}";
 };
 
 subtest 'hook exit 2: bad credentials' => sub {
-    my $r = Dispatcher::Auth::check(config => { auth_hook => make_hook(2) }, run_args());
+    my $r = Exec::Auth::check(config => { auth_hook => make_hook(2) }, run_args());
     is $r->{ok},   0, 'ok => 0';
     is $r->{code}, 2, 'code => 2';
     like $r->{reason}, qr/credential|bad/i, "reason mentions credentials: $r->{reason}";
 };
 
 subtest 'hook exit 3: insufficient privilege' => sub {
-    my $r = Dispatcher::Auth::check(config => { auth_hook => make_hook(3) }, run_args());
+    my $r = Exec::Auth::check(config => { auth_hook => make_hook(3) }, run_args());
     is $r->{ok},   0, 'ok => 0';
     is $r->{code}, 3, 'code => 3';
     like $r->{reason}, qr/privilege|insuffi/i, "reason mentions privilege: $r->{reason}";
 };
 
 subtest 'hook exit 127: denied, no crash' => sub {
-    my $r = eval { Dispatcher::Auth::check(config => { auth_hook => make_hook(127) }, run_args()) };
+    my $r = eval { Exec::Auth::check(config => { auth_hook => make_hook(127) }, run_args()) };
     ok !$@, "no exception: $@";
     is $r->{ok}, 0, 'ok => 0 for exit 127';
 };
 
 subtest 'hook exit 42 (unexpected): denied' => sub {
-    my $r = eval { Dispatcher::Auth::check(config => { auth_hook => make_hook(42) }, run_args()) };
+    my $r = eval { Exec::Auth::check(config => { auth_hook => make_hook(42) }, run_args()) };
     ok !$@, 'no exception for unexpected exit';
     is $r->{ok}, 0, 'ok => 0 for unexpected exit code';
 };
@@ -156,7 +156,7 @@ subtest 'hook receives correct env vars' => sub {
     my $stdin_out = "$DIR/stdin-vars.txt";
     my $hook      = make_recording_hook($env_out, $stdin_out);
 
-    Dispatcher::Auth::check(
+    Exec::Auth::check(
         config    => { auth_hook => $hook },
         action    => 'run',
         script    => 'deploy-app',
@@ -171,27 +171,27 @@ subtest 'hook receives correct env vars' => sub {
     ok -f $env_out, 'hook was called';
     my $env = do { local $/; open my $fh, '<', $env_out or die $!; <$fh> };
 
-    like $env, qr/DISPATCHER_ACTION=run/,        'DISPATCHER_ACTION=run';
-    like $env, qr/DISPATCHER_SCRIPT=deploy-app/, 'DISPATCHER_SCRIPT';
-    like $env, qr/DISPATCHER_USERNAME=bob/,      'DISPATCHER_USERNAME';
-    like $env, qr/DISPATCHER_SOURCE_IP=10\.0\.0\.5/, 'DISPATCHER_SOURCE_IP';
-    like $env, qr/DISPATCHER_HOSTS=.*web-01/,    'DISPATCHER_HOSTS contains web-01';
-    like $env, qr/DISPATCHER_TOKEN=secret-token/, 'DISPATCHER_TOKEN delivered';
+    like $env, qr/ENVEXEC_ACTION=run/,        'ENVEXEC_ACTION=run';
+    like $env, qr/ENVEXEC_SCRIPT=deploy-app/, 'ENVEXEC_SCRIPT';
+    like $env, qr/ENVEXEC_USERNAME=bob/,      'ENVEXEC_USERNAME';
+    like $env, qr/ENVEXEC_SOURCE_IP=10\.0\.0\.5/, 'ENVEXEC_SOURCE_IP';
+    like $env, qr/ENVEXEC_HOSTS=.*web-01/,    'ENVEXEC_HOSTS contains web-01';
+    like $env, qr/ENVEXEC_TOKEN=secret-token/, 'ENVEXEC_TOKEN delivered';
 
-    if ($env =~ /DISPATCHER_ARGS_JSON=(.+)/) {
+    if ($env =~ /ENVEXEC_ARGS_JSON=(.+)/) {
         my $json_str = $1; chomp $json_str;
         my $args = eval { decode_json($json_str) };
-        ok !$@, 'DISPATCHER_ARGS_JSON is valid JSON';
-        is ref $args, 'ARRAY', 'DISPATCHER_ARGS_JSON is array';
+        ok !$@, 'ENVEXEC_ARGS_JSON is valid JSON';
+        is ref $args, 'ARRAY', 'ENVEXEC_ARGS_JSON is array';
         ok grep { $_ eq '--env' } @$args, 'contains --env';
         ok grep { $_ eq 'prod'  } @$args, 'contains prod';
     }
     else {
-        fail 'DISPATCHER_ARGS_JSON not found in env';
+        fail 'ENVEXEC_ARGS_JSON not found in env';
     }
 };
 
-subtest 'DISPATCHER_TOKEN not in STDOUT/STDERR from Auth module' => sub {
+subtest 'ENVEXEC_TOKEN not in STDOUT/STDERR from Auth module' => sub {
     my $env_out   = "$DIR/env-token.txt";
     my $stdin_out = "$DIR/stdin-token.txt";
     my $hook      = make_recording_hook($env_out, $stdin_out);
@@ -201,7 +201,7 @@ subtest 'DISPATCHER_TOKEN not in STDOUT/STDERR from Auth module' => sub {
         local *STDOUT; local *STDERR;
         open STDOUT, '>', \$out;
         open STDERR, '>', \$err;
-        Dispatcher::Auth::check(
+        Exec::Auth::check(
             config    => { auth_hook => $hook },
             action    => 'run', script => 'deploy', hosts => ['web-01'],
             token     => 'should-not-appear',
@@ -221,7 +221,7 @@ subtest 'hook receives full request context as JSON on stdin' => sub {
     my $stdin_out = "$DIR/stdin-ctx.json";
     my $hook      = make_recording_hook($env_out, $stdin_out);
 
-    Dispatcher::Auth::check(
+    Exec::Auth::check(
         config    => { auth_hook => $hook },
         action    => 'run', script => 'backup', hosts => ['db-01'],
         args      => ['--full'], username => 'carol',
@@ -251,7 +251,7 @@ subtest 'hook ignoring stdin does not raise SIGPIPE' => sub {
     my $hook = make_hook(0, body => '# exits without reading stdin');
     my $result = eval {
         local $SIG{PIPE} = sub { die "SIGPIPE\n" };
-        Dispatcher::Auth::check(
+        Exec::Auth::check(
             config    => { auth_hook => $hook },
             action    => 'run', script => 'script', hosts => ['h1'],
             args      => [ ('--arg') x 100 ],
@@ -268,7 +268,7 @@ subtest 'hook ignoring stdin does not raise SIGPIPE' => sub {
 
 subtest 'missing hook executable: denied, no crash' => sub {
     my $r = eval {
-        Dispatcher::Auth::check(
+        Exec::Auth::check(
             config    => { auth_hook => '/nonexistent/hook.sh' },
             action    => 'run', script => 'deploy', hosts => ['web-01'],
             source_ip => '127.0.0.1', caller => 'cli',
@@ -286,7 +286,7 @@ subtest 'non-executable hook file: denied, no crash' => sub {
     chmod 0644, $path;
 
     my $r = eval {
-        Dispatcher::Auth::check(
+        Exec::Auth::check(
             config    => { auth_hook => $path },
             action    => 'run', script => 'deploy', hosts => ['web-01'],
             source_ip => '127.0.0.1', caller => 'cli',
@@ -301,28 +301,28 @@ subtest 'non-executable hook file: denied, no crash' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'hook exit 0 for ping action' => sub {
-    my $r = Dispatcher::Auth::check(
+    my $r = Exec::Auth::check(
         config => { auth_hook => make_hook(0) },
         action => 'ping', hosts => ['web-01'], source_ip => '127.0.0.1', caller => 'cli',
     );
     is $r->{ok}, 1, 'ping authorised';
 };
 
-subtest 'hook receives DISPATCHER_ACTION=ping' => sub {
+subtest 'hook receives ENVEXEC_ACTION=ping' => sub {
     my $env_out   = "$DIR/env-ping.txt";
     my $stdin_out = "$DIR/stdin-ping.txt";
     my $hook      = make_recording_hook($env_out, $stdin_out);
 
-    Dispatcher::Auth::check(
+    Exec::Auth::check(
         config => { auth_hook => $hook },
         action => 'ping', hosts => ['web-01'], source_ip => '127.0.0.1', caller => 'cli',
     );
 
     my $env = do { local $/; open my $fh, '<', $env_out or die $!; <$fh> };
-    like $env, qr/DISPATCHER_ACTION=ping/, 'DISPATCHER_ACTION=ping';
-    if ($env =~ /DISPATCHER_SCRIPT=(.*)/) {
+    like $env, qr/ENVEXEC_ACTION=ping/, 'ENVEXEC_ACTION=ping';
+    if ($env =~ /ENVEXEC_SCRIPT=(.*)/) {
         my $val = $1; chomp $val;
-        is $val, '', 'DISPATCHER_SCRIPT empty for ping';
+        is $val, '', 'ENVEXEC_SCRIPT empty for ping';
     }
 };
 

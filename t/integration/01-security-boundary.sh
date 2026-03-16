@@ -18,7 +18,7 @@ describe "Script not in allowlist - first agent"
 
 run_dispatcher run "$AGENT1" nonexistent-script-xyz
 
-assert_exit 1 "$RC" "dispatcher exits non-zero"
+assert_exit 1 "$RC" "ctrl-exec exits non-zero"
 assert_contains "$OUT$ERR" "not permitted" "error mentions 'not permitted'"
 assert_not_contains "$OUT" "OK" "output does not show OK"
 
@@ -29,7 +29,7 @@ describe "Script not in allowlist - JSON output"
 
 run_dispatcher run "$AGENT1" nonexistent-script-xyz --json
 
-assert_exit 1 "$RC" "dispatcher exits non-zero"
+assert_exit 1 "$RC" "ctrl-exec exits non-zero"
 assert_json_valid "$OUT" "output is valid JSON"
 assert_json_field "$OUT" "ok" "1" "outer ok is 1 (run completed, result is per-host)"
 
@@ -74,7 +74,7 @@ describe "Script name with dot (not in allowed pattern)"
 
 run_dispatcher run "$AGENT1" "script.sh"
 
-assert_exit 1 "$RC" "dispatcher exits non-zero for 'script.sh'"
+assert_exit 1 "$RC" "ctrl-exec exits non-zero for 'script.sh'"
 assert_contains "$OUT$ERR" "not permitted" "dot in name rejected"
 
 summary

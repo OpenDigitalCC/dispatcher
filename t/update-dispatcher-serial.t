@@ -1,11 +1,11 @@
 #!/usr/bin/perl
-# update-dispatcher-serial.t
+# update-ctrl-exec-serial.t
 #
-# Tests for the update-dispatcher-serial bash script.
+# Tests for the update-ctrl-exec-serial bash script.
 #
 # The script runs on the agent host. These tests invoke it directly via
 # system() so they require bash to be present. The tests do not require
-# a running dispatcher-agent - the SIGHUP send is exercised against a
+# a running ctrl-exec-agent - the SIGHUP send is exercised against a
 # temporary pid file pointing at the test process itself.
 #
 # Exit codes documented:
@@ -23,10 +23,10 @@ use POSIX qw(getpid);
 use FindBin qw($Bin);
 
 # Locate the script relative to this test file.
-# Expected layout: bin/update-dispatcher-serial, t/update-dispatcher-serial.t
-my $SCRIPT = "$Bin/../bin/update-dispatcher-serial";
+# Expected layout: bin/update-ctrl-exec-serial, t/update-ctrl-exec-serial.t
+my $SCRIPT = "$Bin/../bin/update-ctrl-exec-serial";
 unless (-f $SCRIPT && -x $SCRIPT) {
-    plan skip_all => "update-dispatcher-serial not found or not executable at $SCRIPT";
+    plan skip_all => "update-ctrl-exec-serial not found or not executable at $SCRIPT";
 }
 unless (system('bash --version >/dev/null 2>&1') == 0) {
     plan skip_all => 'bash not available';
@@ -106,8 +106,8 @@ subtest 'rejects serial longer than 40 hex characters' => sub {
 
 subtest 'accepts serial of minimum length (8 chars)' => sub {
     my $dir   = tempdir(CLEANUP => 1);
-    my $sfile = "$dir/dispatcher-serial";
-    my $pfile = "$dir/dispatcher-agent.pid";
+    my $sfile = "$dir/ctrl-exec-serial";
+    my $pfile = "$dir/ctrl-exec-agent.pid";
     open my $fh, '>', $pfile or die $!;
     print $fh getpid(), "\n";
     close $fh;
@@ -122,8 +122,8 @@ subtest 'accepts serial of minimum length (8 chars)' => sub {
 
 subtest 'accepts serial of typical length (20 chars)' => sub {
     my $dir   = tempdir(CLEANUP => 1);
-    my $sfile = "$dir/dispatcher-serial";
-    my $pfile = "$dir/dispatcher-agent.pid";
+    my $sfile = "$dir/ctrl-exec-serial";
+    my $pfile = "$dir/ctrl-exec-agent.pid";
     open my $fh, '>', $pfile or die $!;
     print $fh getpid(), "\n";
     close $fh;
@@ -138,8 +138,8 @@ subtest 'accepts serial of typical length (20 chars)' => sub {
 
 subtest 'accepts serial of maximum length (40 chars)' => sub {
     my $dir   = tempdir(CLEANUP => 1);
-    my $sfile = "$dir/dispatcher-serial";
-    my $pfile = "$dir/dispatcher-agent.pid";
+    my $sfile = "$dir/ctrl-exec-serial";
+    my $pfile = "$dir/ctrl-exec-agent.pid";
     open my $fh, '>', $pfile or die $!;
     print $fh getpid(), "\n";
     close $fh;
@@ -154,8 +154,8 @@ subtest 'accepts serial of maximum length (40 chars)' => sub {
 
 subtest 'uppercase serial normalised to lowercase in output file' => sub {
     my $dir   = tempdir(CLEANUP => 1);
-    my $sfile = "$dir/dispatcher-serial";
-    my $pfile = "$dir/dispatcher-agent.pid";
+    my $sfile = "$dir/ctrl-exec-serial";
+    my $pfile = "$dir/ctrl-exec-agent.pid";
     open my $fh, '>', $pfile or die $!;
     print $fh getpid(), "\n";
     close $fh;
@@ -176,8 +176,8 @@ subtest 'uppercase serial normalised to lowercase in output file' => sub {
 
 subtest 'accepts valid lowercase hex serial' => sub {
     my $dir    = tempdir(CLEANUP => 1);
-    my $sfile  = "$dir/dispatcher-serial";
-    my $pfile  = "$dir/dispatcher-agent.pid";
+    my $sfile  = "$dir/ctrl-exec-serial";
+    my $pfile  = "$dir/ctrl-exec-agent.pid";
 
     # Point pid file at our own process so SIGHUP is sent to a live process
     open my $fh, '>', $pfile or die "Cannot write pid file: $!";
@@ -194,8 +194,8 @@ subtest 'accepts valid lowercase hex serial' => sub {
 
 subtest 'accepts valid uppercase hex serial (normalised to lowercase)' => sub {
     my $dir    = tempdir(CLEANUP => 1);
-    my $sfile  = "$dir/dispatcher-serial";
-    my $pfile  = "$dir/dispatcher-agent.pid";
+    my $sfile  = "$dir/ctrl-exec-serial";
+    my $pfile  = "$dir/ctrl-exec-agent.pid";
 
     open my $fh, '>', $pfile or die $!;
     print $fh getpid(), "\n";
@@ -217,8 +217,8 @@ subtest 'accepts valid uppercase hex serial (normalised to lowercase)' => sub {
 
 subtest 'writes serial to DISPATCHER_SERIAL_FILE' => sub {
     my $dir    = tempdir(CLEANUP => 1);
-    my $sfile  = "$dir/dispatcher-serial";
-    my $pfile  = "$dir/dispatcher-agent.pid";
+    my $sfile  = "$dir/ctrl-exec-serial";
+    my $pfile  = "$dir/ctrl-exec-agent.pid";
 
     open my $fh, '>', $pfile or die $!;
     print $fh getpid(), "\n";
@@ -239,8 +239,8 @@ subtest 'writes serial to DISPATCHER_SERIAL_FILE' => sub {
 
 subtest 'serial file contains only the serial (no extra content)' => sub {
     my $dir    = tempdir(CLEANUP => 1);
-    my $sfile  = "$dir/dispatcher-serial";
-    my $pfile  = "$dir/dispatcher-agent.pid";
+    my $sfile  = "$dir/ctrl-exec-serial";
+    my $pfile  = "$dir/ctrl-exec-agent.pid";
 
     open my $fh, '>', $pfile or die $!;
     print $fh getpid(), "\n";
@@ -260,8 +260,8 @@ subtest 'serial file contains only the serial (no extra content)' => sub {
 
 subtest 'overwrites existing serial file' => sub {
     my $dir    = tempdir(CLEANUP => 1);
-    my $sfile  = "$dir/dispatcher-serial";
-    my $pfile  = "$dir/dispatcher-agent.pid";
+    my $sfile  = "$dir/ctrl-exec-serial";
+    my $pfile  = "$dir/ctrl-exec-agent.pid";
 
     # Write an old serial
     open my $fh, '>', $sfile or die $!;
@@ -284,18 +284,18 @@ subtest 'overwrites existing serial file' => sub {
 };
 
 subtest 'uses default serial file path when env var not set' => sub {
-    # We cannot write to /etc/dispatcher-agent/ in a test environment.
+    # We cannot write to /etc/ctrl-exec-agent/ in a test environment.
     # Confirm the script accepts the path from env and that the default
     # is documented. Skip if running as non-root.
     if ($> != 0) {
         pass 'skipped: default path test requires root';
         return;
     }
-    # If running as root, verify /etc/dispatcher-agent/ is the default
+    # If running as root, verify /etc/ctrl-exec-agent/ is the default
     # by checking the script source.
     my $src = do { local $/; open my $fh, '<', $SCRIPT or die $!; <$fh> };
-    like $src, qr{/etc/dispatcher-agent},
-        'default serial file path is /etc/dispatcher-agent/...';
+    like $src, qr{/etc/ctrl-exec-agent},
+        'default serial file path is /etc/ctrl-exec-agent/...';
 };
 
 # ---------------------------------------------------------------------------
@@ -304,8 +304,8 @@ subtest 'uses default serial file path when env var not set' => sub {
 
 subtest 'sends SIGHUP to pid from pid file' => sub {
     my $dir    = tempdir(CLEANUP => 1);
-    my $sfile  = "$dir/dispatcher-serial";
-    my $pfile  = "$dir/dispatcher-agent.pid";
+    my $sfile  = "$dir/ctrl-exec-serial";
+    my $pfile  = "$dir/ctrl-exec-agent.pid";
 
     # Use our own PID; SIGHUP to ourself is harmless in a Perl test process
     open my $fh, '>', $pfile or die $!;
@@ -331,7 +331,7 @@ subtest 'sends SIGHUP to pid from pid file' => sub {
 
 subtest 'handles missing pid file gracefully' => sub {
     my $dir    = tempdir(CLEANUP => 1);
-    my $sfile  = "$dir/dispatcher-serial";
+    my $sfile  = "$dir/ctrl-exec-serial";
     my $pfile  = "$dir/nonexistent.pid";
 
     # No pid file written - script should fall back to pidof or fail with exit 3
@@ -356,7 +356,7 @@ subtest 'handles missing pid file gracefully' => sub {
 subtest 'exit 2 when serial file cannot be written' => sub {
     # Point serial file to a non-writable directory
     my $dir   = tempdir(CLEANUP => 1);
-    my $pfile = "$dir/dispatcher-agent.pid";
+    my $pfile = "$dir/ctrl-exec-agent.pid";
 
     open my $fh, '>', $pfile or die $!;
     print $fh getpid(), "\n";

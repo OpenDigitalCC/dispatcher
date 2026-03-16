@@ -1,34 +1,34 @@
-# dispatcher-agent script allowlist
-# /etc/dispatcher-agent/scripts.conf
+# ctrl-exec-agent script allowlist
+# /etc/ctrl-exec-agent/scripts.conf
 #
 # One entry per line: <name> = <absolute-path>
-# The name is what the dispatcher passes as the script argument.
+# The name is what the ctrl-exec passes as the script argument.
 # The path must be executable and owned by root.
 #
 # Example:
-#   backup-mysql = /opt/dispatcher-scripts/backup-mysql.sh
-#   deploy-app   = /opt/dispatcher-scripts/deploy-app.sh
+#   backup-mysql = /opt/ctrl-exec-scripts/backup-mysql.sh
+#   deploy-app   = /opt/ctrl-exec-scripts/deploy-app.sh
 
 # --- Demonstrator (evaluation and examples) ---
 #
-# The dispatcher-demonstrator script illustrates core dispatcher capabilities:
+# The ctrl-exec-demonstrator script illustrates core ctrl-exec capabilities:
 # stdout/stderr capture, exit code propagation, argument passing, JSON context,
 # and agent-side information. Run the script directly on the agent host to see
-# available subcommands and the dispatcher invocations that exercise them.
+# available subcommands and the ctrl-exec invocations that exercise them.
 #
 # Uncomment to enable:
-# dispatcher-demonstrator = /opt/dispatcher-scripts/dispatcher-demonstrator.sh
+# ctrl-exec-demonstrator = /opt/ctrl-exec-scripts/ctrl-exec-demonstrator.sh
 
 # --- Dispatcher certificate rotation ---
 #
-# Required for automatic dispatcher cert rotation. When the dispatcher
+# Required for automatic ctrl-exec cert rotation. When the ctrl-exec
 # rotates its certificate, it calls this script on each agent to update
-# the stored dispatcher serial and reload the agent configuration.
+# the stored ctrl-exec serial and reload the agent configuration.
 # Without this entry, the agent will not receive serial updates and will
 # eventually require manual re-pairing after the overlap window expires.
 #
-# The script is installed at /opt/dispatcher-scripts/update-dispatcher-serial
+# The script is installed at /opt/ctrl-exec-scripts/update-ctrl-exec-serial
 # by the agent installer.
 #
 # Uncomment to enable:
-# update-dispatcher-serial = /opt/dispatcher-scripts/update-dispatcher-serial
+# update-ctrl-exec-serial = /opt/ctrl-exec-scripts/update-ctrl-exec-serial

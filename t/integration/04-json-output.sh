@@ -107,7 +107,7 @@ describe "run --json: non-zero exit code reported correctly"
 
 run_dispatcher run "$AGENT1" exit-code --json -- 42
 
-assert_exit 1 "$RC" "dispatcher exits non-zero"
+assert_exit 1 "$RC" "ctrl-exec exits non-zero"
 assert_json_valid "$OUT" "valid JSON even on failure"
 
 EXIT=$(json_result_field "$OUT" 0 "exit")
@@ -121,7 +121,7 @@ describe "run --json: script not permitted"
 
 run_dispatcher run "$AGENT1" nonexistent-script-xyz --json
 
-assert_exit 1 "$RC" "dispatcher exits non-zero"
+assert_exit 1 "$RC" "ctrl-exec exits non-zero"
 assert_json_valid "$OUT" "valid JSON on denial"
 
 ERROR=$(json_result_field "$OUT" 0 "error")

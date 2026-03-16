@@ -16,9 +16,9 @@ source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
 
 require_agents 1
 
-AGENT_CONF_DIR="/etc/dispatcher-agent"
+AGENT_CONF_DIR="/etc/ctrl-exec-agent"
 ALLOWLIST="$AGENT_CONF_DIR/scripts.conf"
-SCRIPT_DIR="/opt/dispatcher-scripts"
+SCRIPT_DIR="/opt/ctrl-exec-scripts"
 AGENT_SSH_USER="${AGENT_SSH_USER:-root}"
 
 agent_run() {
@@ -30,9 +30,9 @@ agent_run() {
 }
 
 agent_reload() {
-    agent_run "systemctl reload dispatcher-agent 2>/dev/null \
-        || pkill -HUP -f 'dispatcher-agent serve' \
-        || pkill -HUP -x dispatcher-agent" 2>/dev/null || true
+    agent_run "systemctl reload ctrl-exec-agent 2>/dev/null \
+        || pkill -HUP -f 'ctrl-exec-agent serve' \
+        || pkill -HUP -x ctrl-exec-agent" 2>/dev/null || true
     sleep 1
 }
 
@@ -94,10 +94,10 @@ assert_agents_reachable
 describe "Reload: agent PID unchanged after SIGHUP (no restart)"
 # ============================================================
 
-PID_BEFORE=$(agent_run "pgrep -f 'dispatcher-agent serve' | head -1" 2>/dev/null)
+PID_BEFORE=$(agent_run "pgrep -f 'ctrl-exec-agent serve' | head -1" 2>/dev/null)
 agent_reload
 sleep 1
-PID_AFTER=$(agent_run "pgrep -f 'dispatcher-agent serve' | head -1" 2>/dev/null)
+PID_AFTER=$(agent_run "pgrep -f 'ctrl-exec-agent serve' | head -1" 2>/dev/null)
 
 if [ -n "$PID_BEFORE" ] && [ "$PID_BEFORE" = "$PID_AFTER" ]; then
     pass "agent PID unchanged: $PID_BEFORE (no restart occurred)"

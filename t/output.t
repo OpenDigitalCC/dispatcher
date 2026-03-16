@@ -5,7 +5,7 @@ use Test::More;
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::Output qw();
+use Exec::Output qw();
 
 sub capture_stdout {
     my ($code) = @_;
@@ -22,7 +22,7 @@ sub capture_stdout {
 
 {
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_run_results([{
+        Exec::Output::format_run_results([{
             host   => 'host-a',
             exit   => 0,
             stdout => "hello\n",
@@ -39,7 +39,7 @@ sub capture_stdout {
 
 {
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_run_results([{
+        Exec::Output::format_run_results([{
             host   => 'host-b',
             exit   => 1,
             stdout => '',
@@ -53,7 +53,7 @@ sub capture_stdout {
 
 {
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_run_results([{
+        Exec::Output::format_run_results([{
             host  => 'host-c',
             exit  => -1,
             error => 'connection refused',
@@ -67,7 +67,7 @@ sub capture_stdout {
 {
     # stdout with no trailing newline gets one added
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_run_results([{
+        Exec::Output::format_run_results([{
             host   => 'host-d',
             exit   => 0,
             stdout => 'no newline',
@@ -80,7 +80,7 @@ sub capture_stdout {
 {
     # whitespace-only stdout is suppressed
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_run_results([{
+        Exec::Output::format_run_results([{
             host   => 'host-e',
             exit   => 0,
             stdout => "   \n",
@@ -93,7 +93,7 @@ sub capture_stdout {
 {
     # multiple hosts in one call
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_run_results([
+        Exec::Output::format_run_results([
             { host => 'host-a', exit => 0, rtt => '10ms' },
             { host => 'host-b', exit => 2, rtt => '20ms' },
         ]);
@@ -108,7 +108,7 @@ sub capture_stdout {
 
 {
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_ping_results([{
+        Exec::Output::format_ping_results([{
             host    => 'host-a',
             status  => 'ok',
             rtt     => '55ms',
@@ -126,7 +126,7 @@ sub capture_stdout {
 
 {
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_ping_results([{
+        Exec::Output::format_ping_results([{
             host   => 'host-b',
             status => 'error',
             rtt    => '999ms',
@@ -140,7 +140,7 @@ sub capture_stdout {
 
 {
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_agent_list([{
+        Exec::Output::format_agent_list([{
             hostname => 'agent-1',
             ip       => '10.0.0.1',
             paired   => '2025-01-01T00:00:00Z',
@@ -156,7 +156,7 @@ sub capture_stdout {
 
 {
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_agent_list([{
+        Exec::Output::format_agent_list([{
             hostname => undef,
             ip       => undef,
             paired   => undef,
@@ -171,15 +171,15 @@ sub capture_stdout {
 
 {
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_discovery({
+        Exec::Output::format_discovery({
             'host-a' => {
                 host    => 'host-a',
                 status  => 'ok',
                 version => '0.1',
                 rtt     => '68ms',
                 scripts => [
-                    { name => 'backup', path => '/opt/dispatcher-scripts/backup.sh', executable => 1 },
-                    { name => 'check',  path => '/opt/dispatcher-scripts/check.sh',  executable => 1 },
+                    { name => 'backup', path => '/opt/ctrl-exec-scripts/backup.sh', executable => 1 },
+                    { name => 'check',  path => '/opt/ctrl-exec-scripts/check.sh',  executable => 1 },
                 ],
             },
         });
@@ -193,7 +193,7 @@ sub capture_stdout {
 
 {
     my $out = capture_stdout(sub {
-        Dispatcher::Output::format_discovery({
+        Exec::Output::format_discovery({
             'host-b' => {
                 host    => 'host-b',
                 status  => 'ok',

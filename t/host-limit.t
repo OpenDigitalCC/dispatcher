@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # t/host-limit.t
 #
-# Unit tests for the max_hosts guard in Dispatcher::Engine.
+# Unit tests for the max_hosts guard in Exec::Engine.
 # Verifies that dispatch_all, ping_all, and capabilities_all croak when
 # the host list exceeds the configured limit, and accept a list at the limit.
 #
@@ -13,19 +13,19 @@ use Test::More;
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::Engine qw();
+use Exec::Engine qw();
 
 # Suppress log output during tests
 {
     no warnings 'redefine';
-    *Dispatcher::Log::log_action = sub {};
+    *Exec::Log::log_action = sub {};
 }
 
 # Minimal config hashref - only needs to exist, no real cert paths required
 # since croak fires before any SSL connection is attempted.
 my $config = {
-    cert     => '/nonexistent/dispatcher.crt',
-    key      => '/nonexistent/dispatcher.key',
+    cert     => '/nonexistent/ctrl-exec.crt',
+    key      => '/nonexistent/ctrl-exec.key',
     ca       => '/nonexistent/ca.crt',
     cert_days => 365,
 };
@@ -42,7 +42,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::dispatch_all(
+        Exec::Engine::dispatch_all(
             hosts     => host_list(501),
             script    => 'check-disk',
             config    => $config,
@@ -54,7 +54,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::dispatch_all(
+        Exec::Engine::dispatch_all(
             hosts     => host_list(501),
             script    => 'check-disk',
             config    => $config,
@@ -65,7 +65,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::dispatch_all(
+        Exec::Engine::dispatch_all(
             hosts     => host_list(10),
             script    => 'check-disk',
             config    => $config,
@@ -79,7 +79,7 @@ sub host_list {
     # At the limit: croak must not fire. We expect a fork/connection failure
     # (no real agent), not a "too many hosts" croak.
     eval {
-        Dispatcher::Engine::dispatch_all(
+        Exec::Engine::dispatch_all(
             hosts     => host_list(5),
             script    => 'check-disk',
             config    => $config,
@@ -92,7 +92,7 @@ sub host_list {
 {
     # Zero hosts: empty result, no croak
     my $results = eval {
-        Dispatcher::Engine::dispatch_all(
+        Exec::Engine::dispatch_all(
             hosts     => [],
             script    => 'check-disk',
             config    => $config,
@@ -109,7 +109,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::ping_all(
+        Exec::Engine::ping_all(
             hosts     => host_list(501),
             config    => $config,
             max_hosts => 500,
@@ -120,7 +120,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::ping_all(
+        Exec::Engine::ping_all(
             hosts  => host_list(501),
             config => $config,
         );
@@ -130,7 +130,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::ping_all(
+        Exec::Engine::ping_all(
             hosts     => host_list(10),
             config    => $config,
             max_hosts => 5,
@@ -141,7 +141,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::ping_all(
+        Exec::Engine::ping_all(
             hosts     => host_list(5),
             config    => $config,
             max_hosts => 5,
@@ -152,7 +152,7 @@ sub host_list {
 
 {
     my $results = eval {
-        Dispatcher::Engine::ping_all(
+        Exec::Engine::ping_all(
             hosts  => [],
             config => $config,
         );
@@ -168,7 +168,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::capabilities_all(
+        Exec::Engine::capabilities_all(
             hosts     => host_list(501),
             config    => $config,
             max_hosts => 500,
@@ -179,7 +179,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::capabilities_all(
+        Exec::Engine::capabilities_all(
             hosts  => host_list(501),
             config => $config,
         );
@@ -189,7 +189,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::capabilities_all(
+        Exec::Engine::capabilities_all(
             hosts     => host_list(10),
             config    => $config,
             max_hosts => 5,
@@ -200,7 +200,7 @@ sub host_list {
 
 {
     eval {
-        Dispatcher::Engine::capabilities_all(
+        Exec::Engine::capabilities_all(
             hosts     => host_list(5),
             config    => $config,
             max_hosts => 5,
@@ -211,7 +211,7 @@ sub host_list {
 
 {
     my $results = eval {
-        Dispatcher::Engine::capabilities_all(
+        Exec::Engine::capabilities_all(
             hosts  => [],
             config => $config,
         );

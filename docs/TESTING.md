@@ -11,7 +11,7 @@ control host without any network or agent involvement, and integration tests
 that require at least one live paired agent.
 
 Unit tests use `prove` and are safe to run at any time. Integration tests use
-bash scripts and exercise real dispatcher-to-agent traffic over mTLS.
+bash scripts and exercise real ctrl-exec-to-agent traffic over mTLS.
 
 Manual checks that cannot be automated are documented separately in
 `doc/MANUAL-CHECKS.md`.
@@ -37,31 +37,31 @@ Each test file corresponds to one module:
 
 | Test file | Module under test |
 | --- | --- |
-| `t/agent-config.t` | `Dispatcher::Agent::Config` |
-| `t/auth.t` | `Dispatcher::Auth` |
-| `t/auth-hook.t` | `Dispatcher::Auth` (hook exit codes and env) |
-| `t/lock.t` | `Dispatcher::Lock` |
-| `t/log.t` | `Dispatcher::Log` |
-| `t/output.t` | `Dispatcher::Output` |
-| `t/pairing-csr.t` | `Dispatcher::Agent::Pairing` (key/CSR/nonce) |
-| `t/pairing-dispatcher.t` | `Dispatcher::Pairing` (queue/stale expiry) |
-| `t/rate-limit.t` | `Dispatcher::Agent::RateLimit` |
-| `t/registry.t` | `Dispatcher::Registry` |
-| `t/registry-serial.t` | `Dispatcher::Registry` (serial tracking fields) |
-| `t/renewal.t` | `Dispatcher::Engine` (cert renewal logic) |
-| `t/rotation.t` | `Dispatcher::Rotation` |
-| `t/serial-normalisation.t` | `Dispatcher::Agent::Pairing::serial_to_hex` |
-| `t/update-dispatcher-serial.t` | `bin/update-dispatcher-serial` |
+| `t/agent-config.t` | `Exec::Agent::Config` |
+| `t/auth.t` | `Exec::Auth` |
+| `t/auth-hook.t` | `Exec::Auth` (hook exit codes and env) |
+| `t/lock.t` | `Exec::Lock` |
+| `t/log.t` | `Exec::Log` |
+| `t/output.t` | `Exec::Output` |
+| `t/pairing-csr.t` | `Exec::Agent::AgentPairing` (key/CSR/nonce) |
+| `t/pairing-ctrl-exec.t` | `Exec::Pairing` (queue/stale expiry) |
+| `t/rate-limit.t` | `Exec::Agent::RateLimit` |
+| `t/registry.t` | `Exec::Registry` |
+| `t/registry-serial.t` | `Exec::Registry` (serial tracking fields) |
+| `t/renewal.t` | `Exec::Engine` (cert renewal logic) |
+| `t/rotation.t` | `Exec::Rotation` |
+| `t/serial-normalisation.t` | `Exec::Agent::AgentPairing::serial_to_hex` |
+| `t/update-ctrl-exec-serial.t` | `bin/update-ctrl-exec-serial` |
 
-The `dispatcher-cli.t` and `engine.t` files cover CLI argument parsing and
+The `ctrl-exec-cli.t` and `engine.t` files cover CLI argument parsing and
 dispatch logic respectively. `lock-holder.pl` is a test helper used by
 `lock.t` to hold a lock in an independent process - it is not a test file.
 
 
 ## Integration Tests
 
-Integration tests live in `t/integration/` and run real dispatcher commands
-against live agents. They require a working dispatcher installation, at least
+Integration tests live in `t/integration/` and run real ctrl-exec commands
+against live agents. They require a working ctrl-exec installation, at least
 one paired agent, and the test scripts installed on each agent.
 
 The tests are numbered and run in order. Each file is self-contained and can
@@ -77,8 +77,8 @@ parallel and multi-host tests; files that require two agents skip gracefully
 when only one is available.
 
 ```bash
-sudo dispatcher list-agents
-sudo dispatcher ping <agent>
+sudo ctrl-exec list-agents
+sudo ctrl-exec ping <agent>
 ```
 
 **2. Rate limiter raised**
@@ -89,8 +89,8 @@ disable rate limiting on every agent:
 
 ```bash
 # On each agent host
-echo "disable_rate_limit = 1" >> /etc/dispatcher-agent/agent.conf
-systemctl reload dispatcher-agent   # or: /etc/init.d/dispatcher-agent reload
+echo "disable_rate_limit = 1" >> /etc/ctrl-exec-agent/agent.conf
+systemctl reload ctrl-exec-agent   # or: /etc/init.d/ctrl-exec-agent reload
 ```
 
 Remove the setting and reload when testing is complete. Rate-limit behaviour
@@ -99,7 +99,7 @@ itself is covered by `t/rate-limit.t` (unit) and `13-rate-limit-integration.sh`
 
 **3. Test scripts installed on each agent**
 
-The integration tests call scripts by name via the dispatcher. These scripts
+The integration tests call scripts by name via the ctrl-exec. These scripts
 must exist in the agent's allowlist. Install them by running
 `setup-agent-scripts.sh` on each agent host:
 
@@ -108,8 +108,8 @@ must exist in the agent's allowlist. Install them by running
 sudo bash t/integration/setup-agent-scripts.sh
 ```
 
-This writes test scripts to `/opt/dispatcher-scripts/`, appends entries to
-`/etc/dispatcher-agent/scripts.conf`, and sends SIGHUP to reload the allowlist.
+This writes test scripts to `/opt/ctrl-exec-scripts/`, appends entries to
+`/etc/ctrl-exec-agent/scripts.conf`, and sends SIGHUP to reload the allowlist.
 It is safe to run multiple times.
 
 Scripts installed:
@@ -128,16 +128,16 @@ Scripts installed:
 | `sleep-90` | Sleeps 90 seconds; completes within a 120s timeout |
 | `daemonise-test` | Forks a background job and returns immediately |
 | `allowlist-reload-check` | Added manually by test 09 to verify SIGHUP reload |
-| `update-dispatcher-serial` | Serial update script; must be in allowlist for cert rotation |
+| `update-ctrl-exec-serial` | Serial update script; must be in allowlist for cert rotation |
 
 The following are installed by `setup-agent-scripts.sh --install-auth-test` only,
 and removed by `--remove-auth-test`.
 
 | Name | Purpose |
 | --- | --- |
-| `auth-status-dump` | Outputs `/tmp/dispatcher-auth-test-status`; used by test 15 to retrieve hook-received context without SSH |
+| `auth-status-dump` | Outputs `/tmp/ctrl-exec-auth-test-status`; used by test 15 to retrieve hook-received context without SSH |
 
-The accompanying hook (`/etc/dispatcher-agent/auth-context-check.sh`) is also
+The accompanying hook (`/etc/ctrl-exec-agent/auth-context-check.sh`) is also
 written by `--install-auth-test` and registered in `agent.conf` as `auth_hook`.
 It records all `DISPATCHER_*` env vars to the status file on every call before
 applying its known-value policy. `auth-status-dump` is always permitted through
@@ -165,7 +165,7 @@ sudo bash t/integration/run-tests.sh 01-security-boundary.sh 02-argument-integri
 sudo bash t/integration/01-security-boundary.sh
 ```
 
-The runner discovers agents automatically via `dispatcher list-agents` and
+The runner discovers agents automatically via `ctrl-exec list-agents` and
 pings each one before the suite begins. No agent names are hardcoded.
 
 Output shows pass/fail/skip for each assertion within a file, followed by a
@@ -216,7 +216,7 @@ results via dispatch.
 ### Environment Variables
 
 `DISPATCHER`
-: Dispatcher binary name or path. Default: `dispatcher`. Override if the
+: Dispatcher binary name or path. Default: `ctrl-exec`. Override if the
   binary is not in PATH or you want to test a specific build.
 
 `AGENT_SSH_USER`
@@ -254,7 +254,7 @@ against the installed files immediately after installation. This is the
 recommended way to verify a new installation or upgrade.
 
 ```bash
-sudo bash install.sh --dispatcher --run-tests
+sudo bash install.sh --ctrl-exec --run-tests
 sudo bash install.sh --agent --run-tests
 ```
 
@@ -282,7 +282,7 @@ Skipping unit tests.
 All integration test files source `lib.sh`, which provides:
 
 Agent discovery
-: `discover_agents` queries `dispatcher list-agents`, pings each registered
+: `discover_agents` queries `ctrl-exec list-agents`, pings each registered
   agent, and exports `AGENTS` (all reachable), `AGENT1` (first), `AGENT2`
   (second). Called once by the runner before any test files run; test files
   call it automatically when run standalone.
@@ -298,7 +298,7 @@ Agent discovery
   and prints a rate-limit diagnosis if the failure pattern matches.
 
 `run_dispatcher <args...>`
-: Wrapper around `sudo dispatcher`. Sets `OUT`, `ERR`, and `RC`. Increments
+: Wrapper around `sudo ctrl-exec`. Sets `OUT`, `ERR`, and `RC`. Increments
   per-agent and total connection counters. Calls `_check_rate_warning` after
   each invocation to detect rate-block patterns.
 
@@ -392,7 +392,7 @@ if ! ssh -o BatchMode=yes -o ConnectTimeout=3 \
 fi
 
 # SSH is available - proceed with the test
-ssh "${_SSH_USER}@${AGENT1}" "sudo systemctl reload dispatcher-agent"
+ssh "${_SSH_USER}@${AGENT1}" "sudo systemctl reload ctrl-exec-agent"
 ```
 
 Always restore any state changed via SSH (config edits, service reloads) in a
@@ -449,7 +449,7 @@ Private functions
 : Private functions are prefixed `_` and are not part of the public API. Test
   them via the public interface where possible. Where the private function
   contains complex logic worth testing directly (as with `_serial_to_hex`),
-  import it explicitly or call it as `Dispatcher::Module::_function_name`.
+  import it explicitly or call it as `Exec::Module::_function_name`.
 
 Temporary directories
 : Use `File::Temp::tempdir(CLEANUP => 1)` for tests that write files. Pass the

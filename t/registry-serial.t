@@ -1,13 +1,13 @@
 #!/usr/bin/perl
 # t/registry-serial.t
 #
-# Unit tests for serial tracking fields in Dispatcher::Registry.
+# Unit tests for serial tracking fields in Exec::Registry.
 #
 # Covers register_agent (serial fields written and defaulted) and
 # update_agent_serial_status (merge semantics, field isolation, atomicity).
 #
 # All tests use a tempdir injected via the `registry_dir` parameter.
-# No dependency on /var/lib/dispatcher or any running process.
+# No dependency on /var/lib/ctrl-exec or any running process.
 
 use strict;
 use warnings;
@@ -18,7 +18,7 @@ use JSON qw(decode_json encode_json);
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::Registry qw();
+use Exec::Registry qw();
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -46,7 +46,7 @@ sub read_record {
 subtest 'register_agent: serial fields written when provided' => sub {
     my $dir = tempdir(CLEANUP => 1);
 
-    Dispatcher::Registry::register_agent(
+    Exec::Registry::register_agent(
         registry_dir       => $dir,
         hostname           => 'agent-serial-01',
         ip                 => '192.168.1.10',
@@ -67,7 +67,7 @@ subtest 'register_agent: serial fields written when provided' => sub {
 subtest 'register_agent: serial_status defaults to unknown when absent' => sub {
     my $dir = tempdir(CLEANUP => 1);
 
-    Dispatcher::Registry::register_agent(
+    Exec::Registry::register_agent(
         registry_dir => $dir,
         hostname     => 'agent-default-01',
         ip           => '192.168.1.11',
@@ -82,7 +82,7 @@ subtest 'register_agent: serial_status defaults to unknown when absent' => sub {
 subtest 'register_agent: serial fields default to empty string when absent' => sub {
     my $dir = tempdir(CLEANUP => 1);
 
-    Dispatcher::Registry::register_agent(
+    Exec::Registry::register_agent(
         registry_dir => $dir,
         hostname     => 'agent-defaults',
         ip           => '10.0.0.1',
@@ -105,7 +105,7 @@ subtest 'register_agent: all serial fields round-trip through JSON correctly' =>
         serial_confirmed  => '2025-06-01T12:00:00Z',
     );
 
-    Dispatcher::Registry::register_agent(
+    Exec::Registry::register_agent(
         registry_dir => $dir,
         hostname     => 'agent-roundtrip',
         ip           => '10.0.0.1',
@@ -139,7 +139,7 @@ subtest 'update_agent_serial_status: merges serial fields without touching other
         serial_confirmed  => '',
     }));
 
-    Dispatcher::Registry::update_agent_serial_status(
+    Exec::Registry::update_agent_serial_status(
         hostname         => 'agent-merge',
         registry_dir     => $dir,
         status           => 'current',
@@ -172,7 +172,7 @@ subtest 'update_agent_serial_status: serial not overwritten when omitted' => sub
         serial_status     => 'pending',
     }));
 
-    Dispatcher::Registry::update_agent_serial_status(
+    Exec::Registry::update_agent_serial_status(
         hostname     => 'agent-serial-keep',
         registry_dir => $dir,
         status       => 'stale',
@@ -196,7 +196,7 @@ subtest 'update_agent_serial_status: serial_broadcast updated when provided' => 
     }));
 
     my $ts = '2025-06-20T14:00:00Z';
-    Dispatcher::Registry::update_agent_serial_status(
+    Exec::Registry::update_agent_serial_status(
         hostname         => 'agent-broadcast',
         registry_dir     => $dir,
         status           => 'pending',
@@ -217,7 +217,7 @@ subtest 'update_agent_serial_status: serial_broadcast not overwritten when omitt
         serial_broadcast => $original_ts,
     }));
 
-    Dispatcher::Registry::update_agent_serial_status(
+    Exec::Registry::update_agent_serial_status(
         hostname     => 'agent-bc-keep',
         registry_dir => $dir,
         status       => 'stale',
@@ -241,7 +241,7 @@ subtest 'update_agent_serial_status: result is valid JSON after update' => sub {
         serial_status => 'pending',
     }));
 
-    Dispatcher::Registry::update_agent_serial_status(
+    Exec::Registry::update_agent_serial_status(
         hostname     => 'agent-atomic',
         registry_dir => $dir,
         status       => 'current',
@@ -265,7 +265,7 @@ subtest 'update_agent_serial_status: absent agent creates new minimal record' =>
     my $dir = tempdir(CLEANUP => 1);
 
     eval {
-        Dispatcher::Registry::update_agent_serial_status(
+        Exec::Registry::update_agent_serial_status(
             hostname     => 'new-from-update',
             registry_dir => $dir,
             status       => 'pending',

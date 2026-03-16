@@ -8,7 +8,7 @@
 #   - stdout from one host does not appear in another host's result
 #
 # Requires: 2 reachable agents.
-# Scripts needed: env-dump, big-output, dispatcher-demonstrator.
+# Scripts needed: env-dump, big-output, ctrl-exec-demonstrator.
 
 set -uo pipefail
 source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
@@ -110,9 +110,9 @@ assert_exit 0 "$RC" "clean exit"
 
 # ============================================================
 assert_agents_reachable
-describe "Timeout: long-running script completes within dispatcher timeout"
+describe "Timeout: long-running script completes within ctrl-exec timeout"
 # ============================================================
-# sleep-test sleeps 30 seconds. The dispatcher read timeout observed in logs
+# sleep-test sleeps 30 seconds. The ctrl-exec read timeout observed in logs
 # is 60s (RTT=60139ms ERROR="500 read timeout"). A 30s sleep should succeed.
 # This confirms the timeout is longer than 30s and the result is clean.
 

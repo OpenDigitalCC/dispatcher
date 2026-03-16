@@ -20,13 +20,13 @@ use JSON        qw(encode_json decode_json);
 use FindBin     qw($Bin);
 use lib         "$Bin/../lib";
 
-use Dispatcher::Pairing qw();
-use Dispatcher::Log     qw();
+use Exec::Pairing qw();
+use Exec::Log     qw();
 
-Dispatcher::Log::init('test');
+Exec::Log::init('test');
 {
     no warnings 'redefine';
-    *Dispatcher::Log::log_action = sub {};
+    *Exec::Log::log_action = sub {};
 }
 
 # ---------------------------------------------------------------------------
@@ -101,11 +101,11 @@ sub call_handle {
     }
 
     if (defined $pairing_dir) {
-        Dispatcher::Pairing::_handle_pair_request(
+        Exec::Pairing::_handle_pair_request(
             $server, '127.0.0.1', $log_fn, $max_queue, $pairing_dir
         );
     } else {
-        Dispatcher::Pairing::_handle_pair_request(
+        Exec::Pairing::_handle_pair_request(
             $server, '127.0.0.1', $log_fn, $max_queue
         );
     }
@@ -280,7 +280,7 @@ subtest 'run_pairing_mode: accepts max_queue parameter' => sub {
     # guard before reaching any I/O. The test only checks that the croak
     # is not about max_queue being unknown.
     eval {
-        Dispatcher::Pairing::run_pairing_mode(
+        Exec::Pairing::run_pairing_mode(
             max_queue => 20,
             log_fn    => sub {},
         );

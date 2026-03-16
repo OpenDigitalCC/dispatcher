@@ -6,7 +6,7 @@ use File::Temp qw(tempdir);
 use FindBin    qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::Auth qw();
+use Exec::Auth qw();
 
 # Silence syslog during tests - Log falls back to stderr if not init'd,
 # redirect stderr to suppress that noise
@@ -29,7 +29,7 @@ sub make_hook {
 # --- no hook configured ---
 
 {
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         caller => 'cli',
         config => {},
@@ -38,7 +38,7 @@ sub make_hook {
 }
 
 {
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'ping',
         caller => 'cli',
         config => {},
@@ -47,7 +47,7 @@ sub make_hook {
 }
 
 {
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         caller => 'cli',
         config => { auth_hook => '' },
@@ -58,7 +58,7 @@ sub make_hook {
 # --- hook not found / not executable ---
 
 {
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         config => { auth_hook => "$tmpdir/does-not-exist" },
     );
@@ -73,7 +73,7 @@ sub make_hook {
     close $fh;
     chmod 0644, $path;   # not executable
 
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         config => { auth_hook => $path },
     );
@@ -84,7 +84,7 @@ sub make_hook {
 
 {
     my $hook = make_hook('allow', 'exit 0');
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         config => { auth_hook => $hook },
     );
@@ -93,7 +93,7 @@ sub make_hook {
 
 {
     my $hook = make_hook('deny-generic', 'exit 1');
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         config => { auth_hook => $hook },
     );
@@ -104,7 +104,7 @@ sub make_hook {
 
 {
     my $hook = make_hook('deny-creds', 'exit 2');
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         config => { auth_hook => $hook },
     );
@@ -115,7 +115,7 @@ sub make_hook {
 
 {
     my $hook = make_hook('deny-priv', 'exit 3');
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         config => { auth_hook => $hook },
     );
@@ -126,7 +126,7 @@ sub make_hook {
 
 {
     my $hook = make_hook('deny-other', 'exit 99');
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         config => { auth_hook => $hook },
     );
@@ -138,15 +138,15 @@ sub make_hook {
 
 {
     my $hook = make_hook('check-env', <<'HOOK');
-[[ "$DISPATCHER_ACTION" == "run" ]]   || exit 1
-[[ "$DISPATCHER_SCRIPT" == "backup" ]] || exit 2
-[[ "$DISPATCHER_HOSTS"  == "host-a,host-b" ]] || exit 3
-[[ "$DISPATCHER_USERNAME" == "stuart" ]] || exit 4
-[[ "$DISPATCHER_SOURCE_IP" == "10.0.0.1" ]] || exit 5
+[[ "$ENVEXEC_ACTION" == "run" ]]   || exit 1
+[[ "$ENVEXEC_SCRIPT" == "backup" ]] || exit 2
+[[ "$ENVEXEC_HOSTS"  == "host-a,host-b" ]] || exit 3
+[[ "$ENVEXEC_USERNAME" == "stuart" ]] || exit 4
+[[ "$ENVEXEC_SOURCE_IP" == "10.0.0.1" ]] || exit 5
 exit 0
 HOOK
 
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action    => 'run',
         script    => 'backup',
         hosts     => ['host-a', 'host-b'],
@@ -161,11 +161,11 @@ HOOK
 
 {
     my $hook = make_hook('check-token', <<'HOOK');
-[[ "$DISPATCHER_TOKEN" == "secret123" ]] || exit 2
+[[ "$ENVEXEC_TOKEN" == "secret123" ]] || exit 2
 exit 0
 HOOK
 
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         token  => 'secret123',
         config => { auth_hook => $hook },
@@ -175,11 +175,11 @@ HOOK
 
 {
     my $hook = make_hook('check-token-bad', <<'HOOK');
-[[ "$DISPATCHER_TOKEN" == "secret123" ]] || exit 2
+[[ "$ENVEXEC_TOKEN" == "secret123" ]] || exit 2
 exit 0
 HOOK
 
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         token  => 'wrongtoken',
         config => { auth_hook => $hook },
@@ -199,7 +199,7 @@ echo "$input" | grep -q '"script":"deploy"' || exit 1
 exit 0
 HOOK
 
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         script => 'deploy',
         config => { auth_hook => $hook },
@@ -210,37 +210,37 @@ HOOK
 # --- argument validation ---
 
 {
-    eval { Dispatcher::Auth::check(config => {}) };
+    eval { Exec::Auth::check(config => {}) };
     like $@, qr/action required/, 'check: dies without action';
 }
 
 {
-    eval { Dispatcher::Auth::check(action => 'run') };
+    eval { Exec::Auth::check(action => 'run') };
     like $@, qr/config required/, 'check: dies without config';
 }
 
 {
-    eval { Dispatcher::Auth::check(action => 'run', config => {}, hosts => 'bad') };
+    eval { Exec::Auth::check(action => 'run', config => {}, hosts => 'bad') };
     like $@, qr/hosts must be an arrayref/, 'check: dies if hosts not arrayref';
 }
 
-# --- DISPATCHER_ARGS_JSON ---
+# --- ENVEXEC_ARGS_JSON ---
 
 {
-    # Hook checks that DISPATCHER_ARGS_JSON is a valid JSON array
-    # and that DISPATCHER_ARGS is the space-joined form
+    # Hook checks that ENVEXEC_ARGS_JSON is a valid JSON array
+    # and that ENVEXEC_ARGS is the space-joined form
     my $hook = make_hook('check-args-json', <<'HOOK');
-echo "$DISPATCHER_ARGS_JSON" | grep -q '^\["hello world","two"\]' || exit 1
-[[ "$DISPATCHER_ARGS" == "hello world two" ]] || exit 2
+echo "$ENVEXEC_ARGS_JSON" | grep -q '^\["hello world","two"\]' || exit 1
+[[ "$ENVEXEC_ARGS" == "hello world two" ]] || exit 2
 exit 0
 HOOK
 
-    my $result = Dispatcher::Auth::check(
+    my $result = Exec::Auth::check(
         action => 'run',
         args   => ['hello world', 'two'],
         config => { auth_hook => $hook },
     );
-    ok $result->{ok}, 'DISPATCHER_ARGS_JSON: valid JSON array passed to hook';
+    ok $result->{ok}, 'ENVEXEC_ARGS_JSON: valid JSON array passed to hook';
 }
 
 # Restore stderr

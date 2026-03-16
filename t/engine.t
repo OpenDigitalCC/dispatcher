@@ -5,29 +5,29 @@ use Test::More tests => 21;
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::Engine qw();
+use Exec::Engine qw();
 
 # --- parse_host ---
 
 {
-    my ($host, $port) = Dispatcher::Engine::parse_host('myhost', 7443);
+    my ($host, $port) = Exec::Engine::parse_host('myhost', 7443);
     is $host, 'myhost', 'parse_host: plain hostname';
     is $port, 7443,     'parse_host: plain hostname uses default port';
 }
 
 {
-    my ($host, $port) = Dispatcher::Engine::parse_host('myhost:9000', 7443);
+    my ($host, $port) = Exec::Engine::parse_host('myhost:9000', 7443);
     is $host, 'myhost', 'parse_host: host:port extracts host';
     is $port, 9000,     'parse_host: host:port extracts port';
 }
 
 {
-    my ($host, $port) = Dispatcher::Engine::parse_host('myhost', undef);
+    my ($host, $port) = Exec::Engine::parse_host('myhost', undef);
     is $port, 7443, 'parse_host: undef default_port falls back to 7443';
 }
 
 {
-    my ($host, $port) = Dispatcher::Engine::parse_host('192.168.1.1:8080', 7443);
+    my ($host, $port) = Exec::Engine::parse_host('192.168.1.1:8080', 7443);
     is $host, '192.168.1.1', 'parse_host: IP address with port';
     is $port, 8080,          'parse_host: IP address port extracted';
 }
@@ -35,57 +35,57 @@ use Dispatcher::Engine qw();
 # --- gen_reqid ---
 
 {
-    my $id = Dispatcher::Engine::gen_reqid();
+    my $id = Exec::Engine::gen_reqid();
     like $id, qr/^[0-9a-f]{16}$/, 'gen_reqid: 16 hex chars';
 }
 
 {
     my %seen;
-    $seen{ Dispatcher::Engine::gen_reqid() }++ for 1..20;
+    $seen{ Exec::Engine::gen_reqid() }++ for 1..20;
     ok scalar(keys %seen) > 1, 'gen_reqid: generates distinct values';
 }
 
 # --- dispatch_all argument validation ---
 
 {
-    eval { Dispatcher::Engine::dispatch_all(script => 'x', config => {}) };
+    eval { Exec::Engine::dispatch_all(script => 'x', config => {}) };
     like $@, qr/hosts required/, 'dispatch_all: dies without hosts';
 }
 
 {
-    eval { Dispatcher::Engine::dispatch_all(hosts => ['h'], config => {}) };
+    eval { Exec::Engine::dispatch_all(hosts => ['h'], config => {}) };
     like $@, qr/script required/, 'dispatch_all: dies without script';
 }
 
 {
-    eval { Dispatcher::Engine::dispatch_all(hosts => ['h'], script => 'x') };
+    eval { Exec::Engine::dispatch_all(hosts => ['h'], script => 'x') };
     like $@, qr/config required/, 'dispatch_all: dies without config';
 }
 
 {
-    eval { Dispatcher::Engine::dispatch_all(hosts => 'not-an-array', script => 'x', config => {}) };
+    eval { Exec::Engine::dispatch_all(hosts => 'not-an-array', script => 'x', config => {}) };
     like $@, qr/hosts must be an arrayref/, 'dispatch_all: dies if hosts not arrayref';
 }
 
 {
-    eval { Dispatcher::Engine::dispatch_all(hosts => ['h'], script => 'x', config => {}, args => 'bad') };
+    eval { Exec::Engine::dispatch_all(hosts => ['h'], script => 'x', config => {}, args => 'bad') };
     like $@, qr/args must be an arrayref/, 'dispatch_all: dies if args not arrayref';
 }
 
 # --- ping_all argument validation ---
 
 {
-    eval { Dispatcher::Engine::ping_all(config => {}) };
+    eval { Exec::Engine::ping_all(config => {}) };
     like $@, qr/hosts required/, 'ping_all: dies without hosts';
 }
 
 {
-    eval { Dispatcher::Engine::ping_all(hosts => ['h']) };
+    eval { Exec::Engine::ping_all(hosts => ['h']) };
     like $@, qr/config required/, 'ping_all: dies without config';
 }
 
 {
-    eval { Dispatcher::Engine::ping_all(hosts => 'bad', config => {}) };
+    eval { Exec::Engine::ping_all(hosts => 'bad', config => {}) };
     like $@, qr/hosts must be an arrayref/, 'ping_all: dies if hosts not arrayref';
 }
 
@@ -96,7 +96,7 @@ use Dispatcher::Engine qw();
 {
     # Patch _build_ua to return a plain HTTP UA (no TLS)
     no warnings 'redefine';
-    local *Dispatcher::Engine::_build_ua = sub {
+    local *Exec::Engine::_build_ua = sub {
         require LWP::UserAgent;
         return LWP::UserAgent->new(timeout => 5);
     };
@@ -134,13 +134,13 @@ use Dispatcher::Engine qw();
     $server->close;
 
     # Override _dispatch_one to use http:// not https://
-    local *Dispatcher::Engine::_dispatch_one = sub {
+    local *Exec::Engine::_dispatch_one = sub {
         my (%opts) = @_;
         require LWP::UserAgent;
         require Time::HiRes;
         my $t0  = Time::HiRes::time();
         my $ua  = LWP::UserAgent->new(timeout => 5);
-        my $payload = Dispatcher::Engine::_json_encode({
+        my $payload = Exec::Engine::_json_encode({
             script => $opts{script},
             args   => $opts{args} // [],
             reqid  => $opts{reqid},
@@ -160,9 +160,9 @@ use Dispatcher::Engine qw();
 
     use JSON qw(decode_json);
     # Add a helper so the local sub above can encode
-    *Dispatcher::Engine::_json_encode = \&JSON::encode_json;
+    *Exec::Engine::_json_encode = \&JSON::encode_json;
 
-    my $results = Dispatcher::Engine::dispatch_all(
+    my $results = Exec::Engine::dispatch_all(
         hosts  => ["127.0.0.1:$mock_port"],
         script => 'hello',
         config => {},

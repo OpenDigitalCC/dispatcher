@@ -1,16 +1,16 @@
 #!/usr/bin/perl
 # t/rotation.t
 #
-# Unit tests for Dispatcher::Rotation.
+# Unit tests for Exec::Rotation.
 #
 # Tests cover the pure-logic functions (_cert_days_remaining, _read_cert_serial,
 # load_state) and the state-mutating functions (_do_rotation, expire_stale_agents,
 # broadcast_serial) with filesystem I/O isolated via tempdir.
 #
 # Config key reference:
-#   ca_dir          => directory containing dispatcher.crt (default /etc/dispatcher)
-#   rotation_file   => path to rotation.json state file (default /var/lib/dispatcher/rotation.json)
-#   registry_dir    => path to agent registry dir (default /var/lib/dispatcher/agents)
+#   ca_dir          => directory containing ctrl-exec.crt (default /etc/ctrl-exec)
+#   rotation_file   => path to rotation.json state file (default /var/lib/ctrl-exec/rotation.json)
+#   registry_dir    => path to agent registry dir (default /var/lib/ctrl-exec/agents)
 #   cert_days       => new cert lifetime in days
 #   cert_renewal_days  => renew when days-remaining drops below this
 #   cert_overlap_days  => overlap window length in days
@@ -31,7 +31,7 @@ use JSON qw(decode_json encode_json);
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::Rotation qw();
+use Exec::Rotation qw();
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -80,7 +80,7 @@ sub make_cert {
         '-out',    $outfile,
         '-days',   $days,
         '-nodes',
-        '-subj',   '/CN=test-dispatcher',
+        '-subj',   '/CN=test-ctrl-exec',
         qw(-quiet)
     ) == 0;
 }
@@ -97,7 +97,7 @@ subtest '_cert_days_remaining: valid cert returns positive integer' => sub {
     my $cert = "$dir/test.crt";
     plan skip_all => 'could not generate test cert' unless make_cert(365, $cert);
 
-    my $days = Dispatcher::Rotation::_cert_days_remaining($cert);
+    my $days = Exec::Rotation::_cert_days_remaining($cert);
     ok defined $days,    'returns a value';
     ok $days > 0,        "days remaining is positive ($days)";
     ok $days <= 365,     "days remaining <= cert lifetime ($days)";
@@ -111,14 +111,14 @@ subtest '_cert_days_remaining: cert expiring in 1 day' => sub {
     my $cert = "$dir/short.crt";
     plan skip_all => 'could not generate test cert' unless make_cert(1, $cert);
 
-    my $days = Dispatcher::Rotation::_cert_days_remaining($cert);
+    my $days = Exec::Rotation::_cert_days_remaining($cert);
     ok defined $days, 'returns a value for near-expiry cert';
     ok $days >= 0,    "days is non-negative ($days)";
     ok $days <= 2,    "days within expected range for a 1-day cert ($days)";
 };
 
 subtest '_cert_days_remaining: missing cert returns undef' => sub {
-    my $days = Dispatcher::Rotation::_cert_days_remaining('/nonexistent/cert.crt');
+    my $days = Exec::Rotation::_cert_days_remaining('/nonexistent/cert.crt');
     ok !defined $days, 'returns undef for missing cert';
 };
 
@@ -127,7 +127,7 @@ subtest '_cert_days_remaining: garbage file returns undef' => sub {
     my $cert = "$dir/garbage.crt";
     write_file($cert, "this is not a certificate\n");
 
-    my $days = Dispatcher::Rotation::_cert_days_remaining($cert);
+    my $days = Exec::Rotation::_cert_days_remaining($cert);
     ok !defined $days, 'returns undef for garbage cert file';
 };
 
@@ -143,14 +143,14 @@ subtest '_read_cert_serial: valid cert returns lowercase hex serial' => sub {
     my $cert = "$dir/test.crt";
     plan skip_all => 'could not generate test cert' unless make_cert(365, $cert);
 
-    my $serial = Dispatcher::Rotation::_read_cert_serial($cert);
+    my $serial = Exec::Rotation::_read_cert_serial($cert);
     ok defined $serial,              'returns a value';
     like $serial, qr/^[0-9a-f]+$/,  "serial is lowercase hex: $serial";
     ok length($serial) > 0,          'serial is non-empty';
 };
 
 subtest '_read_cert_serial: missing cert returns undef' => sub {
-    my $serial = Dispatcher::Rotation::_read_cert_serial('/nonexistent/cert.crt');
+    my $serial = Exec::Rotation::_read_cert_serial('/nonexistent/cert.crt');
     ok !defined $serial, 'returns undef for missing cert';
 };
 
@@ -159,7 +159,7 @@ subtest '_read_cert_serial: garbage file returns undef' => sub {
     my $cert = "$dir/garbage.crt";
     write_file($cert, "not a cert\n");
 
-    my $serial = Dispatcher::Rotation::_read_cert_serial($cert);
+    my $serial = Exec::Rotation::_read_cert_serial($cert);
     ok !defined $serial, 'returns undef for garbage content';
 };
 
@@ -180,7 +180,7 @@ subtest 'load_state: returns parsed hashref for valid state file' => sub {
     };
     write_file($file, encode_json($data));
 
-    my $state = Dispatcher::Rotation::load_state(path => $file);
+    my $state = Exec::Rotation::load_state(path => $file);
     ok defined $state,                        'load_state returns a value';
     is $state->{current_serial},  'deadbeef', 'current_serial correct';
     is $state->{previous_serial}, 'cafebabe', 'previous_serial correct';
@@ -189,7 +189,7 @@ subtest 'load_state: returns parsed hashref for valid state file' => sub {
 };
 
 subtest 'load_state: returns undef when state file absent' => sub {
-    my $state = Dispatcher::Rotation::load_state(path => '/nonexistent/rotation.json');
+    my $state = Exec::Rotation::load_state(path => '/nonexistent/rotation.json');
     ok !defined $state, 'returns undef when no state file';
 };
 
@@ -198,7 +198,7 @@ subtest 'load_state: returns undef for corrupt JSON' => sub {
     my $file = "$dir/rotation.json";
     write_file($file, "{ this is not valid json ]");
 
-    my $state = Dispatcher::Rotation::load_state(path => $file);
+    my $state = Exec::Rotation::load_state(path => $file);
     ok !defined $state, 'returns undef for corrupt JSON';
 };
 
@@ -215,7 +215,7 @@ subtest 'load_state: all fields preserved in round-trip' => sub {
     };
     write_file($file, encode_json($data));
 
-    my $state = Dispatcher::Rotation::load_state(path => $file);
+    my $state = Exec::Rotation::load_state(path => $file);
     for my $key (sort keys %$data) {
         is $state->{$key}, $data->{$key}, "$key round-trips";
     }
@@ -246,7 +246,7 @@ subtest 'expire_stale_agents: before overlap expires - pending agent unchanged' 
     }));
 
     eval {
-        Dispatcher::Rotation::expire_stale_agents(config => config(
+        Exec::Rotation::expire_stale_agents(config => config(
             rotation_file => $rotFile,
             registry_dir  => $regDir,
         ));
@@ -283,7 +283,7 @@ subtest 'expire_stale_agents: after overlap expires - pending agents become stal
     }));
 
     eval {
-        Dispatcher::Rotation::expire_stale_agents(config => config(
+        Exec::Rotation::expire_stale_agents(config => config(
             rotation_file => $rotFile,
             registry_dir  => $regDir,
         ));
@@ -313,7 +313,7 @@ subtest 'expire_stale_agents: no rotation state file - returns without error' =>
     }));
 
     eval {
-        Dispatcher::Rotation::expire_stale_agents(config => config(
+        Exec::Rotation::expire_stale_agents(config => config(
             rotation_file => "$dir/nonexistent.json",
             registry_dir  => $regDir,
         ));
@@ -335,7 +335,7 @@ subtest 'broadcast_serial: no rotation state file returns empty arrayref' => sub
     make_path($regDir);
 
     my $result = eval {
-        Dispatcher::Rotation::broadcast_serial(config => config(
+        Exec::Rotation::broadcast_serial(config => config(
             rotation_file => "$dir/nonexistent.json",
             registry_dir  => $regDir,
         ))
@@ -359,7 +359,7 @@ subtest 'broadcast_serial: no current_serial in state returns empty arrayref' =>
     }));
 
     my $result = eval {
-        Dispatcher::Rotation::broadcast_serial(config => config(
+        Exec::Rotation::broadcast_serial(config => config(
             rotation_file => $rotFile,
             registry_dir  => $regDir,
         ))
@@ -383,15 +383,15 @@ subtest '_do_rotation: creates rotation state file with correct fields' => sub {
     my $rotFile  = "$dir/rotation.json";
     make_path($caDir, $regDir);
 
-    my $cert = "$caDir/dispatcher.crt";
+    my $cert = "$caDir/ctrl-exec.crt";
     plan skip_all => 'could not generate initial cert'
         unless make_cert(365, $cert);
 
-    my $old_serial = Dispatcher::Rotation::_read_cert_serial($cert);
+    my $old_serial = Exec::Rotation::_read_cert_serial($cert);
     plan skip_all => 'could not read initial cert serial' unless defined $old_serial;
 
     my $result = eval {
-        Dispatcher::Rotation::_do_rotation(config => config(
+        Exec::Rotation::_do_rotation(config => config(
             ca_dir        => $caDir,
             rotation_file => $rotFile,
             registry_dir  => $regDir,
@@ -428,7 +428,7 @@ subtest '_do_rotation: registered agents marked pending after rotation' => sub {
     my $rotFile = "$dir/rotation.json";
     make_path($caDir, $regDir);
 
-    my $cert = "$caDir/dispatcher.crt";
+    my $cert = "$caDir/ctrl-exec.crt";
     plan skip_all => 'could not generate initial cert'
         unless make_cert(365, $cert);
 
@@ -445,7 +445,7 @@ subtest '_do_rotation: registered agents marked pending after rotation' => sub {
     }
 
     my $result = eval {
-        Dispatcher::Rotation::_do_rotation(config => config(
+        Exec::Rotation::_do_rotation(config => config(
             ca_dir        => $caDir,
             rotation_file => $rotFile,
             registry_dir  => $regDir,
@@ -479,7 +479,7 @@ subtest '_do_rotation: no prior cert - previous_serial is empty string' => sub {
     # No cert pre-created in caDir
 
     my $result = eval {
-        Dispatcher::Rotation::_do_rotation(config => config(
+        Exec::Rotation::_do_rotation(config => config(
             ca_dir        => $caDir,
             rotation_file => $rotFile,
             registry_dir  => $regDir,

@@ -27,14 +27,14 @@ describe "Lock: concurrent dispatch to same host is rejected"
 # ============================================================
 # NOTE: This subtest is skipped in integration testing.
 #
-# The lock is flock-based (Dispatcher::Lock). dispatch_all forks a child
+# The lock is flock-based (Exec::Lock). dispatch_all forks a child
 # per host; the child acquires the flock. Whether check_available in an
-# independent second dispatcher process sees that flock depends on when
+# independent second ctrl-exec process sees that flock depends on when
 # acquire is called relative to the HTTP round-trip.
 #
-# In practice the lock fires reliably between independent dispatcher
+# In practice the lock fires reliably between independent ctrl-exec
 # invocations, but the integration test cannot guarantee the timing window
-# between fork, acquire, and the second dispatcher's check_available.
+# between fork, acquire, and the second ctrl-exec's check_available.
 # The unit test t/lock.t covers this with lock-holder.pl (an exec'd
 # process with a fully independent file table) and is the authoritative
 # test for lock conflict detection.

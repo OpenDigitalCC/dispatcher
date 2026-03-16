@@ -1,7 +1,7 @@
 #!/bin/bash
 # run-tests.sh
 #
-# Run dispatcher integration tests.
+# Run ctrl-exec integration tests.
 #
 # Usage:
 #   sudo bash run-tests.sh [test-file ...]
@@ -10,11 +10,11 @@
 # Individual tests can be run directly from the suite directory, e.g.:
 #   sudo bash 02-argument-integrity.sh
 #
-# Agents are discovered automatically from "dispatcher list-agents".
+# Agents are discovered automatically from "ctrl-exec list-agents".
 # No hostnames need to be configured.
 #
 # Environment variables:
-#   DISPATCHER   dispatcher binary name or path (default: dispatcher)
+#   DISPATCHER   ctrl-exec binary name or path (default: ctrl-exec)
 
 set -uo pipefail
 SUITE_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -53,10 +53,10 @@ printf '  DISPATCHER = %s\n' "$DISPATCHER"
 printf '=%.0s' {1..60}
 printf '\n'
 
-# Verify dispatcher binary is accessible
+# Verify ctrl-exec binary is accessible
 if ! sudo "$DISPATCHER" list-agents > /dev/null 2>&1; then
-    printf '\nERROR: Cannot run "dispatcher list-agents"\n'
-    printf 'Check the dispatcher is installed and you have sudo access.\n'
+    printf '\nERROR: Cannot run "ctrl-exec list-agents"\n'
+    printf 'Check the ctrl-exec is installed and you have sudo access.\n'
     exit 1
 fi
 

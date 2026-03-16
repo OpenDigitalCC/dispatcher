@@ -1,7 +1,7 @@
 #!/bin/bash
 # setup-agent-scripts.sh
 #
-# Install test scripts on a dispatcher agent and enable them in scripts.conf.
+# Install test scripts on a ctrl-exec agent and enable them in scripts.conf.
 # Run this on each agent host before running the integration tests.
 #
 # Usage:
@@ -10,13 +10,13 @@
 #   sudo bash setup-agent-scripts.sh --remove-auth-test   # remove auth context test hook and restore agent.conf
 #
 # Default (no args):
-#   - Writes test scripts to /opt/dispatcher-scripts/
-#   - Appends entries to /etc/dispatcher-agent/scripts.conf (if not present)
+#   - Writes test scripts to /opt/ctrl-exec-scripts/
+#   - Appends entries to /etc/ctrl-exec-agent/scripts.conf (if not present)
 #   - Sends SIGHUP to reload the allowlist
 #
 # --install-auth-test additionally:
-#   - Writes the auth-context-check hook to /etc/dispatcher-agent/auth-context-check.sh
-#   - Writes auth-status-dump script to /opt/dispatcher-scripts/
+#   - Writes the auth-context-check hook to /etc/ctrl-exec-agent/auth-context-check.sh
+#   - Writes auth-status-dump script to /opt/ctrl-exec-scripts/
 #   - Appends auth-status-dump to scripts.conf
 #   - Backs up agent.conf and appends auth_hook line
 #   - Sends SIGHUP to reload
@@ -34,8 +34,8 @@ set -euo pipefail
 # Prevent BASH_ENV from auto-sourcing lib.sh if set from a prior test session.
 unset BASH_ENV ENV
 
-SCRIPT_DIR="/opt/dispatcher-scripts"
-CONF="/etc/dispatcher-agent/scripts.conf"
+SCRIPT_DIR="/opt/ctrl-exec-scripts"
+CONF="/etc/ctrl-exec-agent/scripts.conf"
 
 mkdir -p "$SCRIPT_DIR"
 
@@ -124,7 +124,7 @@ EOF
 cat > "$SCRIPT_DIR/sleep-15.sh" << 'EOF'
 #!/bin/sh
 # Sleeps 15 seconds. Used to trigger the 10s read timeout.
-# Will continue running on the agent after the dispatcher times out.
+# Will continue running on the agent after the ctrl-exec times out.
 exec 0</dev/null
 echo "sleep-15: starting on $(hostname 2>/dev/null || uname -n)"
 sleep 15
@@ -146,7 +146,7 @@ cat > "$SCRIPT_DIR/daemonise-test.sh" << 'EOF'
 # The background job writes its completion to a temp file.
 # Demonstrates the async pattern for callers that cannot block.
 REQID="job-$$-$(date +%s)"
-OUTFILE="/tmp/dispatcher-job-${REQID}.out"
+OUTFILE="/tmp/ctrl-exec-job-${REQID}.out"
 
 # Fork into background, redirect all output to file
 (
@@ -173,10 +173,10 @@ chmod 0755 \
     "$SCRIPT_DIR/sleep-90.sh" \
     "$SCRIPT_DIR/daemonise-test.sh"
 
-# update-dispatcher-serial is installed by the agent installer, not written here.
+# update-ctrl-exec-serial is installed by the agent installer, not written here.
 # chmod it only if it exists.
-if [ -f "$SCRIPT_DIR/update-dispatcher-serial" ]; then
-    chmod 0755 "$SCRIPT_DIR/update-dispatcher-serial"
+if [ -f "$SCRIPT_DIR/update-ctrl-exec-serial" ]; then
+    chmod 0755 "$SCRIPT_DIR/update-ctrl-exec-serial"
 fi
 
 echo "Scripts written to $SCRIPT_DIR"
@@ -205,8 +205,8 @@ append_if_missing "sleep-5"                  "$SCRIPT_DIR/sleep-5.sh"
 append_if_missing "sleep-15"                 "$SCRIPT_DIR/sleep-15.sh"
 append_if_missing "sleep-90"                 "$SCRIPT_DIR/sleep-90.sh"
 append_if_missing "daemonise-test"           "$SCRIPT_DIR/daemonise-test.sh"
-append_if_missing "dispatcher-demonstrator"  "$SCRIPT_DIR/dispatcher-demonstrator.sh"
-append_if_missing "update-dispatcher-serial" "$SCRIPT_DIR/update-dispatcher-serial"
+append_if_missing "ctrl-exec-demonstrator"  "$SCRIPT_DIR/ctrl-exec-demonstrator.sh"
+append_if_missing "update-ctrl-exec-serial" "$SCRIPT_DIR/update-ctrl-exec-serial"
 # allowlist-reload-check is intentionally NOT added here.
 # Test 09 adds it manually after setup to verify SIGHUP reload works.
 
@@ -214,42 +214,42 @@ append_if_missing "update-dispatcher-serial" "$SCRIPT_DIR/update-dispatcher-seri
 
 reload_agent() {
     # systemd (Debian)
-    if command -v systemctl >/dev/null 2>&1 && systemctl is-active dispatcher-agent >/dev/null 2>&1; then
-        systemctl reload dispatcher-agent 2>/dev/null \
-            || systemctl kill --signal=HUP dispatcher-agent
-        echo "Sent HUP to dispatcher-agent via systemctl - allowlist reloaded"
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active ctrl-exec-agent >/dev/null 2>&1; then
+        systemctl reload ctrl-exec-agent 2>/dev/null \
+            || systemctl kill --signal=HUP ctrl-exec-agent
+        echo "Sent HUP to ctrl-exec-agent via systemctl - allowlist reloaded"
         return 0
     fi
 
     # procd (OpenWrt)
-    if [ -f /etc/init.d/dispatcher-agent ]; then
-        /etc/init.d/dispatcher-agent reload 2>/dev/null \
-            || /etc/init.d/dispatcher-agent restart
-        echo "Sent reload to dispatcher-agent via procd - allowlist reloaded"
+    if [ -f /etc/init.d/ctrl-exec-agent ]; then
+        /etc/init.d/ctrl-exec-agent reload 2>/dev/null \
+            || /etc/init.d/ctrl-exec-agent restart
+        echo "Sent reload to ctrl-exec-agent via procd - allowlist reloaded"
         return 0
     fi
 
     # Portable fallback: find PID via ps, no pkill/pgrep required
     local pid
     pid=$(ps 2>/dev/null \
-        | awk '/dispatcher-agent/ && !/awk/ && !/setup-agent/ {print $1; exit}')
+        | awk '/ctrl-exec-agent/ && !/awk/ && !/setup-agent/ {print $1; exit}')
     if [ -n "$pid" ]; then
         kill -HUP "$pid"
-        echo "Sent SIGHUP to dispatcher-agent (pid $pid) - allowlist reloaded"
+        echo "Sent SIGHUP to ctrl-exec-agent (pid $pid) - allowlist reloaded"
         return 0
     fi
 
-    echo "WARNING: dispatcher-agent not running - start it before testing"
+    echo "WARNING: ctrl-exec-agent not running - start it before testing"
 }
 
 reload_agent
 
 # --- auth context test hook (optional) ---
 
-AGENT_CONF="/etc/dispatcher-agent/agent.conf"
-AGENT_CONF_BACKUP="/etc/dispatcher-agent/agent.conf.before-auth-test"
-HOOK_PATH="/etc/dispatcher-agent/auth-context-check.sh"
-STATUS_FILE="/tmp/dispatcher-auth-test-status"
+AGENT_CONF="/etc/ctrl-exec-agent/agent.conf"
+AGENT_CONF_BACKUP="/etc/ctrl-exec-agent/agent.conf.before-auth-test"
+HOOK_PATH="/etc/ctrl-exec-agent/auth-context-check.sh"
+STATUS_FILE="/tmp/ctrl-exec-auth-test-status"
 AUTH_STATUS_DUMP="$SCRIPT_DIR/auth-status-dump.sh"
 
 install_auth_test() {
@@ -270,29 +270,29 @@ install_auth_test() {
 # so the test can retrieve results from the preceding call.
 # Exit codes for policy failures use distinct values to identify the failing field.
 
-STATUS_FILE="/tmp/dispatcher-auth-test-status"
+STATUS_FILE="/tmp/ctrl-exec-auth-test-status"
 
 # Allow auth-status-dump through without recording - preserves the status
 # file written by the preceding call so the test can read it back.
-if [ "$DISPATCHER_SCRIPT" = "auth-status-dump" ]; then
+if [ "$ENVEXEC_SCRIPT" = "auth-status-dump" ]; then
     exit 0
 fi
 
 # Record what was received for all other scripts
 cat > "$STATUS_FILE" << VARS
-DISPATCHER_ACTION=$DISPATCHER_ACTION
-DISPATCHER_SCRIPT=$DISPATCHER_SCRIPT
-DISPATCHER_USERNAME=$DISPATCHER_USERNAME
-DISPATCHER_TOKEN=$DISPATCHER_TOKEN
-DISPATCHER_SOURCE_IP=$DISPATCHER_SOURCE_IP
-DISPATCHER_ARGS_JSON=$DISPATCHER_ARGS_JSON
+ENVEXEC_ACTION=$ENVEXEC_ACTION
+ENVEXEC_SCRIPT=$ENVEXEC_SCRIPT
+ENVEXEC_USERNAME=$ENVEXEC_USERNAME
+ENVEXEC_TOKEN=$ENVEXEC_TOKEN
+ENVEXEC_SOURCE_IP=$ENVEXEC_SOURCE_IP
+ENVEXEC_ARGS_JSON=$ENVEXEC_ARGS_JSON
 VARS
 
 # Apply known-value policy
-[ "$DISPATCHER_ACTION"   = "run"              ] || exit 11
-[ "$DISPATCHER_USERNAME" = "test-user"        ] || exit 13
-[ "$DISPATCHER_TOKEN"    = "test-token-value" ] || exit 14
-[ -n "$DISPATCHER_SOURCE_IP"                  ] || exit 15
+[ "$ENVEXEC_ACTION"   = "run"              ] || exit 11
+[ "$ENVEXEC_USERNAME" = "test-user"        ] || exit 13
+[ "$ENVEXEC_TOKEN"    = "test-token-value" ] || exit 14
+[ -n "$ENVEXEC_SOURCE_IP"                  ] || exit 15
 exit 0
 EOF
     chmod 0755 "$HOOK_PATH"
@@ -304,7 +304,7 @@ EOF
 # Outputs the auth context status file written by auth-context-check.sh.
 # Used by integration test 15 to read hook-received values without SSH.
 exec 0</dev/null
-STATUS_FILE="/tmp/dispatcher-auth-test-status"
+STATUS_FILE="/tmp/ctrl-exec-auth-test-status"
 if [ -f "$STATUS_FILE" ]; then
     cat "$STATUS_FILE"
 else
@@ -365,7 +365,7 @@ remove_auth_test() {
     # Restore agent.conf
     if [ -f "$AGENT_CONF_BACKUP" ]; then
         cp "$AGENT_CONF_BACKUP" "$AGENT_CONF"
-        chown root:dispatcher-agent "$AGENT_CONF"
+        chown root:ctrl-exec-agent "$AGENT_CONF"
         chmod 640 "$AGENT_CONF"
         rm -f "$AGENT_CONF_BACKUP"
         echo "  Restored agent.conf from backup"
@@ -400,4 +400,4 @@ case "$MODE" in
         ;;
 esac
 
-echo "Done. Verify with: sudo dispatcher-agent ping-self"
+echo "Done. Verify with: sudo ctrl-exec-agent ping-self"

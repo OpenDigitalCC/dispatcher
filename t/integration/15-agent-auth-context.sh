@@ -7,7 +7,7 @@
 # Design:
 #   The auth-context-check hook (installed by setup-agent-scripts.sh
 #   --install-auth-test) writes all received DISPATCHER_* env vars to a
-#   status file on the agent at /tmp/dispatcher-auth-test-status on every
+#   status file on the agent at /tmp/ctrl-exec-auth-test-status on every
 #   call. The allowlisted script auth-status-dump retrieves that file via a
 #   subsequent dispatch, without requiring SSH access to the agent.
 #
@@ -40,7 +40,7 @@ require_agents 1
 # The script exits 1 if the status file does not yet exist (no prior call),
 # so we accept both exit 0 and exit 1 as evidence the script is present and
 # reachable. Exit 1 from a missing status file produces "STATUS_FILE_NOT_FOUND"
-# on stdout; a true "not permitted" denial produces no stdout and a dispatcher
+# on stdout; a true "not permitted" denial produces no stdout and a ctrl-exec
 # error on stderr. We distinguish these by checking stdout content.
 
 AUTH_AGENT=""
@@ -93,61 +93,61 @@ STATUS=$(read_status_file)
 
 assert_exit 0 "$RC" "auth-status-dump retrieved status file"
 
-if echo "$STATUS" | grep -q "^DISPATCHER_ACTION="; then
-    pass "DISPATCHER_ACTION present in status file"
+if echo "$STATUS" | grep -q "^ENVEXEC_ACTION="; then
+    pass "ENVEXEC_ACTION present in status file"
 else
-    fail "DISPATCHER_ACTION present in status file" "status: $STATUS"
+    fail "ENVEXEC_ACTION present in status file" "status: $STATUS"
 fi
 
 # ============================================================
-describe "Auth context: DISPATCHER_ACTION is 'run'"
+describe "Auth context: ENVEXEC_ACTION is 'run'"
 # ============================================================
 
-ACTION=$(parse_field "$STATUS" "DISPATCHER_ACTION")
+ACTION=$(parse_field "$STATUS" "ENVEXEC_ACTION")
 [ "$ACTION" = "run" ] \
-    && pass "DISPATCHER_ACTION = run" \
-    || fail "DISPATCHER_ACTION = run" "got: '$ACTION'"
+    && pass "ENVEXEC_ACTION = run" \
+    || fail "ENVEXEC_ACTION = run" "got: '$ACTION'"
 
 # ============================================================
-describe "Auth context: DISPATCHER_SCRIPT matches requested script"
+describe "Auth context: ENVEXEC_SCRIPT matches requested script"
 # ============================================================
 
 # The status file was written during the args-echo call above.
-SCRIPT=$(parse_field "$STATUS" "DISPATCHER_SCRIPT")
+SCRIPT=$(parse_field "$STATUS" "ENVEXEC_SCRIPT")
 [ "$SCRIPT" = "args-echo" ] \
-    && pass "DISPATCHER_SCRIPT = args-echo" \
-    || fail "DISPATCHER_SCRIPT = args-echo" "got: '$SCRIPT'"
+    && pass "ENVEXEC_SCRIPT = args-echo" \
+    || fail "ENVEXEC_SCRIPT = args-echo" "got: '$SCRIPT'"
 
 # ============================================================
-describe "Auth context: DISPATCHER_USERNAME forwarded correctly"
+describe "Auth context: ENVEXEC_USERNAME forwarded correctly"
 # ============================================================
 
-USERNAME=$(parse_field "$STATUS" "DISPATCHER_USERNAME")
+USERNAME=$(parse_field "$STATUS" "ENVEXEC_USERNAME")
 [ "$USERNAME" = "test-user" ] \
-    && pass "DISPATCHER_USERNAME = test-user" \
-    || fail "DISPATCHER_USERNAME = test-user" "got: '$USERNAME'"
+    && pass "ENVEXEC_USERNAME = test-user" \
+    || fail "ENVEXEC_USERNAME = test-user" "got: '$USERNAME'"
 
 # ============================================================
-describe "Auth context: DISPATCHER_TOKEN forwarded correctly"
+describe "Auth context: ENVEXEC_TOKEN forwarded correctly"
 # ============================================================
 
-TOKEN=$(parse_field "$STATUS" "DISPATCHER_TOKEN")
+TOKEN=$(parse_field "$STATUS" "ENVEXEC_TOKEN")
 [ "$TOKEN" = "test-token-value" ] \
-    && pass "DISPATCHER_TOKEN = test-token-value" \
-    || fail "DISPATCHER_TOKEN = test-token-value" "got: '$TOKEN'"
+    && pass "ENVEXEC_TOKEN = test-token-value" \
+    || fail "ENVEXEC_TOKEN = test-token-value" "got: '$TOKEN'"
 
 # ============================================================
-describe "Auth context: DISPATCHER_SOURCE_IP is non-empty"
+describe "Auth context: ENVEXEC_SOURCE_IP is non-empty"
 # ============================================================
 
-SOURCE_IP=$(parse_field "$STATUS" "DISPATCHER_SOURCE_IP")
+SOURCE_IP=$(parse_field "$STATUS" "ENVEXEC_SOURCE_IP")
 if [ -n "$SOURCE_IP" ]; then
-    pass "DISPATCHER_SOURCE_IP is non-empty: $SOURCE_IP"
+    pass "ENVEXEC_SOURCE_IP is non-empty: $SOURCE_IP"
 else
-    fail "DISPATCHER_SOURCE_IP is non-empty" "was empty or missing"
+    fail "ENVEXEC_SOURCE_IP is non-empty" "was empty or missing"
 fi
 
-# Record the observed dispatcher IP for the remainder of the test.
+# Record the observed ctrl-exec IP for the remainder of the test.
 DISPATCHER_IP="$SOURCE_IP"
 
 # ============================================================
@@ -158,11 +158,11 @@ describe "Auth context: wrong username is denied"
 run_dispatcher run "$AUTH_AGENT" args-echo \
     --username "wrong-user" --token "test-token-value" -- probe
 
-assert_exit 1 "$RC" "wrong username: dispatcher exits non-zero"
+assert_exit 1 "$RC" "wrong username: ctrl-exec exits non-zero"
 assert_not_contains "$OUT" "[1] probe" "wrong username: script did not execute"
 
 STATUS=$(read_status_file)
-RECORDED_USER=$(parse_field "$STATUS" "DISPATCHER_USERNAME")
+RECORDED_USER=$(parse_field "$STATUS" "ENVEXEC_USERNAME")
 [ "$RECORDED_USER" = "wrong-user" ] \
     && pass "wrong username: hook received the incorrect value before denying" \
     || fail "wrong username: hook received the incorrect value before denying" \
@@ -176,11 +176,11 @@ describe "Auth context: wrong token is denied"
 run_dispatcher run "$AUTH_AGENT" args-echo \
     --username "test-user" --token "wrong-token" -- probe
 
-assert_exit 1 "$RC" "wrong token: dispatcher exits non-zero"
+assert_exit 1 "$RC" "wrong token: ctrl-exec exits non-zero"
 assert_not_contains "$OUT" "[1] probe" "wrong token: script did not execute"
 
 STATUS=$(read_status_file)
-RECORDED_TOKEN=$(parse_field "$STATUS" "DISPATCHER_TOKEN")
+RECORDED_TOKEN=$(parse_field "$STATUS" "ENVEXEC_TOKEN")
 [ "$RECORDED_TOKEN" = "wrong-token" ] \
     && pass "wrong token: hook received the incorrect value before denying" \
     || fail "wrong token: hook received the incorrect value before denying" \
@@ -194,11 +194,11 @@ describe "Auth context: missing token is denied"
 run_dispatcher run "$AUTH_AGENT" args-echo \
     --username "test-user" -- probe
 
-assert_exit 1 "$RC" "missing token: dispatcher exits non-zero"
+assert_exit 1 "$RC" "missing token: ctrl-exec exits non-zero"
 assert_not_contains "$OUT" "[1] probe" "missing token: script did not execute"
 
 STATUS=$(read_status_file)
-RECORDED_TOKEN=$(parse_field "$STATUS" "DISPATCHER_TOKEN")
+RECORDED_TOKEN=$(parse_field "$STATUS" "ENVEXEC_TOKEN")
 [ -z "$RECORDED_TOKEN" ] \
     && pass "missing token: hook received empty token before denying" \
     || fail "missing token: hook received empty token before denying" \
@@ -209,18 +209,18 @@ assert_agents_reachable
 describe "Auth context: missing username is denied"
 # ============================================================
 
-# When --username is omitted, the dispatcher substitutes the invoking user
+# When --username is omitted, the ctrl-exec substitutes the invoking user
 # (typically root when run via sudo). The hook receives a non-empty username
 # that does not match the approved value and correctly denies.
 
 run_dispatcher run "$AUTH_AGENT" args-echo \
     --token "test-token-value" -- probe
 
-assert_exit 1 "$RC" "missing username: dispatcher exits non-zero"
+assert_exit 1 "$RC" "missing username: ctrl-exec exits non-zero"
 assert_not_contains "$OUT" "[1] probe" "missing username: script did not execute"
 
 STATUS=$(read_status_file)
-RECORDED_USER=$(parse_field "$STATUS" "DISPATCHER_USERNAME")
+RECORDED_USER=$(parse_field "$STATUS" "ENVEXEC_USERNAME")
 [ "$RECORDED_USER" != "test-user" ] \
     && pass "missing username: hook received non-approved username before denying ($RECORDED_USER)" \
     || fail "missing username: hook received non-approved username before denying" \
@@ -238,11 +238,11 @@ run_dispatcher run "$AUTH_AGENT" args-echo \
 assert_exit 0 "$RC" "second passing request succeeds"
 
 STATUS=$(read_status_file)
-SOURCE_IP2=$(parse_field "$STATUS" "DISPATCHER_SOURCE_IP")
+SOURCE_IP2=$(parse_field "$STATUS" "ENVEXEC_SOURCE_IP")
 
 [ "$SOURCE_IP2" = "$DISPATCHER_IP" ] \
-    && pass "DISPATCHER_SOURCE_IP consistent: $DISPATCHER_IP" \
-    || fail "DISPATCHER_SOURCE_IP consistent" \
+    && pass "ENVEXEC_SOURCE_IP consistent: $DISPATCHER_IP" \
+    || fail "ENVEXEC_SOURCE_IP consistent" \
             "first=$DISPATCHER_IP second=$SOURCE_IP2"
 
 summary

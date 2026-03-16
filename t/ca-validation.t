@@ -26,10 +26,10 @@ use File::Glob  qw(bsd_glob);
 use FindBin     qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::CA  qw();
-use Dispatcher::Log qw();
+use Exec::CA  qw();
+use Exec::Log qw();
 
-Dispatcher::Log::init('test');
+Exec::Log::init('test');
 
 # Scratch dir used by tests that need a directory path but no real CA
 my $scratch = tempdir(CLEANUP => 1);
@@ -52,7 +52,7 @@ for my $fn (qw(generate_ca generate_dispatcher_cert sign_csr)) {
             $base{cn}      = 'Test CA'   if $fn eq 'generate_ca';
             $base{csr_pem} = "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n"
                              if $fn eq 'sign_csr';
-            eval { Dispatcher::CA->can($fn)->(%base) };
+            eval { Exec::CA->can($fn)->(%base) };
             like $@, qr/days must be a positive integer/,
                 "$fn: days=$label croaks with correct message";
         };
@@ -64,7 +64,7 @@ subtest 'days validation: sign_csr accepts days => 1 (fires before openssl with 
     # Use a fresh empty dir so the CA existence check fires as intended.
     my $empty = tempdir(CLEANUP => 1);
     eval {
-        Dispatcher::CA::sign_csr(
+        Exec::CA::sign_csr(
             csr_pem => "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n",
             ca_dir  => $empty,
             days    => 1,
@@ -81,17 +81,17 @@ subtest 'days validation: sign_csr accepts days => 1 (fires before openssl with 
 # ---------------------------------------------------------------------------
 
 subtest 'CN validation: slash rejected' => sub {
-    eval { Dispatcher::CA::generate_ca(cn => 'Dispatcher CA/O=Evil', ca_dir => $scratch) };
+    eval { Exec::CA::generate_ca(cn => 'Dispatcher CA/O=Evil', ca_dir => $scratch) };
     like $@, qr/Invalid CN/, 'slash in CN croaks';
 };
 
 subtest 'CN validation: null byte rejected' => sub {
-    eval { Dispatcher::CA::generate_ca(cn => "Dispatcher\0CA", ca_dir => $scratch) };
+    eval { Exec::CA::generate_ca(cn => "Dispatcher\0CA", ca_dir => $scratch) };
     like $@, qr/Invalid CN/, 'null byte in CN croaks';
 };
 
 subtest 'CN validation: equals sign rejected' => sub {
-    eval { Dispatcher::CA::generate_ca(cn => 'CN=Bad', ca_dir => $scratch) };
+    eval { Exec::CA::generate_ca(cn => 'CN=Bad', ca_dir => $scratch) };
     like $@, qr/Invalid CN/, 'equals sign in CN croaks';
 };
 
@@ -99,7 +99,7 @@ subtest 'CN validation: valid characters accepted (word, space, hyphen, dot)' =>
     # Verify the guard passes - croak should come from existing CA or openssl,
     # not from the CN check.
     my $d = tempdir(CLEANUP => 1);
-    eval { Dispatcher::CA::generate_ca(cn => 'My CA-01.example', ca_dir => $d, days => 1) };
+    eval { Exec::CA::generate_ca(cn => 'My CA-01.example', ca_dir => $d, days => 1) };
     unlike $@, qr/Invalid CN/, 'valid CN does not trigger CN guard';
 };
 
@@ -110,7 +110,7 @@ subtest 'CN validation: valid characters accepted (word, space, hyphen, dot)' =>
 
 subtest 'CSR format: oversized CSR rejected' => sub {
     eval {
-        Dispatcher::CA::sign_csr(
+        Exec::CA::sign_csr(
             csr_pem => 'A' x 10_241,
             ca_dir  => $scratch,
             days    => 1,
@@ -122,7 +122,7 @@ subtest 'CSR format: oversized CSR rejected' => sub {
 subtest 'CSR format: oversized CSR - no temp file written' => sub {
     my $d = tempdir(CLEANUP => 1);
     eval {
-        Dispatcher::CA::sign_csr(
+        Exec::CA::sign_csr(
             csr_pem => 'A' x 10_241,
             ca_dir  => $d,
             days    => 1,
@@ -135,7 +135,7 @@ subtest 'CSR format: oversized CSR - no temp file written' => sub {
 subtest 'CSR format: non-PEM content rejected' => sub {
     for my $bad ('{}', '<xml/>', 'not a csr', '') {
         eval {
-            Dispatcher::CA::sign_csr(
+            Exec::CA::sign_csr(
                 csr_pem => $bad,
                 ca_dir  => $scratch,
                 days    => 1,
@@ -153,7 +153,7 @@ subtest 'CSR format: valid PEM header passes guard' => sub {
     # Use a fresh empty dir so the CA existence check fires as intended.
     my $empty = tempdir(CLEANUP => 1);
     eval {
-        Dispatcher::CA::sign_csr(
+        Exec::CA::sign_csr(
             csr_pem => "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n",
             ca_dir  => $empty,
             days    => 1,
@@ -170,7 +170,7 @@ subtest 'CSR format: exactly 10240 bytes accepted by size guard' => sub {
     # Inject the PEM header so the format guard passes
     substr($pem, 0, 36) = "-----BEGIN CERTIFICATE REQUEST-----\n";
     eval {
-        Dispatcher::CA::sign_csr(csr_pem => $pem, ca_dir => $scratch, days => 1);
+        Exec::CA::sign_csr(csr_pem => $pem, ca_dir => $scratch, days => 1);
     };
     unlike $@, qr/CSR exceeds maximum size/, '10240-byte CSR passes size guard';
 };
@@ -187,7 +187,7 @@ SKIP: {
     # Generate a real test CA once for all openssl-dependent tests
     my $ca_dir = tempdir(CLEANUP => 1);
     my $ca_ok = eval {
-        Dispatcher::CA::generate_ca(
+        Exec::CA::generate_ca(
             cn     => 'Test CA',
             ca_dir => $ca_dir,
             days   => 1,
@@ -202,7 +202,7 @@ SKIP: {
 
     subtest 'days validation: generate_ca accepts days => 1' => sub {
         my $d = tempdir(CLEANUP => 1);
-        eval { Dispatcher::CA::generate_ca(cn => 'Test CA', ca_dir => $d, days => 1, bits => 2048) };
+        eval { Exec::CA::generate_ca(cn => 'Test CA', ca_dir => $d, days => 1, bits => 2048) };
         is $@, '', 'generate_ca: days=1 does not croak';
         ok -f "$d/ca.crt", 'generate_ca: ca.crt created with days=1';
     };
@@ -211,7 +211,7 @@ SKIP: {
 
     subtest 'days validation: generate_dispatcher_cert rejects days => 0' => sub {
         eval {
-            Dispatcher::CA::generate_dispatcher_cert(ca_dir => $ca_dir, days => 0);
+            Exec::CA::generate_dispatcher_cert(ca_dir => $ca_dir, days => 0);
         };
         like $@, qr/days must be a positive integer/,
             'generate_dispatcher_cert: days=0 croaks';
@@ -219,18 +219,18 @@ SKIP: {
 
     subtest 'days validation: generate_dispatcher_cert accepts days => 1' => sub {
         my $d = tempdir(CLEANUP => 1);
-        # Copy CA files to fresh dir so we get a clean dispatcher cert
+        # Copy CA files to fresh dir so we get a clean ctrl-exec cert
         for my $f (qw(ca.key ca.crt ca.serial)) {
             File::Copy::copy("$ca_dir/$f", "$d/$f")
                 if -f "$ca_dir/$f";
         }
         eval {
-            Dispatcher::CA::generate_dispatcher_cert(
+            Exec::CA::generate_dispatcher_cert(
                 ca_dir => $d, days => 1, bits => 2048
             );
         };
         is $@, '', 'generate_dispatcher_cert: days=1 does not croak';
-        ok -f "$d/dispatcher.crt", 'generate_dispatcher_cert: dispatcher.crt created';
+        ok -f "$d/ctrl-exec.crt", 'generate_dispatcher_cert: ctrl-exec.crt created';
     };
 
     # --- Finding 4: stderr captured in croak message ---
@@ -242,7 +242,7 @@ SKIP: {
         # stderr is redirected into the temp file and included in the croak.
         my $bad_csr = "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n";
         eval {
-            Dispatcher::CA::sign_csr(
+            Exec::CA::sign_csr(
                 csr_pem => $bad_csr,
                 ca_dir  => $ca_dir,
                 days    => 1,
@@ -264,7 +264,7 @@ SKIP: {
         my @before = (bsd_glob('/tmp/*.csr'), bsd_glob('/tmp/*.crt'));
 
         my $bad_csr = "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n";
-        eval { Dispatcher::CA::sign_csr(csr_pem => $bad_csr, ca_dir => $ca_dir, days => 1) };
+        eval { Exec::CA::sign_csr(csr_pem => $bad_csr, ca_dir => $ca_dir, days => 1) };
 
         my @after = (bsd_glob('/tmp/*.csr'), bsd_glob('/tmp/*.crt'));
         is scalar @after, scalar @before,
@@ -275,7 +275,7 @@ SKIP: {
         my @before = (bsd_glob("$ca_dir/*.csr"), bsd_glob("$ca_dir/*.crt"));
 
         my $bad_csr = "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n";
-        eval { Dispatcher::CA::sign_csr(csr_pem => $bad_csr, ca_dir => $ca_dir, days => 1) };
+        eval { Exec::CA::sign_csr(csr_pem => $bad_csr, ca_dir => $ca_dir, days => 1) };
 
         my @after = (bsd_glob("$ca_dir/*.csr"), bsd_glob("$ca_dir/*.crt"));
         is scalar @after, scalar @before,
@@ -288,7 +288,7 @@ SKIP: {
     subtest 'CSR format: oversized CSR - no temp file in ca_dir' => sub {
         my @before = bsd_glob("$ca_dir/*");
         eval {
-            Dispatcher::CA::sign_csr(
+            Exec::CA::sign_csr(
                 csr_pem => 'A' x 10_241,
                 ca_dir  => $ca_dir,
                 days    => 1,
@@ -304,7 +304,7 @@ SKIP: {
     subtest 'CN validation: generate_ca with valid CN produces ca.crt' => sub {
         my $d = tempdir(CLEANUP => 1);
         eval {
-            Dispatcher::CA::generate_ca(
+            Exec::CA::generate_ca(
                 cn     => 'Dispatcher CA-01',
                 ca_dir => $d,
                 days   => 1,

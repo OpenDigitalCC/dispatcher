@@ -9,7 +9,7 @@ brand: opendigitalcc
 ## Purpose and Design Criteria
 
 Dispatcher is a Perl machine-to-machine remote script execution system. It
-allows a control host (the dispatcher) to run scripts on remote hosts (agents)
+allows a control host (the ctrl-exec) to run scripts on remote hosts (agents)
 over mTLS-authenticated HTTPS, with no SSH involved.
 
 The design criteria were:
@@ -24,19 +24,19 @@ locked-down execution
   executed via `fork`/`exec` with no shell, preventing injection via arguments.
 
 mTLS trust
-: All operational traffic uses mutual TLS. Both dispatcher and agent present
-  certificates signed by a private CA. The CA is created once on the dispatcher
+: All operational traffic uses mutual TLS. Both ctrl-exec and agent present
+  certificates signed by a private CA. The CA is created once on the ctrl-exec
   host; the CA key never leaves that host.
 
 pairing workflow
 : The initial certificate exchange uses a separate TLS port (7444) where the
-  agent connects to the dispatcher to submit a CSR. The dispatcher holds the
+  agent connects to the ctrl-exec to submit a CSR. The ctrl-exec holds the
   connection open while waiting for operator approval. On approval the CSR is
   signed and the cert is delivered back over the open connection. Approved
   agents are recorded in a persistent registry.
 
 automatic cert renewal
-: Agent certs are renewed automatically by the dispatcher over the mTLS
+: Agent certs are renewed automatically by the ctrl-exec over the mTLS
   operational port (7443). Renewal is triggered when remaining cert validity
   drops below half the configured lifetime. No operator involvement required
   during normal operation.
@@ -47,7 +47,7 @@ argument support
 
 structured logging
 : All actions are logged to syslog in a consistent `ACTION=value KEY=value`
-  format with a request ID that correlates dispatcher and agent log lines for
+  format with a request ID that correlates ctrl-exec and agent log lines for
   the same operation.
 
 auth hook
@@ -56,18 +56,18 @@ auth hook
   environment variables and JSON on stdin. Exit codes map to authorisation
   outcomes. No hook configured means unconditional pass. The hook is the
   intended policy engine for per-token, per-script, and per-argument access
-  control; dispatcher deliberately does not implement config-based ACLs.
+  control; ctrl-exec deliberately does not implement config-based ACLs.
 
 token forwarding pipeline
-: Tokens and usernames are forwarded from the dispatcher through to the agent
+: Tokens and usernames are forwarded from the ctrl-exec through to the agent
   and into the script's stdin context. This supports multi-hop token validation:
-  the dispatcher hook, the agent hook, and the script itself can all
+  the ctrl-exec hook, the agent hook, and the script itself can all
   independently verify that the token is still valid and authorised for the
   stated purpose. Each hop trusts the CA for identity but verifies authority
   independently via its own token validation.
 
 HTTP REST API
-: An optional API server (`dispatcher-api`) exposes the same run, ping, and
+: An optional API server (`ctrl-exec-api`) exposes the same run, ping, and
   discovery operations as HTTP endpoints with JSON request and response bodies.
   Auth hook and lock checking apply identically to CLI and API.
 
@@ -90,35 +90,35 @@ function-based design
   certificates signed by the private CA.
 
 7444
-: Pairing port. Only open when the dispatcher is in `pairing-mode`. TLS server
+: Pairing port. Only open when the ctrl-exec is in `pairing-mode`. TLS server
   cert only (no client cert required) since the agent has no cert yet. Agents
   connect here to submit a CSR and wait for the signed cert.
 
 7445
-: API port. The `dispatcher-api` HTTP server listens here. Plain HTTP by
+: API port. The `ctrl-exec-api` HTTP server listens here. Plain HTTP by
   default; TLS enabled if `api_cert` and `api_key` are set in
-  `dispatcher.conf`. No mTLS - auth is delegated to the auth hook.
+  `ctrl-exec.conf`. No mTLS - auth is delegated to the auth hook.
 
 
 ## Certificate Layout
 
-Dispatcher host (`/etc/dispatcher/`)
+Dispatcher host (`/etc/ctrl-exec/`)
 
 ```
 ca.key          CA private key (0600, root only, never leaves this host)
 ca.crt          CA certificate (distributed to agents during pairing)
 ca.serial       Serial counter for issued certs
-dispatcher.key  Dispatcher's own private key (0600)
-dispatcher.crt  Dispatcher's own cert, signed by CA
+ctrl-exec.key  Dispatcher's own private key (0600)
+ctrl-exec.crt  Dispatcher's own cert, signed by CA
 auth-hook       Auth hook executable (0755)
 ```
 
-Agent host (`/etc/dispatcher-agent/`)
+Agent host (`/etc/ctrl-exec-agent/`)
 
 ```
-agent.key       Agent's private key (0640, root:dispatcher-agent)
-agent.crt       Agent's cert, signed by dispatcher CA (0640, root:dispatcher-agent)
-ca.crt          CA cert from dispatcher (0644)
+agent.key       Agent's private key (0640, root:ctrl-exec-agent)
+agent.crt       Agent's cert, signed by ctrl-exec CA (0640, root:ctrl-exec-agent)
+ca.crt          CA cert from ctrl-exec (0644)
 agent.conf      Port, cert paths, optional script_dirs and tags
 scripts.conf    Allowlist: name = /absolute/path
 ```
@@ -126,24 +126,24 @@ scripts.conf    Allowlist: name = /absolute/path
 Runtime directories
 
 ```
-/var/lib/dispatcher/pairing/    Pairing queue ({reqid}.json, .approved, .denied)
-/var/lib/dispatcher/agents/     Agent registry ({hostname}.json, written at pairing)
-/var/lib/dispatcher/locks/      flock files for host:script concurrency control
+/var/lib/ctrl-exec/pairing/    Pairing queue ({reqid}.json, .approved, .denied)
+/var/lib/ctrl-exec/agents/     Agent registry ({hostname}.json, written at pairing)
+/var/lib/ctrl-exec/locks/      flock files for host:script concurrency control
 ```
 
 
 ## Module Reference
 
-### `Dispatcher::Log`
+### `Exec::Log`
 
 Structured syslog. Call `init()` once at startup, then `log_action()` for each
 event. If `init()` has not been called, `log_action()` falls back to stderr,
 allowing library functions to log without requiring a syslog context.
 
 ```perl
-Dispatcher::Log::init('dispatcher-agent');
+Exec::Log::init('ctrl-exec-agent');
 
-Dispatcher::Log::log_action('INFO', {
+Exec::Log::log_action('INFO', {
     ACTION => 'run',
     SCRIPT => 'backup',
     EXIT   => 0,
@@ -174,7 +174,7 @@ Functions:
 : Closes the syslog handle. Not usually needed explicitly.
 
 
-### `Dispatcher::CA`
+### `Exec::CA`
 
 CA management and CSR signing via `openssl` subprocesses. All crypto is
 delegated to the system `openssl` binary - no Perl crypto modules used.
@@ -182,7 +182,7 @@ delegated to the system `openssl` binary - no Perl crypto modules used.
 Functions:
 
 `generate_ca(%opts)`
-: Generates `ca.key` and `ca.crt` in `ca_dir` (default `/etc/dispatcher`).
+: Generates `ca.key` and `ca.crt` in `ca_dir` (default `/etc/ctrl-exec`).
   Dies if CA already exists unless `force => 1`. Sets `ca.key` to mode 0600.
   Options: `days` (default 3650), `bits` (default 4096), `cn`, `ca_dir`, `force`.
 
@@ -197,23 +197,23 @@ Functions:
   to send the CA cert to the agent alongside the signed agent cert.
 
 `generate_dispatcher_cert(%opts)`
-: Generates `dispatcher.key` (4096-bit RSA, 0600), `dispatcher.csr`, signs it
-  with the CA, writes `dispatcher.crt` (825 days), removes the CSR.
-  Guards: dies if CA does not exist, dies if `dispatcher.crt` already exists
-  unless `force => 1`. Called by `bin/dispatcher setup-dispatcher`.
+: Generates `ctrl-exec.key` (4096-bit RSA, 0600), `ctrl-exec.csr`, signs it
+  with the CA, writes `ctrl-exec.crt` (825 days), removes the CSR.
+  Guards: dies if CA does not exist, dies if `ctrl-exec.crt` already exists
+  unless `force => 1`. Called by `bin/ctrl-exec setup-ctrl-exec`.
   Options: `ca_dir`, `force`.
 
 
-### `Dispatcher::Pairing`
+### `Exec::Pairing`
 
 Dispatcher-side pairing server and approval queue. Handles the initial
-certificate exchange from the dispatcher's perspective.
+certificate exchange from the ctrl-exec's perspective.
 
 The pairing flow uses the filesystem as a message queue between the main
-dispatcher process (which the operator interacts with via `approve`/`deny`)
+ctrl-exec process (which the operator interacts with via `approve`/`deny`)
 and the forked child processes (which hold connections open to waiting agents).
 
-File states in `/var/lib/dispatcher/pairing/`:
+File states in `/var/lib/ctrl-exec/pairing/`:
 
 ```
 {reqid}.json      Pending request (CSR, hostname, IP, nonce, timestamp)
@@ -224,12 +224,12 @@ File states in `/var/lib/dispatcher/pairing/`:
 The child polls every 2 seconds for up to 10 minutes. On finding an `.approved`
 or `.denied` file it sends the response and exits.
 
-`approve_request` also calls `Dispatcher::Registry::register_agent()` to write
+`approve_request` also calls `Exec::Registry::register_agent()` to write
 a persistent record of the approved agent before cleaning up the pairing files.
 
 Nonce
 : Each pairing request carries a random nonce generated by the agent. The
-  dispatcher stores it in the `.json` queue file and echoes it in the
+  ctrl-exec stores it in the `.json` queue file and echoes it in the
   `.approved` response. The agent verifies the nonce matches before storing
   the delivered certs. This prevents misrouted or replayed approval responses.
 
@@ -261,9 +261,9 @@ Functions:
   `hostname`, `ip`, `csr`, `nonce`, `received`.
 
 `approve_request(%opts)`
-: Reads the `.json` file, signs the CSR with `Dispatcher::CA::sign_csr()`,
+: Reads the `.json` file, signs the CSR with `Exec::CA::sign_csr()`,
   writes the signed cert, CA cert, and echoed nonce to `{reqid}.approved`, then
-  calls `Dispatcher::Registry::register_agent()`. The waiting child picks this
+  calls `Exec::Registry::register_agent()`. The waiting child picks this
   up within 2 seconds and delivers it to the agent.
   Options: `reqid` (required), `ca_dir`, `pairing_dir`, `log_fn`.
 
@@ -280,15 +280,15 @@ Important SSL note - `SSL_no_shutdown => 1` on parent close
   to a child.
 
 
-### `Dispatcher::Rotation`
+### `Exec::Rotation`
 
-Dispatcher cert lifecycle management. Monitors the dispatcher's own cert
+Dispatcher cert lifecycle management. Monitors the ctrl-exec's own cert
 expiry, rotates it when approaching expiry, and broadcasts the new serial to
-all registered agents so they can update their trusted-dispatcher serial.
+all registered agents so they can update their trusted-ctrl-exec serial.
 
 The module is used in two ways: `check_and_rotate` is called at startup and
 by the background loop in `run_check_loop`; `rotate` is called directly by
-`dispatcher rotate-cert` for operator-initiated rotation.
+`ctrl-exec rotate-cert` for operator-initiated rotation.
 
 Call sequence for automatic rotation:
 
@@ -297,10 +297,10 @@ run_check_loop
   └─ expire_stale_agents   (mark pending agents stale after overlap window)
   └─ check_and_rotate      (check expiry; calls _do_rotation if renewal due)
        └─ _do_rotation     (regenerate cert, write rotation.json, mark agents pending)
-  └─ broadcast_serial      (run update-dispatcher-serial on all pending agents)
+  └─ broadcast_serial      (run update-ctrl-exec-serial on all pending agents)
 ```
 
-Call sequence for manual rotation (`dispatcher rotate-cert`):
+Call sequence for manual rotation (`ctrl-exec rotate-cert`):
 
 ```
 rotate
@@ -308,7 +308,7 @@ rotate
 broadcast_serial            (called separately by the CLI mode)
 ```
 
-Rotation state (`/var/lib/dispatcher/rotation.json`):
+Rotation state (`/var/lib/ctrl-exec/rotation.json`):
 
 ```json
 {
@@ -330,14 +330,14 @@ Agent serial status values in the registry:
 ```
 unknown    Paired before serial tracking was introduced
 pending    Serial broadcast attempted but not yet confirmed
-confirmed  Agent has acknowledged the current dispatcher serial
+confirmed  Agent has acknowledged the current ctrl-exec serial
 stale      Overlap window expired without confirmation
 ```
 
 Functions:
 
 `check_and_rotate(%opts)`
-: Reads the dispatcher cert expiry. If remaining days is below
+: Reads the ctrl-exec cert expiry. If remaining days is below
   `cert_renewal_days` (default 90), calls `_do_rotation`. Returns
   `{ rotated => 0 }`, `{ rotated => 1, serial => $hex, ... }`, or
   `{ rotated => 0, error => $str }` for non-fatal failures.
@@ -345,12 +345,12 @@ Functions:
 
 `rotate(%opts)`
 : Unconditional rotation. Thin wrapper around `_do_rotation`. Used by
-  `dispatcher rotate-cert`. Required: `config`.
+  `ctrl-exec rotate-cert`. Required: `config`.
 
 `load_state(%opts)`
 : Reads and parses `rotation.json`. Returns the state hashref or `undef` if
   the file does not exist or is corrupt. Logs `ERR` on corrupt file.
-  Optional: `path` (default `/var/lib/dispatcher/rotation.json`).
+  Optional: `path` (default `/var/lib/ctrl-exec/rotation.json`).
 
 `expire_stale_agents(%opts)`
 : Reads rotation state. If `overlap_expires` is in the past, marks all
@@ -360,9 +360,9 @@ Functions:
 `broadcast_serial(%opts)`
 : Reads rotation state to find `current_serial`. Queries the registry for
   agents with status `pending` or `unknown`. Dispatches
-  `update-dispatcher-serial` to all of them in parallel via
-  `Dispatcher::Engine::dispatch_all`. On success for each agent, calls
-  `Dispatcher::Registry::update_agent_serial_status` to set status
+  `update-ctrl-exec-serial` to all of them in parallel via
+  `Exec::Engine::dispatch_all`. On success for each agent, calls
+  `Exec::Registry::update_agent_serial_status` to set status
   `confirmed`. Returns arrayref of `{ hostname, status => 'ok'|'failed', error? }`.
   Required: `config`.
 
@@ -377,10 +377,10 @@ Private functions:
 
 `_do_rotation(%opts)`
 : Core rotation logic. Reads the old cert serial, calls
-  `Dispatcher::CA::generate_dispatcher_cert(force => 1)` to replace the cert,
+  `Exec::CA::generate_dispatcher_cert(force => 1)` to replace the cert,
   reads the new serial, writes `rotation.json` with `overlap_expires` set to
   now + `cert_overlap_days`, then marks all registered agents as `pending` via
-  `Dispatcher::Registry::update_agent_serial_status`. Returns the result
+  `Exec::Registry::update_agent_serial_status`. Returns the result
   hashref passed back through `rotate` and `check_and_rotate`.
 
 `_read_cert_serial($path)`
@@ -391,14 +391,14 @@ Private functions:
   Returns a number (may be negative for expired certs).
 
 
-### `Dispatcher::Registry`
+### `Exec::Registry`
 
-Persistent store of all paired agents. Written by `Dispatcher::Pairing::approve_request`
-at pairing time and updated by `Dispatcher::Engine::_renew_one` after cert
-renewal. Read by `bin/dispatcher list-agents` and by `Dispatcher::API` for
+Persistent store of all paired agents. Written by `Exec::Pairing::approve_request`
+at pairing time and updated by `Exec::Engine::_renew_one` after cert
+renewal. Read by `bin/ctrl-exec list-agents` and by `Exec::API` for
 the `/discovery` endpoint.
 
-One JSON file per agent in `/var/lib/dispatcher/agents/{hostname}.json`.
+One JSON file per agent in `/var/lib/ctrl-exec/agents/{hostname}.json`.
 Re-pairing the same hostname overwrites its registry entry. Files are written
 atomically via temp file and rename.
 
@@ -445,7 +445,7 @@ Functions:
   after unpairing.
 
 
-### `Dispatcher::Engine`
+### `Exec::Engine`
 
 Parallel dispatch, ping, capabilities query, and automatic cert renewal. Uses
 fork-per-host with pipes to collect results. No threads.
@@ -456,7 +456,7 @@ children and reading their pipes as they finish.
 
 Cert renewal is triggered automatically after every successful ping. If the
 agent's cert expiry (returned in the ping response) is within half the
-configured `cert_days`, the dispatcher initiates renewal over the same mTLS
+configured `cert_days`, the ctrl-exec initiates renewal over the same mTLS
 connection. Renewal failure is logged at ERR level but does not affect the
 ping result.
 
@@ -509,7 +509,7 @@ Private functions (not part of public API but documented for extension):
 
 `_renew_one(%opts)`
 : Performs the full renewal exchange for one agent: POST `/renew` to get CSR,
-  sign via `Dispatcher::CA::sign_csr`, POST `/renew-complete` to deliver cert,
+  sign via `Exec::CA::sign_csr`, POST `/renew-complete` to deliver cert,
   update registry. Dies on any failure so the caller can log at ERR.
   Required: `host`, `port`, `config`, `reqid`.
 
@@ -518,12 +518,12 @@ Private functions (not part of public API but documented for extension):
   -enddate`. Returns the date string or undef on failure.
 
 
-### `Dispatcher::Auth`
+### `Exec::Auth`
 
 Auth hook runner. Called before every `run` and `ping` operation from both
 the CLI and the API. Also called by the agent's `handle_run` when
-`config->{auth_hook}` is set - the same module serves both dispatcher-side
-and agent-side hook execution. If no hook is configured (dispatcher or agent),
+`config->{auth_hook}` is set - the same module serves both ctrl-exec-side
+and agent-side hook execution. If no hook is configured (ctrl-exec or agent),
 all requests pass unconditionally.
 
 The hook is an external executable called with request context as environment
@@ -546,29 +546,29 @@ Exit codes:
 Environment variables passed to hook:
 
 ```
-DISPATCHER_ACTION      run | ping
-DISPATCHER_SCRIPT      script name (empty for ping)
-DISPATCHER_HOSTS       comma-separated host list
-DISPATCHER_ARGS        space-joined args (lossy if args contain spaces - see below)
-DISPATCHER_ARGS_JSON   args as a JSON array string (reliable for all arg values)
-DISPATCHER_USERNAME    username from request (may be empty)
-DISPATCHER_TOKEN       token from request (may be empty)
-DISPATCHER_SOURCE_IP   originating IP address
-DISPATCHER_TIMESTAMP   ISO8601 UTC timestamp
+ENVEXEC_ACTION      run | ping
+ENVEXEC_SCRIPT      script name (empty for ping)
+ENVEXEC_HOSTS       comma-separated host list
+ENVEXEC_ARGS        space-joined args (lossy if args contain spaces - see below)
+ENVEXEC_ARGS_JSON   args as a JSON array string (reliable for all arg values)
+ENVEXEC_USERNAME    username from request (may be empty)
+ENVEXEC_TOKEN       token from request (may be empty)
+ENVEXEC_SOURCE_IP   originating IP address
+ENVEXEC_TIMESTAMP   ISO8601 UTC timestamp
 ```
 
-`DISPATCHER_ARGS` vs `DISPATCHER_ARGS_JSON`
-: `DISPATCHER_ARGS` is kept for backwards compatibility but is ambiguous when
+`ENVEXEC_ARGS` vs `ENVEXEC_ARGS_JSON`
+: `ENVEXEC_ARGS` is kept for backwards compatibility but is ambiguous when
   arguments contain spaces - a hook reading it will silently miscalculate the
-  argument count. `DISPATCHER_ARGS_JSON` contains the args as a proper JSON
+  argument count. `ENVEXEC_ARGS_JSON` contains the args as a proper JSON
   array and should be used for all argument inspection. Example hook pattern
   using JSON stdin (more complete than env vars alone):
 
 ```bash
 #!/bin/bash
 # Restrict the backup token to backup-* scripts only
-if [[ "$DISPATCHER_TOKEN" == "backup-token" ]]; then
-    if [[ "$DISPATCHER_SCRIPT" != backup-* ]]; then
+if [[ "$ENVEXEC_TOKEN" == "backup-token" ]]; then
+    if [[ "$ENVEXEC_SCRIPT" != backup-* ]]; then
         exit 3   # insufficient privilege
     fi
 fi
@@ -605,11 +605,11 @@ Functions:
   `token`, `source_ip`. Returns `{ ok => 1 }` or `{ ok => 0, reason => $str, code => $n }`.
 
 
-### `Dispatcher::Lock`
+### `Exec::Lock`
 
 flock-based concurrency control. Prevents two concurrent requests from running
 the same script on the same host simultaneously. Lock files live in
-`/var/lib/dispatcher/locks/`.
+`/var/lib/ctrl-exec/locks/`.
 
 The pattern is check-then-acquire in two separate calls:
 
@@ -648,9 +648,9 @@ Functions:
   Closes all filehandles, releasing all flocks.
 
 
-### `Dispatcher::Output`
+### `Exec::Output`
 
-Output formatting for CLI tables. Extracted from `bin/dispatcher` to enable
+Output formatting for CLI tables. Extracted from `bin/ctrl-exec` to enable
 independent unit testing. All functions write to stdout.
 
 Functions:
@@ -673,7 +673,7 @@ Functions:
   scripts, tags, and status.
 
 
-### `Dispatcher::API`
+### `Exec::API`
 
 HTTP API server. Listens on `api_port` (default 7445). TLS is enabled if
 `api_cert` and `api_key` are present in config; plain HTTP otherwise.
@@ -683,7 +683,7 @@ request. The child handles the request and exits. The parent reaps children
 with a SIGCHLD handler calling `waitpid(-1, WNOHANG)`.
 
 `SSL_no_shutdown => 1` is used on both parent and child connection close, for
-the same reason as in the pairing server - see the note in `Dispatcher::Pairing`.
+the same reason as in the pairing server - see the note in `Exec::Pairing`.
 
 Endpoints:
 
@@ -722,7 +722,7 @@ Functions:
 : Required: `config`. Starts the server and blocks until SIGTERM or SIGINT.
 
 
-### `Dispatcher::Agent::Config`
+### `Exec::Agent::Config`
 
 Config and allowlist loading for the agent. Both functions die on unrecoverable
 errors (missing file, required key absent) and warn on recoverable issues
@@ -755,15 +755,15 @@ Config format (`agent.conf`):
 
 ```ini
 port = 7443
-cert = /etc/dispatcher-agent/agent.crt
-key  = /etc/dispatcher-agent/agent.key
-ca   = /etc/dispatcher-agent/ca.crt
+cert = /etc/ctrl-exec-agent/agent.crt
+key  = /etc/ctrl-exec-agent/agent.key
+ca   = /etc/ctrl-exec-agent/ca.crt
 
 # Optional: restrict scripts to approved directories
-# script_dirs = /opt/dispatcher-scripts:/usr/local/lib/dispatcher-scripts
+# script_dirs = /opt/ctrl-exec-scripts:/usr/local/lib/ctrl-exec-scripts
 
 # Optional: agent-side auth hook for independent token validation
-# auth_hook = /etc/dispatcher-agent/auth-hook
+# auth_hook = /etc/ctrl-exec-agent/auth-hook
 
 [tags]
 env  = prod
@@ -775,12 +775,12 @@ Allowlist format (`scripts.conf`):
 
 ```ini
 # name = /absolute/path/to/script
-check-disk    = /opt/dispatcher-scripts/check-disk.sh
-backup-mysql  = /opt/dispatcher-scripts/backup-mysql.sh
+check-disk    = /opt/ctrl-exec-scripts/check-disk.sh
+backup-mysql  = /opt/ctrl-exec-scripts/backup-mysql.sh
 ```
 
 
-### `Dispatcher::Agent::Runner`
+### `Exec::Agent::Runner`
 
 Script execution. Forks a child, redirects stdin, stdout, and stderr to pipes,
 calls `exec { $path } $path, @args` (no shell). The parent writes the request
@@ -814,20 +814,20 @@ script      Script name as requested
 args        Arrayref of positional arguments
 reqid       Request ID
 peer_ip     Dispatcher's IP address
-username    Username from the dispatcher request (may be empty)
-token       Auth token from the dispatcher request (may be empty)
+username    Username from the ctrl-exec request (may be empty)
+token       Auth token from the ctrl-exec request (may be empty)
 timestamp   ISO 8601 UTC timestamp of the request
 ```
 
 
-### `Dispatcher::Agent::Pairing`
+### `Exec::Agent::AgentPairing`
 
 Agent-side pairing and cert renewal support. Generates key and CSR, connects
-to the dispatcher pairing port, submits the CSR and waits (up to 11 minutes)
+to the ctrl-exec pairing port, submits the CSR and waits (up to 11 minutes)
 for the signed cert. Also handles cert-only renewal using the existing key.
 
 The 11-minute timeout on the socket is intentionally longer than the
-dispatcher's 10-minute poll window, so the agent gets a proper denial response
+ctrl-exec's 10-minute poll window, so the agent gets a proper denial response
 rather than a socket timeout.
 
 Nonce
@@ -849,14 +849,14 @@ Functions:
   file does not exist.
 
 `request_pairing(%opts)`
-: Connects to the dispatcher's pairing port, sends `{ hostname, csr, nonce }`,
+: Connects to the ctrl-exec's pairing port, sends `{ hostname, csr, nonce }`,
   waits for response, verifies nonce. Returns `{ ok => 1, cert_pem, ca_pem }`
   or `{ ok => 0, error }`.
-  Options: `dispatcher` (required), `csr_pem`, `hostname`, `port` (default 7444).
+  Options: `ctrl-exec` (required), `csr_pem`, `hostname`, `port` (default 7444).
 
 `store_certs(%opts)`
 : Writes `agent.crt` (0640), `agent.key` (0640), `ca.crt` (0644) to `cert_dir`.
-  Uses atomic rename via temp file. Sets group ownership to `dispatcher-agent`
+  Uses atomic rename via temp file. Sets group ownership to `ctrl-exec-agent`
   if the group exists on the system.
 
 `pairing_status(%opts)`
@@ -866,44 +866,44 @@ Functions:
 HTTP response reading
 : `request_pairing` reads headers line-by-line until the blank separator,
   extracts `Content-Length`, then calls `read()` for exactly that many bytes.
-  Reading to EOF would block - the dispatcher child holds the connection open
+  Reading to EOF would block - the ctrl-exec child holds the connection open
   while polling and does not close it when sending the response.
 
 
-## `bin/dispatcher`
+## `bin/ctrl-exec`
 
-The dispatcher CLI. Argument parsing and output formatting only; all business
+The ctrl-exec CLI. Argument parsing and output formatting only; all business
 logic is in the library modules.
 
 Modes:
 
 `setup-ca`
-: Calls `Dispatcher::CA::generate_ca()`. One-time operation on the dispatcher
-  host. Creates the CA key and cert in `/etc/dispatcher/`.
+: Calls `Exec::CA::generate_ca()`. One-time operation on the ctrl-exec
+  host. Creates the CA key and cert in `/etc/ctrl-exec/`.
 
-`setup-dispatcher`
-: Calls `Dispatcher::CA::generate_dispatcher_cert()`. Generates the
-  dispatcher's own key and cert signed by the CA. Run after `setup-ca`.
+`setup-ctrl-exec`
+: Calls `Exec::CA::generate_dispatcher_cert()`. Generates the
+  ctrl-exec's own key and cert signed by the CA. Run after `setup-ca`.
   Replaces the four manual openssl commands previously required.
 
 `pairing-mode`
-: Calls `Dispatcher::Pairing::run_pairing_mode()`. Blocks until interrupted.
+: Calls `Exec::Pairing::run_pairing_mode()`. Blocks until interrupted.
   Interactive when run in a terminal (tty): displays incoming requests and
   prompts for approve/deny. Non-interactive when piped or run from a service.
 
 `list-requests`
-: Calls `Dispatcher::Pairing::list_requests()` and prints a table.
+: Calls `Exec::Pairing::list_requests()` and prints a table.
 
 `approve <reqid>` / `deny <reqid>`
-: Calls `Dispatcher::Pairing::approve_request()` or `deny_request()`.
-  `approve` also triggers registry write via `Dispatcher::Registry`.
+: Calls `Exec::Pairing::approve_request()` or `deny_request()`.
+  `approve` also triggers registry write via `Exec::Registry`.
 
 `list-agents`
-: Calls `Dispatcher::Registry::list_agents()` and prints a table of all
+: Calls `Exec::Registry::list_agents()` and prints a table of all
   paired agents with hostname, IP, paired timestamp, and cert expiry.
 
 `unpair <hostname>`
-: Calls `Dispatcher::Registry::remove_agent()`. Removes the agent from the
+: Calls `Exec::Registry::remove_agent()`. Removes the agent from the
   registry and prints a warning that the cert remains valid until expiry.
   Logs `ACTION=unpair` with the cert expiry date.
 
@@ -915,7 +915,7 @@ Modes:
 : Auth hook checked, then `Lock::check_available`, then `Engine::dispatch_all`.
 
 Auth options
-: `--token` reads from the flag or `$DISPATCHER_TOKEN` env var (never appears
+: `--token` reads from the flag or `$ENVEXEC_TOKEN` env var (never appears
   in `ps` output when set via env). `--username` defaults to `$ENV{USER}`.
   Source IP is hardcoded to `127.0.0.1` for CLI calls.
 
@@ -923,7 +923,7 @@ Testability
 : `main()` is called as `main() unless caller`. This means the file can be
   `do`'d by test files without triggering execution - the standard Perl idiom
   for making a script's functions testable without a separate library. The
-  `dispatcher-cli.t` test relies on this to load `_parse_run_args` and
+  `ctrl-exec-cli.t` test relies on this to load `_parse_run_args` and
   `_format_*` functions without running the CLI.
 
 Arg parsing for `run`
@@ -933,7 +933,7 @@ Arg parsing for `run`
   `--` is not consumed by the option parser.
 
 
-## `bin/dispatcher-agent`
+## `bin/ctrl-exec-agent`
 
 The agent daemon. Listens on port 7443 using `IO::Socket::SSL` directly.
 
@@ -951,13 +951,13 @@ Modes:
   `script_dirs` changes, and `auth_hook` changes take effect on reload.
 
 `request-pairing`
-: Performs a preflight writability check on `/etc/dispatcher-agent` before
+: Performs a preflight writability check on `/etc/ctrl-exec-agent` before
   making any network connection. Dies immediately with "re-run with sudo" if
   the directory is not writable. On success: generates key and CSR, connects
-  to the dispatcher pairing port, waits for approval, stores certs.
+  to the ctrl-exec pairing port, waits for approval, stores certs.
 
 `pairing-status`
-: Calls `Agent::Pairing::pairing_status()` and prints the result.
+: Calls `Exec::Agent::AgentPairing::pairing_status()` and prints the result.
 
 `ping-self`
 : Loads config, allowlist, and cert status without starting the server.
@@ -972,10 +972,10 @@ that needs to hook into the loop:
 ```perl
 sub mode_serve {
     # Load initial state
-    my $config    = Dispatcher::Agent::Config::load_config($CONFIG_PATH);
-    my $allowlist = Dispatcher::Agent::Config::load_allowlist($ALLOWLIST_PATH);
-    my $revoked   = Dispatcher::Agent::Pairing::load_revoked_serials(...);
-    my $disp_serial = Dispatcher::Agent::Pairing::load_dispatcher_serial(...);
+    my $config    = Exec::Agent::Config::load_config($CONFIG_PATH);
+    my $allowlist = Exec::Agent::Config::load_allowlist($ALLOWLIST_PATH);
+    my $revoked   = Exec::Agent::AgentPairing::load_revoked_serials(...);
+    my $disp_serial = Exec::Agent::AgentPairing::load_dispatcher_serial(...);
 
     # SIGHUP handler is top-level in mode_serve (not local $SIG{HUP}).
     # It closes over $allowlist, $revoked, $disp_serial and reassigns them.
@@ -1027,16 +1027,16 @@ sub mode_serve {
   All variables come from `mode_serve`'s scope and are passed explicitly - there
   is no closure over them. `$peer_serial` is a plain lowercase hex string (or
   `''`) extracted before fork. `$revoked` is a hashref keyed by hex serial.
-  `$disp_serial` is the stored dispatcher serial hex string (or `''` if not
+  `$disp_serial` is the stored ctrl-exec serial hex string (or `''` if not
   yet set).
 
 Testability
-: `bin/dispatcher-agent` calls `main()` unconditionally — it does not use
-  the `main() unless caller` idiom used by `bin/dispatcher`. This is a
+: `bin/ctrl-exec-agent` calls `main()` unconditionally — it does not use
+  the `main() unless caller` idiom used by `bin/ctrl-exec`. This is a
   deliberate design choice: functions defined in the binary (`_peer_serial`,
   `handle_connection`, `handle_capabilities`) are covered by integration
   tests, which exercise them through the full accept-loop path. Unit tests
-  target `Dispatcher::Agent::Config`, `Dispatcher::Agent::Runner`, and other
+  target `Exec::Agent::Config`, `Exec::Agent::Runner`, and other
   library modules directly. This boundary keeps integration test coverage
   where it is most meaningful for the binary's concurrent, socket-driven
   logic, and keeps unit test coverage targeted at the library modules where
@@ -1065,9 +1065,9 @@ Endpoints handled in `handle_connection`:
 `POST /run`
 : Extracts `script`, `args`, `reqid`, `username`, and `token` from the request
   body. Validates the script name against the allowlist (and `script_dirs` if
-  configured). If `config->{auth_hook}` is set, calls `Dispatcher::Auth::check`
+  configured). If `config->{auth_hook}` is set, calls `Exec::Auth::check`
   with the full request context including `username` and `token` - this is the
-  agent-side auth hook, independent of the dispatcher's own hook. On pass,
+  agent-side auth hook, independent of the ctrl-exec's own hook. On pass,
   builds a `$context` hashref (script, args, reqid, peer_ip, username, token,
   timestamp) and passes it to `Agent::Runner::run_script`. Returns
   `{ script, exit, stdout, stderr, reqid }`.
@@ -1082,22 +1082,22 @@ Endpoints handled in `handle_connection`:
 
 `POST /renew`
 : Dispatcher-initiated cert renewal request. Loads config to find the existing
-  key path, calls `Agent::Pairing::generate_csr_only`, returns
+  key path, calls `Exec::Agent::AgentPairing::generate_csr_only`, returns
   `{ status: "ok", csr: "<PEM>", reqid }`. Dies on config or CSR generation
   failure.
 
 `POST /renew-complete`
-: Receives `{ cert, ca, reqid }` from the dispatcher, calls `store_certs` with
+: Receives `{ cert, ca, reqid }` from the ctrl-exec, calls `store_certs` with
   the new cert and the existing key. Logs `ACTION=renew-complete STATUS=cert-stored`.
 
 
-## `bin/dispatcher-api`
+## `bin/ctrl-exec-api`
 
-Entry point for the HTTP API server. Loads config, calls `Dispatcher::API::run`.
-Installed as a systemd service (`dispatcher-api.service`).
+Entry point for the HTTP API server. Loads config, calls `Exec::API::run`.
+Installed as a systemd service (`ctrl-exec-api.service`).
 
-The service runs as `root:dispatcher` with `ProtectSystem=strict` and
-`ReadWritePaths=/var/lib/dispatcher`. The `dispatcher` group is created by the
+The service runs as `root:ctrl-exec` with `ProtectSystem=strict` and
+`ReadWritePaths=/var/lib/ctrl-exec`. The `ctrl-exec` group is created by the
 installer and grants CLI access without sudo to users added to it.
 
 
@@ -1105,7 +1105,7 @@ installer and grants CLI access without sudo to users added to it.
 
 All JSON over HTTP/1.0.
 
-Agent endpoints (dispatcher → agent, mTLS on port 7443):
+Agent endpoints (ctrl-exec → agent, mTLS on port 7443):
 
 Run request (`POST /run`):
 
@@ -1119,7 +1119,7 @@ Run request (`POST /run`):
 }
 ```
 
-`username` and `token` are forwarded from the dispatcher request (CLI flag,
+`username` and `token` are forwarded from the ctrl-exec request (CLI flag,
 env var, or API body). The agent does not validate them directly - it passes
 them to its own auth hook (if configured) and into the script's stdin context.
 
@@ -1148,30 +1148,30 @@ Capabilities response (`GET /capabilities`):
   "status": "ok", "host": "agent-host-01", "version": "0.1",
   "tags": { "env": "prod", "role": "db" },
   "scripts": [
-    { "name": "backup-mysql", "path": "/opt/dispatcher-scripts/backup-mysql.sh", "executable": true }
+    { "name": "backup-mysql", "path": "/opt/ctrl-exec-scripts/backup-mysql.sh", "executable": true }
   ]
 }
 ```
 
-Cert renewal request (`POST /renew`, dispatcher → agent):
+Cert renewal request (`POST /renew`, ctrl-exec → agent):
 
 ```json
 { "reqid": "c1d2e3f40001" }
 ```
 
-Cert renewal response (agent → dispatcher):
+Cert renewal response (agent → ctrl-exec):
 
 ```json
 { "status": "ok", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "reqid": "c1d2e3f40001" }
 ```
 
-Cert delivery (`POST /renew-complete`, dispatcher → agent):
+Cert delivery (`POST /renew-complete`, ctrl-exec → agent):
 
 ```json
 { "status": "ok", "cert": "-----BEGIN CERTIFICATE-----\n...", "ca": "-----BEGIN CERTIFICATE-----\n...", "reqid": "c1d2e3f40001" }
 ```
 
-Pairing request (agent → dispatcher, port 7444, `POST /pair`):
+Pairing request (agent → ctrl-exec, port 7444, `POST /pair`):
 
 ```json
 { "hostname": "agent-host-01", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...", "nonce": "a3f4c2b1..." }
@@ -1183,7 +1183,7 @@ Pairing response:
 { "status": "approved", "cert": "-----BEGIN CERTIFICATE-----\n...", "ca": "-----BEGIN CERTIFICATE-----\n...", "nonce": "a3f4c2b1..." }
 ```
 
-API endpoints (caller → dispatcher-api, port 7445):
+API endpoints (caller → ctrl-exec-api, port 7445):
 
 `POST /ping` request:
 
@@ -1232,21 +1232,21 @@ Add new actions there when introducing new log calls.
 Quick examples for orientation:
 
 ```
-dispatcher[1234]: ACTION=dispatch HOSTS=agent-host-02 REQID=a3f9b2c10001 SCRIPT=backup-mysql
-dispatcher[1234]: ACTION=run EXIT=0 REQID=a3f9b2c10001 RTT=87ms SCRIPT=backup-mysql TARGET=agent-host-02:7443
-dispatcher[1234]: ACTION=pair-approve AGENT=agent-host-01 REQID=fa5e74630001
-dispatcher-agent[5678]: ACTION=run EXIT=0 PEER=192.0.2.11 REQID=a3f9b2c10001 SCRIPT=backup-mysql
-dispatcher-api[9012]: ACTION=api-request LEN=25 METHOD=POST PATH=/ping PEER=127.0.0.1
+ctrl-exec[1234]: ACTION=dispatch HOSTS=agent-host-02 REQID=a3f9b2c10001 SCRIPT=backup-mysql
+ctrl-exec[1234]: ACTION=run EXIT=0 REQID=a3f9b2c10001 RTT=87ms SCRIPT=backup-mysql TARGET=agent-host-02:7443
+ctrl-exec[1234]: ACTION=pair-approve AGENT=agent-host-01 REQID=fa5e74630001
+ctrl-exec-agent[5678]: ACTION=run EXIT=0 PEER=192.0.2.11 REQID=a3f9b2c10001 SCRIPT=backup-mysql
+ctrl-exec-api[9012]: ACTION=api-request LEN=25 METHOD=POST PATH=/ping PEER=127.0.0.1
 ```
 
-The `REQID` field appears in both dispatcher and agent log lines for the
+The `REQID` field appears in both ctrl-exec and agent log lines for the
 same operation, enabling cross-host log correlation.
 
 
 ## Automatic Cert Renewal
 
-Cert lifetime is configured in `dispatcher.conf` as `cert_days` (default 365).
-Renewal is triggered by the dispatcher after every successful ping when the
+Cert lifetime is configured in `ctrl-exec.conf` as `cert_days` (default 365).
+Renewal is triggered by the ctrl-exec after every successful ping when the
 agent's remaining cert validity drops below half the configured lifetime.
 
 The renewal flow:
@@ -1257,11 +1257,11 @@ The renewal flow:
 2. If renewal is due, `_renew_one` sends `POST /renew` to the agent. The agent
    generates a CSR from its existing key (`generate_csr_only`) and returns it.
    The key is not regenerated - key continuity is preserved across renewals.
-3. The dispatcher signs the CSR via `Dispatcher::CA::sign_csr` using
+3. The ctrl-exec signs the CSR via `Exec::CA::sign_csr` using
    `cert_days` from config, then sends `POST /renew-complete` with the new
    cert and CA PEM.
 4. The agent stores the new cert via `store_certs` and logs completion.
-5. The dispatcher updates the registry expiry for the agent.
+5. The ctrl-exec updates the registry expiry for the agent.
 
 Renewal failure is logged at ERR level and does not affect the ping result.
 The operator can investigate via syslog. A cert that fails renewal will
@@ -1291,7 +1291,7 @@ no shell execution
   Shell metacharacters in arguments have no effect.
 
 mTLS on port 7443
-: `SSL_verify_mode => SSL_VERIFY_PEER` on both sides means both dispatcher and
+: `SSL_verify_mode => SSL_VERIFY_PEER` on both sides means both ctrl-exec and
   agent must present a cert signed by the CA. An agent with no cert, or a cert
   signed by a different CA, cannot connect.
 
@@ -1303,19 +1303,19 @@ pairing port security
   prevents misrouted or replayed approvals.
 
 pairing preflight check
-: `request-pairing` verifies that `/etc/dispatcher-agent` is writable before
+: `request-pairing` verifies that `/etc/ctrl-exec-agent` is writable before
   making any network connection. This prevents a stale pairing request being
-  left in the dispatcher queue when the agent cannot write the received certs.
+  left in the ctrl-exec queue when the agent cannot write the received certs.
 
 cert renewal security
 : Renewal uses the already-authenticated mTLS connection on port 7443. The
-  dispatcher only initiates renewal for hosts in its registry. The agent only
+  ctrl-exec only initiates renewal for hosts in its registry. The agent only
   accepts renewal over the authenticated operational port - pairing mode does
   not need to be running.
 
 unpairing
-: `dispatcher unpair <hostname>` removes the registry entry, ending the
-  dispatcher's knowledge of the agent. The agent's cert remains technically
+: `ctrl-exec unpair <hostname>` removes the registry entry, ending the
+  ctrl-exec's knowledge of the agent. The agent's cert remains technically
   valid until its natural expiry date. No CRL mechanism is implemented. The
   agent should be decommissioned promptly after unpairing.
 
@@ -1325,21 +1325,21 @@ API security
   token or credential checking for any internet-facing deployment.
 
 auth hook token
-: The token is passed to the hook via `DISPATCHER_TOKEN` env var and as a JSON
-  field on stdin. It is never logged by the dispatcher. The CLI reads it from
-  `--token` or `$DISPATCHER_TOKEN` env var; using the env var prevents the
+: The token is passed to the hook via `ENVEXEC_TOKEN` env var and as a JSON
+  field on stdin. It is never logged by the ctrl-exec. The CLI reads it from
+  `--token` or `$ENVEXEC_TOKEN` env var; using the env var prevents the
   token appearing in `ps` output.
 
 file permissions
 : CA key: 0600 root. Dispatcher cert/key: 0600 root. Agent cert/key: 0640
-  root:dispatcher-agent. Scripts: 0750 root:dispatcher-agent. The
-  `dispatcher-agent` system user has no login shell and no home directory.
-  Runtime dirs: 0770 root:dispatcher.
+  root:ctrl-exec-agent. Scripts: 0750 root:ctrl-exec-agent. The
+  `ctrl-exec-agent` system user has no login shell and no home directory.
+  Runtime dirs: 0770 root:ctrl-exec.
 
 systemd hardening
 : The agent unit sets `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`,
   `PrivateTmp`, `PrivateDevices`. The API unit sets the same and restricts
-  writes to `/var/lib/dispatcher`.
+  writes to `/var/lib/ctrl-exec`.
 
 
 ## Known Issues and Bugs Fixed
@@ -1373,14 +1373,14 @@ Interactive pairing prompt buffering (fixed)
   `handle_run`'s signature but `handle_connection` - which sits between
   `mode_serve` and `handle_run` - was not updated to receive and forward it.
   This caused a compile-time error (`Global symbol "$config" requires explicit
-  package name`) when `dispatcher-agent request-pairing` was run. Fixed by
+  package name`) when `ctrl-exec-agent request-pairing` was run. Fixed by
   passing `$config` at the `handle_connection` call site in `mode_serve` and
   adding it to `handle_connection`'s parameter list.
 
 `_renewal_due`, `_renew_one`, `_extract_expiry` lost from `Engine.pm` (fixed)
 : These private functions were inadvertently removed from `Engine.pm` during
   an edit session. Their absence caused `renewal.t` to fail with
-  `Undefined subroutine &Dispatcher::Engine::_renewal_due` and also silently
+  `Undefined subroutine &Exec::Engine::_renewal_due` and also silently
   disabled automatic cert renewal in `ping_all`. Restored in full.
 
 `_renewal_due` test assertions inverted (fixed)
@@ -1408,20 +1408,20 @@ On the agent host:
 
 ```bash
 # Place script in the managed directory
-sudo cp my-script.sh /opt/dispatcher-scripts/
-sudo chmod 750 /opt/dispatcher-scripts/my-script.sh
-sudo chown root:dispatcher-agent /opt/dispatcher-scripts/my-script.sh
+sudo cp my-script.sh /opt/ctrl-exec-scripts/
+sudo chmod 750 /opt/ctrl-exec-scripts/my-script.sh
+sudo chown root:ctrl-exec-agent /opt/ctrl-exec-scripts/my-script.sh
 
 # Add to allowlist
-echo "my-script = /opt/dispatcher-scripts/my-script.sh" \
-    | sudo tee -a /etc/dispatcher-agent/scripts.conf
+echo "my-script = /opt/ctrl-exec-scripts/my-script.sh" \
+    | sudo tee -a /etc/ctrl-exec-agent/scripts.conf
 
 # Reload allowlist without restart
-sudo systemctl kill --signal=HUP dispatcher-agent
+sudo systemctl kill --signal=HUP ctrl-exec-agent
 
 # Verify discovery sees the new script
-sudo dispatcher ping agent-host-01
-sudo dispatcher run agent-host-01 my-script
+sudo ctrl-exec ping agent-host-01
+sudo ctrl-exec run agent-host-01 my-script
 ```
 
 Scripts receive positional arguments exactly as passed. They should exit 0 on
@@ -1436,20 +1436,20 @@ unread stdin pipe.
 ## Extending the System
 
 Adding a new agent endpoint
-: Add a route check in `handle_connection()` in `bin/dispatcher-agent`.
+: Add a route check in `handle_connection()` in `bin/ctrl-exec-agent`.
   Add the handler following the `handle_run`/`handle_ping` pattern: decode
   body, do work, call `_send_json()`. Pass `$config` if agent configuration
   or tags are needed.
 
 Adding a new API endpoint
-: Add a route in `_handle_connection()` in `Dispatcher::API`. Add a
+: Add a route in `_handle_connection()` in `Exec::API`. Add a
   `_handle_*` function following the existing pattern: parse body, auth check,
   do work, call `_send_json()`.
 
-Adding a new dispatcher CLI mode
-: Add an entry to the `%dispatch` hash in `main()` in `bin/dispatcher`.
+Adding a new ctrl-exec CLI mode
+: Add an entry to the `%dispatch` hash in `main()` in `bin/ctrl-exec`.
   Add a `mode_*` function. Keep network logic in Engine; keep output formatting
-  in `Dispatcher::Output`; keep the mode function thin.
+  in `Exec::Output`; keep the mode function thin.
 
 Adding a new library module
 : Place in `lib/Dispatcher/` or `lib/Dispatcher/Agent/`. Use `use strict;
@@ -1459,19 +1459,19 @@ Adding a new library module
 Adding agent tags
 : Tags are free-form key-value pairs in the `[tags]` section of `agent.conf`.
   They appear in `/capabilities` responses and therefore in discovery output.
-  The dispatcher does not interpret them. Tag-based filtering or routing belongs
+  The ctrl-exec does not interpret them. Tag-based filtering or routing belongs
   in the auth hook or in tooling that consumes the API.
 
 Adding an agent-side auth hook
 : Set `auth_hook` in `agent.conf` to an executable path. The agent calls
-  `Dispatcher::Auth::check` in `handle_run` after allowlist validation.
-  The hook receives the same context as the dispatcher hook, including the
+  `Exec::Auth::check` in `handle_run` after allowlist validation.
+  The hook receives the same context as the ctrl-exec hook, including the
   forwarded `username` and `token`. This enables independent token validation
   on the agent - for example, verifying the token against a central validation
-  service without trusting the dispatcher's prior check.
+  service without trusting the ctrl-exec's prior check.
 
 Changing cert lifetime
-: Set `cert_days` in `dispatcher.conf`. All new certs (pairing and renewal)
+: Set `cert_days` in `ctrl-exec.conf`. All new certs (pairing and renewal)
   will use the new value. Existing certs are unaffected until their next
   renewal. Renewal is triggered at half the configured lifetime, so a change
   from 365 to 730 days will mean existing 365-day certs are renewed when they
@@ -1514,7 +1514,7 @@ The version is stored in a single `VERSION` file in the repository root using
 semver (`n.n.n`). It is the only authoritative source of the version.
 
 Module files (`lib/`) carry no version strings. The three binaries
-(`bin/dispatcher`, `bin/dispatcher-agent`, `bin/dispatcher-api`) carry the
+(`bin/ctrl-exec`, `bin/ctrl-exec-agent`, `bin/ctrl-exec-api`) carry the
 sentinel value `UNINSTALLED` in their `our $VERSION` declaration in the source
 tree. This value is replaced at two points:
 
@@ -1524,7 +1524,7 @@ tree. This value is replaced at two points:
   binaries after copying them to `/usr/local/bin/`. If installed from a dev
   checkout without a release tarball, `UNINSTALLED` is preserved.
 
-This means `dispatcher --version`, agent ping responses, and API health checks
+This means `ctrl-exec --version`, agent ping responses, and API health checks
 all report the version of the release that was installed, or `UNINSTALLED` if
 run directly from the source tree.
 
@@ -1562,7 +1562,7 @@ git status
 - Stage all shipped files into a temp directory
 - Stamp the version into the three staged binaries
 - Generate `sbom.json` with SHA-256 hashes of all source components
-- Create `dispatcher-<version>.tar.gz` and a `.sha256` checksum file
+- Create `ctrl-exec-<version>.tar.gz` and a `.sha256` checksum file
 - Create an annotated git tag `v<version>`
 - Auto-increment the patch version in `VERSION`
 
@@ -1587,9 +1587,9 @@ version without a deliberate commit.
 The tarball contains:
 
 ```
-bin/dispatcher
-bin/dispatcher-agent
-bin/dispatcher-api
+bin/ctrl-exec
+bin/ctrl-exec-agent
+bin/ctrl-exec-api
 lib/
 etc/
 t/

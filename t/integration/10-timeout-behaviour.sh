@@ -3,16 +3,16 @@
 #
 # Tests configurable read_timeout behaviour.
 #
-# Strategy: write a temporary dispatcher.conf with a specific read_timeout,
-# then invoke the dispatcher with --config pointing at it. The original
-# dispatcher.conf is never modified.
+# Strategy: write a temporary ctrl-exec.conf with a specific read_timeout,
+# then invoke the ctrl-exec with --config pointing at it. The original
+# ctrl-exec.conf is never modified.
 #
 # Sections:
 #   1. read_timeout = 10: script completing in 5s succeeds
 #   2. read_timeout = 10: script sleeping 15s triggers timeout with correct message
-#   3. Orphaned script: agent continues running after dispatcher times out
+#   3. Orphaned script: agent continues running after ctrl-exec times out
 #      - agent syslog shows script start but no completion at timeout
-#      - dispatcher syslog shows timeout error with reqid
+#      - ctrl-exec syslog shows timeout error with reqid
 #   4. read_timeout = 120: script sleeping 90s completes successfully
 #
 # Requires: 1 reachable agent.
@@ -26,8 +26,8 @@ source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
 
 require_agents 1
 
-ORIG_CONF="/etc/dispatcher/dispatcher.conf"
-TMP_CONF="/tmp/dispatcher-test-$$.conf"
+ORIG_CONF="/etc/ctrl-exec/ctrl-exec.conf"
+TMP_CONF="/tmp/ctrl-exec-test-$$.conf"
 SSH_USER="${AGENT_SSH_USER:-root}"
 
 # --- build a temporary config with a given read_timeout ---
@@ -38,7 +38,7 @@ make_conf() {
     echo "read_timeout = $timeout" >> "$TMP_CONF"
 }
 
-# --- run dispatcher with the temporary config ---
+# --- run ctrl-exec with the temporary config ---
 run_with_timeout() {
     local timeout="$1"; shift
     make_conf "$timeout"
@@ -81,7 +81,7 @@ START=$(date +%s)
 run_with_timeout 10 run "$AGENT1" sleep-15
 ELAPSED=$(elapsed_seconds "$START")
 
-assert_exit 1 "$RC" "dispatcher exits non-zero on timeout"
+assert_exit 1 "$RC" "ctrl-exec exits non-zero on timeout"
 
 if echo "$OUT$ERR" | grep -qE "read timeout after 10s"; then
     pass "error message: 'read timeout after 10s'"
@@ -91,16 +91,16 @@ else
 fi
 
 [ "$ELAPSED" -ge 9 ] && [ "$ELAPSED" -le 14 ] \
-    && pass "dispatcher returned at ~10s not ~15s (${ELAPSED}s)" \
-    || fail "dispatcher returned at ~10s not ~15s" "got ${ELAPSED}s"
+    && pass "ctrl-exec returned at ~10s not ~15s (${ELAPSED}s)" \
+    || fail "ctrl-exec returned at ~10s not ~15s" "got ${ELAPSED}s"
 
 # ============================================================
 assert_agents_reachable
-describe "Timeout: orphaned script - agent continues after dispatcher times out"
+describe "Timeout: orphaned script - agent continues after ctrl-exec times out"
 # ============================================================
 # This section verifies the documented behaviour: the agent is stateless
-# with respect to dispatcher connectivity. The script runs to completion
-# on the agent regardless of the dispatcher timeout.
+# with respect to ctrl-exec connectivity. The script runs to completion
+# on the agent regardless of the ctrl-exec timeout.
 #
 # We can only observe the syslog entries from outside; we cannot directly
 # confirm the script is still running without SSH. If SSH is available
@@ -121,16 +121,16 @@ print(results[0].get('reqid', '') if results else '')
     && pass "reqid captured from timeout response: $REQID" \
     || fail "reqid captured from timeout response" "output: $OUT"
 
-# Check dispatcher syslog for timeout entry with reqid
+# Check ctrl-exec syslog for timeout entry with reqid
 if [ -n "$REQID" ]; then
-    DISP_LOG=$(journalctl -t dispatcher --since "1 minute ago" 2>/dev/null \
-        || grep "dispatcher" /var/log/syslog 2>/dev/null \
+    DISP_LOG=$(journalctl -t ctrl-exec --since "1 minute ago" 2>/dev/null \
+        || grep "ctrl-exec" /var/log/syslog 2>/dev/null \
         || true)
     if echo "$DISP_LOG" | grep -q "$REQID"; then
-        pass "dispatcher syslog contains reqid $REQID"
+        pass "ctrl-exec syslog contains reqid $REQID"
     else
         skip "Dispatcher syslog check" \
-            "cannot read dispatcher syslog - verify manually: journalctl -t dispatcher | grep $REQID"
+            "cannot read ctrl-exec syslog - verify manually: journalctl -t ctrl-exec | grep $REQID"
     fi
 else
     skip "Dispatcher syslog check" "no reqid to search for"
@@ -141,7 +141,7 @@ if agent_run "true" 2>/dev/null; then
     sleep 2   # give the script a moment to still be running
     RUNNING=$(agent_run "pgrep -f 'sleep 15' | wc -l" 2>/dev/null || echo "0")
     if [ "${RUNNING:-0}" -gt 0 ]; then
-        pass "sleep-15 still running on agent after dispatcher timeout"
+        pass "sleep-15 still running on agent after ctrl-exec timeout"
     else
         # May have finished - only a concern if we're within the window
         skip "Agent process check" \
@@ -151,7 +151,7 @@ if agent_run "true" 2>/dev/null; then
     # Wait for the script to finish, then check agent syslog for completion
     sleep 10
     AGENT_LOG=$(agent_run \
-        "logread 2>/dev/null || journalctl -t dispatcher-agent --since '2 minutes ago' 2>/dev/null || true")
+        "logread 2>/dev/null || journalctl -t ctrl-exec-agent --since '2 minutes ago' 2>/dev/null || true")
     if echo "$AGENT_LOG" | grep -qiE "script.*exit|exit.*script|sleep-15.*done|finished"; then
         pass "agent syslog records script completion after timeout"
     else

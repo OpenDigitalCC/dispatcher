@@ -12,11 +12,11 @@
 #
 # Hook behaviour tested:
 #   - Exit 0: request passes through
-#   - Exit 1: request denied, dispatcher reports denial
+#   - Exit 1: request denied, ctrl-exec reports denial
 #   - Exit 2: request denied with bad-credentials reason
 #   - Token-based policy: specific token denied, others pass
 #
-# Requires: 1 reachable agent with SSH access from the dispatcher host,
+# Requires: 1 reachable agent with SSH access from the ctrl-exec host,
 # OR run this script directly on the agent host with sudo.
 #
 # NOTE: This test modifies agent.conf on AGENT1. It restores the original
@@ -27,10 +27,10 @@ source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
 
 require_agents 1
 
-AGENT_CONF="/etc/dispatcher-agent/agent.conf"
-HOOK_PATH="/etc/dispatcher-agent/test-auth-hook.sh"
-HOOK_BACKUP="/etc/dispatcher-agent/test-auth-hook.sh.bak"
-CONF_BACKUP="/etc/dispatcher-agent/agent.conf.bak"
+AGENT_CONF="/etc/ctrl-exec-agent/agent.conf"
+HOOK_PATH="/etc/ctrl-exec-agent/test-auth-hook.sh"
+HOOK_BACKUP="/etc/ctrl-exec-agent/test-auth-hook.sh.bak"
+CONF_BACKUP="/etc/ctrl-exec-agent/agent.conf.bak"
 
 # --- helper: run a command on the agent ---
 # If AGENT1 is localhost (running locally), use sudo directly.
@@ -70,17 +70,17 @@ cleanup() {
     agent_run "grep -v '^auth_hook' '$AGENT_CONF' > '${AGENT_CONF}.tmp' && mv '${AGENT_CONF}.tmp' '$AGENT_CONF'" \
         2>/dev/null || true
     # Reload
-    agent_run "systemctl reload dispatcher-agent 2>/dev/null || pkill -HUP -f 'dispatcher-agent serve' || true" \
+    agent_run "systemctl reload ctrl-exec-agent 2>/dev/null || pkill -HUP -f 'ctrl-exec-agent serve' || true" \
         2>/dev/null || true
 }
 trap cleanup EXIT
 
-# --- install hook that checks DISPATCHER_TOKEN ---
+# --- install hook that checks ENVEXEC_TOKEN ---
 agent_write "$HOOK_PATH" '#!/bin/sh
 # Test auth hook: deny token "denied-token" with exit 2,
 # deny token "restricted-token" with exit 3,
 # allow everything else.
-case "$DISPATCHER_TOKEN" in
+case "$ENVEXEC_TOKEN" in
     denied-token)     echo "bad credentials" >&2; exit 2 ;;
     restricted-token) echo "insufficient privilege" >&2; exit 3 ;;
     *)                exit 0 ;;
@@ -94,9 +94,9 @@ if ! agent_run "grep -q '^auth_hook' '$AGENT_CONF'" 2>/dev/null; then
 fi
 
 # Reload agent to pick up hook config
-agent_run "systemctl reload dispatcher-agent 2>/dev/null \
-    || pkill -HUP -f 'dispatcher-agent serve' \
-    || pkill -HUP -x dispatcher-agent" 2>/dev/null || true
+agent_run "systemctl reload ctrl-exec-agent 2>/dev/null \
+    || pkill -HUP -f 'ctrl-exec-agent serve' \
+    || pkill -HUP -x ctrl-exec-agent" 2>/dev/null || true
 sleep 2
 
 # ============================================================
@@ -124,7 +124,7 @@ describe "Auth hook: denied token rejected (exit 2)"
 
 run_dispatcher run "$AGENT1" env-dump --token denied-token
 
-assert_exit 1 "$RC" "dispatcher exits non-zero"
+assert_exit 1 "$RC" "ctrl-exec exits non-zero"
 if echo "$OUT$ERR" | grep -qiE "denied|authoris|not authoris|credential"; then
     pass "denial reason reported"
 else
@@ -139,7 +139,7 @@ describe "Auth hook: denied token rejected - JSON output"
 
 run_dispatcher run "$AGENT1" env-dump --token denied-token --json
 
-assert_exit 1 "$RC" "dispatcher exits non-zero"
+assert_exit 1 "$RC" "ctrl-exec exits non-zero"
 assert_json_valid "$OUT" "valid JSON on denial"
 
 EXIT=$(python3 -c "
@@ -158,7 +158,7 @@ describe "Auth hook: restricted token rejected (exit 3)"
 
 run_dispatcher run "$AGENT1" env-dump --token restricted-token
 
-assert_exit 1 "$RC" "dispatcher exits non-zero"
+assert_exit 1 "$RC" "ctrl-exec exits non-zero"
 assert_not_contains "$OUT$ERR" "PATH=" "env-dump did not execute"
 
 # ============================================================

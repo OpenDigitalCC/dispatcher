@@ -4,19 +4,19 @@ subtitle: HTTP REST API reference, OpenAPI spec, and live spec generator
 brand: odcc
 ---
 
-This document covers the HTTP REST API exposed by `dispatcher-api`, the
+This document covers the HTTP REST API exposed by `ctrl-exec-api`, the
 OpenAPI specification, and the live spec generator that augments the spec
 with discovered host and script data.
 
 For installation and configuration of the API server, see INSTALL.md. For
-the agent-side wire format (the mTLS protocol between dispatcher and agents),
+the agent-side wire format (the mTLS protocol between ctrl-exec and agents),
 see DEVELOPER.md.
 
 
 ## Overview
 
-`dispatcher-api` exposes the same run, ping, and discovery operations as the
-dispatcher CLI, as HTTP endpoints with JSON request and response bodies. The
+`ctrl-exec-api` exposes the same run, ping, and discovery operations as the
+ctrl-exec CLI, as HTTP endpoints with JSON request and response bodies. The
 auth hook and lock checking apply identically to CLI and API requests.
 
 Endpoints: `GET /`, `GET /health`, `POST /ping`, `POST /run`,
@@ -24,7 +24,7 @@ Endpoints: `GET /`, `GET /health`, `POST /ping`, `POST /run`,
 `GET /openapi.json`, `GET /openapi-live.json`.
 
 The server listens on `api_port` (default 7445). TLS is enabled if `api_cert`
-and `api_key` are set in `dispatcher.conf`; plain HTTP is used otherwise.
+and `api_key` are set in `ctrl-exec.conf`; plain HTTP is used otherwise.
 
 The server uses a fork-per-request model: the parent accepts connections and
 forks a child per request. The child handles the request and exits. The parent
@@ -40,7 +40,7 @@ endpoints and spec URLs programmatically.
 
 ```json
 {
-  "name": "dispatcher-api",
+  "name": "ctrl-exec-api",
   "version": "0.2.8",
   "spec": "/openapi.json",
   "live_spec": "/openapi-live.json",
@@ -149,11 +149,11 @@ Response (success):
 
 `reqid`
 : Request ID at the top level of the response. Matches `REQID` in syslog on
-  both dispatcher and agent. Use to poll `GET /status/{reqid}` or to
+  both ctrl-exec and agent. Use to poll `GET /status/{reqid}` or to
   correlate log entries across both sides.
 
 `exit`
-: Script exit code. 0 = success. Positive = script failure. -1 = dispatcher-side
+: Script exit code. 0 = success. Positive = script failure. -1 = ctrl-exec-side
   failure (connection error, timeout). 126 = killed by signal or exec failed.
 
 Response (lock conflict):
@@ -167,7 +167,7 @@ Response (lock conflict):
 ### `GET /status/{reqid}`
 
 Returns the stored result for a completed run. Results are persisted to
-`/var/lib/dispatcher/runs/<reqid>.json` for 24 hours after the run
+`/var/lib/ctrl-exec/runs/<reqid>.json` for 24 hours after the run
 completes, then purged.
 
 This endpoint supports an async polling pattern: submit a run with
@@ -228,7 +228,7 @@ Response:
       "host": "web-01", "status": "ok", "version": "0.2.8",
       "tags": { "env": "production", "role": "web" },
       "scripts": [
-        { "name": "deploy", "path": "/opt/dispatcher-scripts/deploy.sh", "executable": true }
+        { "name": "deploy", "path": "/opt/ctrl-exec-scripts/deploy.sh", "executable": true }
       ]
     }
   }
@@ -266,7 +266,7 @@ Auth error codes in the `code` field:
 
 ## Auth hook
 
-If `auth_hook` is set in `dispatcher.conf`, it is called before every
+If `auth_hook` is set in `ctrl-exec.conf`, it is called before every
 request including `/run`, `/ping`, `/discovery`, and all informational
 endpoints. The hook receives the full request context as JSON on stdin,
 including `action`, `script`, `hosts`, `username`, `token`, and
@@ -274,12 +274,12 @@ including `action`, `script`, `hosts`, `username`, `token`, and
 1 = denied, 2 = bad credentials, 3 = insufficient privilege.
 
 If no hook is configured, behaviour is governed by `api_auth_default` in
-`dispatcher.conf`. The default is `deny` - all requests return 403 until a
+`ctrl-exec.conf`. The default is `deny` - all requests return 403 until a
 hook is configured. Set `api_auth_default = allow` only on isolated networks
 where no credential checking is required.
 
-Always use `DISPATCHER_ARGS_JSON` in hook scripts to inspect script arguments.
-`DISPATCHER_ARGS` (space-joined) is deprecated and unreliable for arguments
+Always use `ENVEXEC_ARGS_JSON` in hook scripts to inspect script arguments.
+`ENVEXEC_ARGS` (space-joined) is deprecated and unreliable for arguments
 containing spaces or newlines.
 
 ---
@@ -287,7 +287,7 @@ containing spaces or newlines.
 ## OpenAPI spec
 
 The static OpenAPI 3.1 spec is installed at
-`/usr/local/lib/dispatcher/Dispatcher/openapi.json` and served verbatim from
+`/usr/local/lib/ctrl-exec/Dispatcher/openapi.json` and served verbatim from
 `GET /openapi.json`. The version field is stamped with the release version at
 install time.
 
@@ -342,7 +342,7 @@ workflow, and exposes its own API. The generator should not grow beyond its
 current scope.
 
 
-## `Dispatcher::API` module
+## `Exec::API` module
 
 Implemented in `lib/Dispatcher/API.pm`. Public interface:
 
@@ -352,4 +352,4 @@ Implemented in `lib/Dispatcher/API.pm`. Public interface:
 
 `SSL_no_shutdown => 1` is used on connection close in both parent and child,
 for the same reason as in the pairing server - see the note in
-`Dispatcher::Pairing` in DEVELOPER.md.
+`Exec::Pairing` in DEVELOPER.md.

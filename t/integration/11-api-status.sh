@@ -1,7 +1,7 @@
 #!/bin/bash
 # 11-api-status.sh
 #
-# Tests the dispatcher-api HTTP server on port 7445.
+# Tests the ctrl-exec-api HTTP server on port 7445.
 #
 # Covers:
 #   1. POST /run - reqid present in response alongside results
@@ -11,7 +11,7 @@
 #      otherwise documented as a manual check)
 #
 # Prerequisites:
-#   - dispatcher-api must be running on port 7445
+#   - ctrl-exec-api must be running on port 7445
 #   - API_HOST defaults to localhost; override with API_HOST=<host>
 #   - API_PORT defaults to 7445; override with API_PORT=<port>
 #   - Uses curl; install with: apt install curl / opkg install curl
@@ -74,7 +74,7 @@ if ! curl -s --connect-timeout 3 "${API_BASE}/" >/dev/null 2>&1 && \
         --connect-timeout 3 "${API_BASE}/status/probe" 2>/dev/null)
     if [ "$HTTP_CODE" = "000" ]; then
         skip "All API tests" \
-            "dispatcher-api not reachable at ${API_BASE} - start it with: dispatcher-api"
+            "ctrl-exec-api not reachable at ${API_BASE} - start it with: ctrl-exec-api"
         summary
         exit 0
     fi
@@ -250,9 +250,9 @@ describe "API: results TTL - purge after expiry"
 # binary supports a reduced TTL flag or env var, and document the
 # manual approach if not.
 
-# Check if dispatcher-api accepts a --ttl or TTL env var
+# Check if ctrl-exec-api accepts a --ttl or TTL env var
 TTL_SUPPORTED=0
-if dispatcher-api --help 2>&1 | grep -qi "ttl"; then
+if ctrl-exec-api --help 2>&1 | grep -qi "ttl"; then
     TTL_SUPPORTED=1
 fi
 

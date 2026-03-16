@@ -2,12 +2,12 @@
 # 06-auth-context.sh
 #
 # Confirms username and token are forwarded end-to-end:
-# dispatcher CLI -> agent -> script stdin context.
+# ctrl-exec CLI -> agent -> script stdin context.
 #
-# Also tests the $USER default behaviour and DISPATCHER_TOKEN env var.
+# Also tests the $USER default behaviour and ENVEXEC_TOKEN env var.
 #
 # Requires: 1 reachable agent minimum.
-# Scripts needed: context-dump, dispatcher-demonstrator.
+# Scripts needed: context-dump, ctrl-exec-demonstrator.
 
 set -uo pipefail
 source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
@@ -61,20 +61,20 @@ assert_contains "$OUT" "$EXPECTED_USER" "\$USER ($EXPECTED_USER) appears in cont
 
 # ============================================================
 assert_agents_reachable
-describe "token from DISPATCHER_TOKEN environment variable"
+describe "token from ENVEXEC_TOKEN environment variable"
 # ============================================================
 
-DISPATCHER_TOKEN="env-token-456" run_dispatcher run "$AGENT1" context-dump
+ENVEXEC_TOKEN="env-token-456" run_dispatcher run "$AGENT1" context-dump
 
 assert_exit 0 "$RC" "clean exit"
 assert_contains "$OUT" "env-token-456" "env var token appears in context"
 
 # ============================================================
 assert_agents_reachable
-describe "--token overrides DISPATCHER_TOKEN"
+describe "--token overrides ENVEXEC_TOKEN"
 # ============================================================
 
-OUT_OVERRIDE=$(sudo env DISPATCHER_TOKEN="env-token" "$DISPATCHER" run \
+OUT_OVERRIDE=$(sudo env ENVEXEC_TOKEN="env-token" "$DISPATCHER" run \
     "$AGENT1" context-dump --token cli-token 2>/dev/null)
 RC_OVERRIDE=$?
 
@@ -90,7 +90,7 @@ describe "reqid is present and unique across two runs"
 OUT1=$(sudo "$DISPATCHER" run "$AGENT1" context-dump 2>/dev/null)
 OUT2=$(sudo "$DISPATCHER" run "$AGENT1" context-dump 2>/dev/null)
 
-# context-dump outputs the raw JSON context after the dispatcher header line.
+# context-dump outputs the raw JSON context after the ctrl-exec header line.
 # Extract the JSON portion only (the line starting with '{').
 REQID1=$(echo "$OUT1" | grep '^{' | python3 -c \
     "import sys,json; d=json.load(sys.stdin); print(d.get('reqid',''))" 2>/dev/null)
@@ -111,7 +111,7 @@ assert_agents_reachable
 describe "context via log-fields (demonstrator) - syslog verification"
 # ============================================================
 
-run_dispatcher run "$AGENT1" dispatcher-demonstrator \
+run_dispatcher run "$AGENT1" ctrl-exec-demonstrator \
     -- log-fields --username testop --token verify-token
 
 assert_exit 0 "$RC" "clean exit"
@@ -123,7 +123,7 @@ assert_contains "$OUT" "user:"        "user label in log-fields output"
 
 printf '\n'
 printf '  NOTE: Verify syslog on %s with:\n' "$AGENT1"
-printf '        journalctl -t dispatcher-demo | tail -5\n'
-printf '        Expect: reqid=... user=testop script=dispatcher-demonstrator\n'
+printf '        journalctl -t ctrl-exec-demo | tail -5\n'
+printf '        Expect: reqid=... user=testop script=ctrl-exec-demonstrator\n'
 
 summary

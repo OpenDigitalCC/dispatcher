@@ -6,19 +6,19 @@ use File::Temp qw(tempdir);
 use FindBin    qw($Bin);
 use lib "$Bin/../lib";
 
-use Dispatcher::Registry qw();
+use Exec::Registry qw();
 
 my $dir = tempdir(CLEANUP => 1);
 
 # --- register_agent ---
 
 {
-    eval { Dispatcher::Registry::register_agent(registry_dir => $dir) };
+    eval { Exec::Registry::register_agent(registry_dir => $dir) };
     like $@, qr/hostname required/, 'register_agent: dies without hostname';
 }
 
 {
-    Dispatcher::Registry::register_agent(
+    Exec::Registry::register_agent(
         hostname     => 'host-a',
         ip           => '10.0.0.1',
         paired       => '2026-03-05T12:00:00Z',
@@ -31,7 +31,7 @@ my $dir = tempdir(CLEANUP => 1);
 
 {
     # Re-register same host - should overwrite
-    Dispatcher::Registry::register_agent(
+    Exec::Registry::register_agent(
         hostname     => 'host-a',
         ip           => '10.0.0.2',
         paired       => '2026-03-05T13:00:00Z',
@@ -40,7 +40,7 @@ my $dir = tempdir(CLEANUP => 1);
         registry_dir => $dir,
     );
 
-    my $agent = Dispatcher::Registry::get_agent(
+    my $agent = Exec::Registry::get_agent(
         hostname     => 'host-a',
         registry_dir => $dir,
     );
@@ -51,12 +51,12 @@ my $dir = tempdir(CLEANUP => 1);
 # --- get_agent ---
 
 {
-    eval { Dispatcher::Registry::get_agent(registry_dir => $dir) };
+    eval { Exec::Registry::get_agent(registry_dir => $dir) };
     like $@, qr/hostname required/, 'get_agent: dies without hostname';
 }
 
 {
-    my $agent = Dispatcher::Registry::get_agent(
+    my $agent = Exec::Registry::get_agent(
         hostname     => 'host-a',
         registry_dir => $dir,
     );
@@ -66,7 +66,7 @@ my $dir = tempdir(CLEANUP => 1);
 }
 
 {
-    my $agent = Dispatcher::Registry::get_agent(
+    my $agent = Exec::Registry::get_agent(
         hostname     => 'does-not-exist',
         registry_dir => $dir,
     );
@@ -78,7 +78,7 @@ my $dir = tempdir(CLEANUP => 1);
 {
     # Add more agents
     for my $h (qw(host-b host-c)) {
-        Dispatcher::Registry::register_agent(
+        Exec::Registry::register_agent(
             hostname     => $h,
             ip           => '10.0.0.5',
             paired       => '2026-03-05T14:00:00Z',
@@ -88,7 +88,7 @@ my $dir = tempdir(CLEANUP => 1);
         );
     }
 
-    my $agents = Dispatcher::Registry::list_agents(registry_dir => $dir);
+    my $agents = Exec::Registry::list_agents(registry_dir => $dir);
     is scalar @$agents, 3, 'list_agents: returns all registered agents';
 
     # Should be sorted by hostname
@@ -99,20 +99,20 @@ my $dir = tempdir(CLEANUP => 1);
 
 {
     my $empty_dir = tempdir(CLEANUP => 1);
-    my $agents = Dispatcher::Registry::list_agents(registry_dir => $empty_dir);
+    my $agents = Exec::Registry::list_agents(registry_dir => $empty_dir);
     is_deeply $agents, [], 'list_agents: empty list for empty dir';
 }
 
 {
     my $no_dir = tempdir(CLEANUP => 1) . '/nonexistent';
-    my $agents = Dispatcher::Registry::list_agents(registry_dir => $no_dir);
+    my $agents = Exec::Registry::list_agents(registry_dir => $no_dir);
     is_deeply $agents, [], 'list_agents: empty list when dir does not exist';
 }
 
 # --- list_hostnames ---
 
 {
-    my $hosts = Dispatcher::Registry::list_hostnames(registry_dir => $dir);
+    my $hosts = Exec::Registry::list_hostnames(registry_dir => $dir);
     is scalar @$hosts, 3,        'list_hostnames: returns correct count';
     is $hosts->[0], 'host-a',    'list_hostnames: first hostname';
     is $hosts->[2], 'host-c',    'list_hostnames: last hostname';
@@ -122,7 +122,7 @@ my $dir = tempdir(CLEANUP => 1);
 # --- record completeness ---
 
 {
-    my $agent = Dispatcher::Registry::get_agent(
+    my $agent = Exec::Registry::get_agent(
         hostname     => 'host-b',
         registry_dir => $dir,
     );
@@ -136,12 +136,12 @@ my $dir = tempdir(CLEANUP => 1);
 # --- remove_agent ---
 
 {
-    eval { Dispatcher::Registry::remove_agent(registry_dir => $dir) };
+    eval { Exec::Registry::remove_agent(registry_dir => $dir) };
     like $@, qr/hostname required/, 'remove_agent: dies without hostname';
 }
 
 {
-    eval { Dispatcher::Registry::remove_agent(
+    eval { Exec::Registry::remove_agent(
         hostname     => 'does-not-exist',
         registry_dir => $dir,
     ) };
@@ -150,7 +150,7 @@ my $dir = tempdir(CLEANUP => 1);
 
 {
     # Register a host to remove
-    Dispatcher::Registry::register_agent(
+    Exec::Registry::register_agent(
         hostname     => 'host-to-remove',
         ip           => '10.0.0.99',
         paired       => '2026-03-05T15:00:00Z',
@@ -159,7 +159,7 @@ my $dir = tempdir(CLEANUP => 1);
         registry_dir => $dir,
     );
 
-    my $record = Dispatcher::Registry::remove_agent(
+    my $record = Exec::Registry::remove_agent(
         hostname     => 'host-to-remove',
         registry_dir => $dir,
     );
@@ -171,14 +171,14 @@ my $dir = tempdir(CLEANUP => 1);
 
 {
     # Confirm removed agent no longer appears in list
-    my $agents = Dispatcher::Registry::list_agents(registry_dir => $dir);
+    my $agents = Exec::Registry::list_agents(registry_dir => $dir);
     my @found = grep { $_->{hostname} eq 'host-to-remove' } @$agents;
     is scalar @found, 0, 'remove_agent: agent no longer in list_agents';
 }
 
 {
     # Confirm get_agent returns undef after removal
-    my $agent = Dispatcher::Registry::get_agent(
+    my $agent = Exec::Registry::get_agent(
         hostname     => 'host-to-remove',
         registry_dir => $dir,
     );

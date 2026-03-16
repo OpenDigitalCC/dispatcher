@@ -4,12 +4,12 @@ use strict;
 use Fcntl qw(LOCK_EX LOCK_NB);
 use FindBin qw($Bin);
 use lib "$Bin/../lib";
-use Dispatcher::Lock;
+use Exec::Lock;
 open STDERR, '>', '/dev/null';
 
 my ($dir, $host, $script) = @ARGV;
 
-my $result = Dispatcher::Lock::acquire(
+my $result = Exec::Lock::acquire(
     hosts    => [$host],
     script   => $script,
     lock_dir => $dir,
@@ -20,7 +20,7 @@ if ($result->{ok}) {
     syswrite STDOUT, "locked\n";
     # Hold until parent closes our stdin
     <STDIN>;
-    Dispatcher::Lock::release(
+    Exec::Lock::release(
         handles => $result->{handles},
         hosts   => [$host],
         script  => $script,

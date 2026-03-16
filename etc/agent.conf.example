@@ -1,25 +1,25 @@
-# dispatcher-agent configuration
-# /etc/dispatcher-agent/agent.conf
+# ctrl-exec-agent configuration
+# /etc/ctrl-exec-agent/agent.conf
 
 port = 7443
-cert = /etc/dispatcher-agent/agent.crt
-key  = /etc/dispatcher-agent/agent.key
-ca   = /etc/dispatcher-agent/ca.crt
+cert = /etc/ctrl-exec-agent/agent.crt
+key  = /etc/ctrl-exec-agent/agent.key
+ca   = /etc/ctrl-exec-agent/ca.crt
 
 # Pairing port (default: 7444).
-# Must match the --port value passed to dispatcher-agent request-pairing
-# and the port used by dispatcher pairing-mode on the dispatcher host.
+# Must match the --port value passed to ctrl-exec-agent request-pairing
+# and the port used by ctrl-exec pairing-mode on the ctrl-exec host.
 # pairing_port = 7444
 
 # Dispatcher certificate serial (written automatically at pairing time).
-# Path to a file containing the trusted dispatcher cert serial number (hex).
+# Path to a file containing the trusted ctrl-exec cert serial number (hex).
 # The /capabilities endpoint rejects any peer whose cert serial does not match.
-# This restricts allowlist enumeration to the genuine dispatcher only,
+# This restricts allowlist enumeration to the genuine ctrl-exec only,
 # preventing lateral reconnaissance from a compromised agent peer.
 # Written by request-pairing - do not edit manually.
 # Re-pair the agent if this file is missing or needs updating.
 # Reloaded on SIGHUP alongside the allowlist and revocation list.
-# dispatcher_serial_path = /etc/dispatcher-agent/dispatcher-serial
+# dispatcher_serial_path = /etc/ctrl-exec-agent/ctrl-exec-serial
 
 # Revoked certificate serials.
 # Path to a file listing revoked TLS certificate serial numbers, one per line.
@@ -27,32 +27,32 @@ ca   = /etc/dispatcher-agent/ca.crt
 # immediately after the mTLS handshake, before any request is processed.
 # Format: lowercase hex serial as output by: openssl x509 -noout -serial -in cert.crt
 # Lines beginning with # are treated as comments.
-# The file is loaded at startup and reloaded on SIGHUP (systemctl reload dispatcher-agent).
+# The file is loaded at startup and reloaded on SIGHUP (systemctl reload ctrl-exec-agent).
 # A missing or empty file means no certs are revoked - this is the normal state.
-# revoked_serials = /etc/dispatcher-agent/revoked-serials
+# revoked_serials = /etc/ctrl-exec-agent/revoked-serials
 
 # Restrict scripts to approved directories (optional, recommended).
 # Colon-separated list of absolute directory paths.
 # If set, any script path in scripts.conf not under an approved directory
 # is rejected at load time and re-validated at execution time.
 #
-# script_dirs = /opt/dispatcher-scripts:/usr/local/lib/dispatcher-scripts
+# script_dirs = /opt/ctrl-exec-scripts:/usr/local/lib/ctrl-exec-scripts
 
 # Agent-side auth hook (optional).
 # Called before every run request, after allowlist validation.
 # Receives full request context including username and token, enabling
-# independent downstream token validation separate from the dispatcher's
+# independent downstream token validation separate from the ctrl-exec's
 # own auth hook.
 # Hook must be executable. Exit 0 = authorised, 1/2/3 = denied.
 # See REFERENCE.md for the hook interface and exit code semantics.
 #
-# auth_hook = /etc/dispatcher-agent/auth-hook
+# auth_hook = /etc/ctrl-exec-agent/auth-hook
 
-# Optional: restrict connections to known dispatcher IPs.
+# Optional: restrict connections to known ctrl-exec IPs.
 # Comma-separated list of IPs or CIDR prefixes (/8, /16, /24 only).
 # If absent, all source IPs are accepted (mTLS still applies).
 # Connections from unlisted IPs are closed before TLS handshake cost is paid.
-# Reloaded on SIGHUP (systemctl reload dispatcher-agent).
+# Reloaded on SIGHUP (systemctl reload ctrl-exec-agent).
 #
 # allowed_ips = 192.168.1.10, 10.0.0.0/8
 
@@ -68,7 +68,7 @@ ca   = /etc/dispatcher-agent/ca.crt
 # rate_limit_volume = 10/60/300
 # rate_limit_probe  = 3/600/3600
 
-# Agent tags - reported in /capabilities response and dispatcher discovery.
+# Agent tags - reported in /capabilities response and ctrl-exec discovery.
 # Use to group and filter agents by environment, role, location, etc.
 #
 # [tags]

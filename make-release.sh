@@ -1,16 +1,26 @@
 #!/bin/bash
-# make-release.sh - Create a versioned release tarball and CycloneDX SBOM
+# make-release.sh - Create a versioned release tarball and CycloneDX SBOM,
+# or repackage a ctrl-exec release under a licensed brand name.
 #
-# Usage: ./make-release.sh
+# Usage:
+#   ./make-release.sh [--auto]
+#       Build ctrl-exec-<version>.tar.gz from the current source tree.
+#       Bumps VERSION, creates git tag, generates sbom.json.
 #
-# Reads version from VERSION file. Requires a clean git working tree.
-# Produces:
-#   dispatcher-<version>.tar.gz
-#   sbom.json  (CycloneDX 1.6 JSON, committed to repo)
+#   ./make-release.sh --brand xi [--from ctrl-exec-<version>.tar.gz]
+#       Repackage an existing ctrl-exec tarball as xi-exec-<version>.tar.gz.
+#       Does not touch git, does not bump VERSION, does not retag.
+#       If --from is omitted, the most recent ctrl-exec-*.tar.gz is used.
+#
+# Brand substitution applies ctrl -> BRAND to all customer-facing identifiers:
+# binary names, service unit names, config paths, syslog tags, package metadata.
+# The Perl namespace (Exec::) and ENVEXEC_ variables are never substituted.
 
 set -euo pipefail
 
-# --- helpers ---
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -21,17 +31,236 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 die()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
-# --- arguments ---
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
 
 AUTO=0
-for arg in "$@"; do
-    case "$arg" in
-        --auto|--force) AUTO=1 ;;
-        *) die "Unknown argument: $arg" ;;
+BRAND=""
+FROM=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --auto|--force)
+            AUTO=1; shift ;;
+        --brand)
+            [[ -n "${2:-}" ]] || die "--brand requires a value (e.g. --brand xi)"
+            BRAND="$2"; shift 2 ;;
+        --from)
+            [[ -n "${2:-}" ]] || die "--from requires a tarball path"
+            FROM="$2"; shift 2 ;;
+        *)
+            die "Unknown argument: $1" ;;
     esac
 done
 
-# --- version ---
+# ---------------------------------------------------------------------------
+# Brand mode: repackage ctrl-exec tarball as BRAND-exec
+# ---------------------------------------------------------------------------
+
+if [[ -n "$BRAND" ]]; then
+
+    # Locate source tarball
+    if [[ -z "$FROM" ]]; then
+        FROM=$(find . -maxdepth 1 -name 'ctrl-exec-*.tar.gz' | sort -V | tail -1)
+        [[ -n "$FROM" ]] || die "No ctrl-exec-*.tar.gz found. Use --from <tarball>."
+        info "Using: $FROM"
+    fi
+    [[ -f "$FROM" ]] || die "Source tarball not found: $FROM"
+
+    # Extract version from tarball name
+    TARBALL_BASE=$(basename "$FROM")
+    VERSION=$(echo "$TARBALL_BASE" | sed 's/ctrl-exec-//; s/\.tar\.gz//')
+    [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+        || die "Could not extract semver from tarball name: $TARBALL_BASE"
+
+    BRAND_TARBALL="${BRAND}-exec-${VERSION}.tar.gz"
+    BRAND_NAME="${BRAND}-exec-${VERSION}"
+
+    info "Building $BRAND_TARBALL from $FROM (version $VERSION)"
+
+    STAGE_DIR=$(mktemp -d)
+    trap 'rm -rf "$STAGE_DIR"' EXIT
+
+    # Unpack ctrl-exec tarball
+    tar -xzf "$FROM" -C "$STAGE_DIR"
+
+    # Rename top-level directory to brand name
+    mv "$STAGE_DIR/ctrl-exec-${VERSION}" "$STAGE_DIR/$BRAND_NAME"
+    STAGE="$STAGE_DIR/$BRAND_NAME"
+
+    # -----------------------------------------------------------------------
+    # Brand substitution: ctrl -> BRAND in all text files.
+    # Compound forms are replaced before the bare word to avoid
+    # double-substitution (ctrl-exec-agent must not become BRAND-BRAND-exec-agent).
+    # -----------------------------------------------------------------------
+
+    info "Applying brand substitution: ctrl -> $BRAND ..."
+
+    find "$STAGE" -type f \
+        ! -name '*.png' ! -name '*.jpg' ! -name '*.gif' \
+        ! -name '*.tar.gz' ! -name '*.zip' \
+    | while IFS= read -r f; do
+        grep -q "ctrl" "$f" 2>/dev/null || continue
+        sed -i \
+            -e "s/ctrl-exec-agent/${BRAND}-exec-agent/g" \
+            -e "s/ctrl-exec-api/${BRAND}-exec-api/g" \
+            -e "s/ctrl-exec-plugins/${BRAND}-exec-plugins/g" \
+            -e "s/ctrl-exec-demonstrator/${BRAND}-exec-demonstrator/g" \
+            -e "s/ctrl-exec-serial/${BRAND}-exec-serial/g" \
+            -e "s/update-ctrl-exec/update-${BRAND}-exec/g" \
+            -e "s|/etc/ctrl-exec-agent|/etc/${BRAND}-exec-agent|g" \
+            -e "s|/etc/ctrl-exec|/etc/${BRAND}-exec|g" \
+            -e "s|/var/lib/ctrl-exec|/var/lib/${BRAND}-exec|g" \
+            -e "s|/usr/local/lib/ctrl-exec|/usr/local/lib/${BRAND}-exec|g" \
+            -e "s|/opt/ctrl-exec-scripts|/opt/${BRAND}-exec-scripts|g" \
+            -e "s/ctrl-exec/${BRAND}-exec/g" \
+            "$f"
+    done
+
+    # Rename files
+    declare -A FMAP=(
+        ["bin/ctrl-exec"]="bin/${BRAND}-exec"
+        ["bin/ctrl-exec-agent"]="bin/${BRAND}-exec-agent"
+        ["bin/ctrl-exec-api"]="bin/${BRAND}-exec-api"
+        ["bin/update-ctrl-exec-serial"]="bin/update-${BRAND}-exec-serial"
+        ["etc/ctrl-exec-agent.service"]="etc/${BRAND}-exec-agent.service"
+        ["etc/ctrl-exec-api.service"]="etc/${BRAND}-exec-api.service"
+        ["etc/ctrl-exec-agent.init"]="etc/${BRAND}-exec-agent.init"
+        ["etc/ctrl-exec.conf.example"]="etc/${BRAND}-exec.conf.example"
+        ["etc/ctrl-exec_conf.example"]="etc/${BRAND}-exec_conf.example"
+        ["etc/ctrl-exec-agent_conf.example"]="etc/${BRAND}-exec-agent_conf.example"
+        ["etc/ctrl-exec-demonstrator.sh"]="etc/${BRAND}-exec-demonstrator.sh"
+    )
+    for old in "${!FMAP[@]}"; do
+        new="${FMAP[$old]}"
+        [[ -f "$STAGE/$old" ]] && mv "$STAGE/$old" "$STAGE/$new"
+    done
+
+    # -----------------------------------------------------------------------
+    # Brand SBOM (separate from ctrl-exec sbom.json)
+    # -----------------------------------------------------------------------
+
+    info "Generating CycloneDX SBOM for ${BRAND}-exec ..."
+
+    TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    BSERIAL="urn:uuid:$(python3 -c "import uuid; print(uuid.uuid4())")"
+    BRAND_SBOM="${BRAND}-exec-${VERSION}-sbom.json"
+
+    python3 - "$STAGE" "$VERSION" "$BRAND" "$BSERIAL" "$TIMESTAMP" "$BRAND_SBOM" <<'PYEOF'
+import json, sys, os, hashlib
+
+stage, version, brand, serial, timestamp, outfile = sys.argv[1:7]
+components = []
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+for dirpath, name_key, ctype in [
+    (os.path.join(stage, 'bin'), None, 'file'),
+]:
+    if os.path.isdir(dirpath):
+        for name in sorted(os.listdir(dirpath)):
+            path = os.path.join(dirpath, name)
+            if os.path.isfile(path):
+                components.append({
+                    'type': 'file', 'name': name, 'version': version,
+                    'hashes': [{'alg': 'SHA-256', 'content': sha256(path)}],
+                    'licenses': [{'license': {'id': 'proprietary'}}],
+                    'purl': f'pkg:generic/{brand}/{name}@{version}'
+                })
+
+lib_dir = os.path.join(stage, 'lib')
+if os.path.isdir(lib_dir):
+    for root, dirs, files in os.walk(lib_dir):
+        dirs.sort()
+        for fname in sorted(files):
+            path = os.path.join(root, fname)
+            if fname.endswith('.pm'):
+                rel = os.path.relpath(path, lib_dir)
+                name = rel.replace(os.sep, '::').removesuffix('.pm')
+                ctype = 'library'
+            else:
+                name = fname
+                ctype = 'file'
+            components.append({
+                'type': ctype, 'name': name, 'version': version,
+                'hashes': [{'alg': 'SHA-256', 'content': sha256(path)}],
+                'licenses': [{'license': {'id': 'proprietary'}}],
+                'purl': f'pkg:generic/{brand}/{name}@{version}'
+            })
+
+deps = [
+    {'type': 'library', 'name': 'IO::Socket::SSL', 'version': 'unknown',
+     'description': 'TLS sockets. Debian: libio-socket-ssl-perl'},
+    {'type': 'library', 'name': 'JSON', 'version': 'unknown',
+     'description': 'JSON encode/decode. Debian: libjson-perl'},
+    {'type': 'library', 'name': 'LWP::UserAgent', 'version': 'unknown',
+     'description': 'HTTP client. Debian: libwww-perl'},
+    {'type': 'library', 'name': 'perl', 'version': 'unknown',
+     'description': 'Perl runtime. Debian: perl'},
+    {'type': 'library', 'name': 'openssl', 'version': 'unknown',
+     'description': 'Key and certificate operations. Debian: openssl'},
+]
+
+sbom = {
+    'bomFormat': 'CycloneDX', 'specVersion': '1.6',
+    'serialNumber': serial, 'version': 1,
+    'metadata': {
+        'timestamp': timestamp,
+        'tools': [{'name': 'make-release.sh'}],
+        'component': {
+            'type': 'application',
+            'name': f'{brand}-exec',
+            'version': version,
+            'description': 'Perl mTLS remote script execution system',
+            'licenses': [{'license': {'id': 'proprietary'}}],
+        }
+    },
+    'components': components + deps
+}
+
+with open(outfile, 'w') as fh:
+    json.dump(sbom, fh, indent=2)
+print(f'Written: {outfile}')
+PYEOF
+
+    cp "$BRAND_SBOM" "$STAGE/$BRAND_SBOM"
+
+    # Remove the ctrl-exec sbom from the brand package
+    rm -f "$STAGE/sbom.json"
+
+    # Repack
+    tar -czf "$BRAND_TARBALL" -C "$STAGE_DIR" "$BRAND_NAME"
+    BRAND_HASH=$(sha256sum "$BRAND_TARBALL" | awk '{print $1}')
+    echo "$BRAND_HASH  $BRAND_TARBALL" > "${BRAND_TARBALL}.sha256"
+
+    echo ""
+    echo "================================================================"
+    echo " Brand package complete"
+    echo "================================================================"
+    echo ""
+    echo "  Source:    $FROM"
+    echo "  Brand:     ${BRAND}-exec"
+    echo "  Version:   $VERSION"
+    echo "  Tarball:   $BRAND_TARBALL"
+    echo "  Checksum:  ${BRAND_TARBALL}.sha256"
+    echo "  SBOM:      $BRAND_SBOM"
+    echo ""
+    echo "  Deliver $BRAND_TARBALL and $BRAND_SBOM to Xi Software."
+    echo "  Do not distribute the ctrl-exec source tarball."
+    echo ""
+    echo "================================================================"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Standard ctrl-exec release
+# ---------------------------------------------------------------------------
 
 VERSION_FILE="VERSION"
 [[ -f "$VERSION_FILE" ]] || die "VERSION file not found."
@@ -40,8 +269,6 @@ VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
     || die "VERSION must be semver n.n.n, got: $VERSION"
 
 info "Release version: $VERSION"
-
-# --- git checks ---
 
 if ! git rev-parse --git-dir &>/dev/null; then
     die "Not a git repository."
@@ -54,21 +281,17 @@ fi
 COMMIT=$(git rev-parse HEAD)
 info "Git commit: $COMMIT"
 
-# --- paths ---
-
-RELEASE_NAME="dispatcher-${VERSION}"
+RELEASE_NAME="ctrl-exec-${VERSION}"
 TARBALL="${RELEASE_NAME}.tar.gz"
 STAGE_DIR=$(mktemp -d)
 STAGE="${STAGE_DIR}/${RELEASE_NAME}"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
-# --- files to ship ---
-
 SHIP_FILES=(
-    bin/dispatcher
-    bin/dispatcher-agent
-    bin/dispatcher-api
-    bin/update-dispatcher-serial
+    bin/ctrl-exec
+    bin/ctrl-exec-agent
+    bin/ctrl-exec-api
+    bin/update-ctrl-exec-serial
     install.sh
     VERSION
     LICENCE
@@ -84,13 +307,7 @@ SHIP_FILES=(
     docs/SECURITY.md
 )
 
-SHIP_DIRS=(
-    lib
-    etc
-    t
-)
-
-# --- stage files ---
+SHIP_DIRS=(lib etc t)
 
 info "Staging files..."
 mkdir -p "$STAGE"
@@ -106,148 +323,73 @@ for d in "${SHIP_DIRS[@]}"; do
     cp -r "$d" "$STAGE/"
 done
 
-# --- stamp version in the three binaries ---
-
 info "Stamping version $VERSION in binaries..."
 chmod 755 "$STAGE/install.sh"
-for bin in dispatcher dispatcher-agent dispatcher-api; do
+for bin in ctrl-exec ctrl-exec-agent ctrl-exec-api; do
+    [[ -f "$STAGE/bin/$bin" ]] || continue
     sed -i "s/our \$VERSION = .*/our \$VERSION = '$VERSION';/" \
         "$STAGE/bin/$bin"
 done
 
-# --- generate sbom.json ---
-
 info "Generating CycloneDX SBOM..."
 
-# Collect source components with SHA-256 hashes
-# Components: the three binaries and all library modules
+TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+SERIAL="urn:uuid:$(python3 -c "import uuid; print(uuid.uuid4())")"
 
-collect_components() {
-    local components="[]"
+SOURCE_COMPONENTS=$(python3 - "$STAGE" "$VERSION" <<'PYEOF'
+import json, sys, os, hashlib
 
-    # bin/ executables (Perl binaries with $VERSION stamped)
-    for bin in dispatcher dispatcher-agent dispatcher-api; do
-        local path="bin/$bin"
-        local staged="$STAGE/bin/$bin"
-        local hash
-        hash=$(sha256sum "$staged" | awk '{print $1}')
-        local component
-        component=$(python3 -c "
-import json, sys
-c = {
-    'type': 'file',
-    'name': '$bin',
-    'version': '$VERSION',
-    'hashes': [{'alg': 'SHA-256', 'content': '$hash'}],
-    'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
-    'purl': 'pkg:generic/opendigital/dispatcher-$bin@$VERSION'
-}
-print(json.dumps(c))
-")
-        components=$(python3 -c "
-import json, sys
-comps = json.loads('$components' if '$components' != '[]' else '[]')
-comps.append(json.loads(sys.stdin.read()))
-print(json.dumps(comps))
-" <<< "$component")
-    done
+stage, version = sys.argv[1], sys.argv[2]
+components = []
 
-    # bin/update-dispatcher-serial (bash script - no $VERSION stamp)
-    {
-        local staged="$STAGE/bin/update-dispatcher-serial"
-        local hash
-        hash=$(sha256sum "$staged" | awk '{print $1}')
-        local component
-        component=$(python3 -c "
-import json
-c = {
-    'type': 'file',
-    'name': 'update-dispatcher-serial',
-    'version': '$VERSION',
-    'hashes': [{'alg': 'SHA-256', 'content': '$hash'}],
-    'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
-    'purl': 'pkg:generic/opendigital/dispatcher-update-dispatcher-serial@$VERSION'
-}
-print(json.dumps(c))
-")
-        components=$(python3 -c "
-import json, sys
-comps = json.loads('''$components''')
-comps.append(json.loads(sys.stdin.read()))
-print(json.dumps(comps))
-" <<< "$component")
-    }
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
-    # lib/ modules
-    while IFS= read -r -d '' pm; do
-        local rel="${pm#$STAGE/}"
-        local name
-        name=$(echo "$rel" | sed 's|lib/||; s|/|::|g; s|\.pm$||')
-        local hash
-        hash=$(sha256sum "$pm" | awk '{print $1}')
-        local component
-        component=$(python3 -c "
-import json
-c = {
-    'type': 'library',
-    'name': '$name',
-    'version': '$VERSION',
-    'hashes': [{'alg': 'SHA-256', 'content': '$hash'}],
-    'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
-    'purl': 'pkg:generic/opendigital/$name@$VERSION'
-}
-print(json.dumps(c))
-")
-        components=$(python3 -c "
-import json, sys
-comps = json.loads('''$components''')
-comps.append(json.loads(sys.stdin.read()))
-print(json.dumps(comps))
-" <<< "$component")
-    done < <(find "$STAGE/lib" -name '*.pm' -print0 | sort -z)
+bin_dir = os.path.join(stage, 'bin')
+if os.path.isdir(bin_dir):
+    for name in sorted(os.listdir(bin_dir)):
+        path = os.path.join(bin_dir, name)
+        if os.path.isfile(path):
+            components.append({
+                'type': 'file', 'name': name, 'version': version,
+                'hashes': [{'alg': 'SHA-256', 'content': sha256(path)}],
+                'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
+                'purl': f'pkg:generic/opendigital/{name}@{version}'
+            })
 
-    # Non-Perl lib assets (e.g. static JSON specs shipped inside lib/)
-    while IFS= read -r -d '' asset; do
-        local rel="${asset#$STAGE/}"
-        local name
-        name=$(basename "$asset")
-        local hash
-        hash=$(sha256sum "$asset" | awk '{print $1}')
-        local component
-        component=$(python3 -c "
-import json
-c = {
-    'type': 'file',
-    'name': '$name',
-    'version': '$VERSION',
-    'hashes': [{'alg': 'SHA-256', 'content': '$hash'}],
-    'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
-    'purl': 'pkg:generic/opendigital/$name@$VERSION'
-}
-print(json.dumps(c))
-")
-        components=$(python3 -c "
-import json, sys
-comps = json.loads('''$components''')
-comps.append(json.loads(sys.stdin.read()))
-print(json.dumps(comps))
-" <<< "$component")
-    done < <(find "$STAGE/lib" ! -name '*.pm' -type f -print0 | sort -z)
+lib_dir = os.path.join(stage, 'lib')
+if os.path.isdir(lib_dir):
+    for root, dirs, files in os.walk(lib_dir):
+        dirs.sort()
+        for fname in sorted(files):
+            path = os.path.join(root, fname)
+            if fname.endswith('.pm'):
+                rel = os.path.relpath(path, lib_dir)
+                name = rel.replace(os.sep, '::').removesuffix('.pm')
+                ctype = 'library'
+            else:
+                name = fname
+                ctype = 'file'
+            components.append({
+                'type': ctype, 'name': name, 'version': version,
+                'hashes': [{'alg': 'SHA-256', 'content': sha256(path)}],
+                'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
+                'purl': f'pkg:generic/opendigital/{name}@{version}'
+            })
 
-    echo "$components"
-}
+print(json.dumps(components))
+PYEOF
+)
 
-SOURCE_COMPONENTS=$(collect_components)
-
-# Dependency components - OS-managed, versions resolved at install time
 DEPS_JSON=$(python3 -c "
 import json
-
 deps = [
     {
-        'type': 'library',
-        'name': 'IO::Socket::SSL',
-        'version': 'unknown',
+        'type': 'library', 'name': 'IO::Socket::SSL', 'version': 'unknown',
         'description': 'TLS sockets. Debian: libio-socket-ssl-perl, Alpine: perl-io-socket-ssl',
         'externalReferences': [
             {'type': 'distribution', 'url': 'https://packages.debian.org/trixie/libio-socket-ssl-perl'},
@@ -255,9 +397,7 @@ deps = [
         ]
     },
     {
-        'type': 'library',
-        'name': 'JSON',
-        'version': 'unknown',
+        'type': 'library', 'name': 'JSON', 'version': 'unknown',
         'description': 'JSON encode/decode. Debian: libjson-perl, Alpine: perl-json',
         'externalReferences': [
             {'type': 'distribution', 'url': 'https://packages.debian.org/trixie/libjson-perl'},
@@ -265,9 +405,7 @@ deps = [
         ]
     },
     {
-        'type': 'library',
-        'name': 'LWP::UserAgent',
-        'version': 'unknown',
+        'type': 'library', 'name': 'LWP::UserAgent', 'version': 'unknown',
         'description': 'HTTP client. Debian: libwww-perl, Alpine: perl-libwww',
         'externalReferences': [
             {'type': 'distribution', 'url': 'https://packages.debian.org/trixie/libwww-perl'},
@@ -275,9 +413,7 @@ deps = [
         ]
     },
     {
-        'type': 'library',
-        'name': 'perl',
-        'version': 'unknown',
+        'type': 'library', 'name': 'perl', 'version': 'unknown',
         'description': 'Perl runtime and core modules. Debian: perl, Alpine: perl',
         'externalReferences': [
             {'type': 'distribution', 'url': 'https://packages.debian.org/trixie/perl'},
@@ -285,9 +421,7 @@ deps = [
         ]
     },
     {
-        'type': 'library',
-        'name': 'openssl',
-        'version': 'unknown',
+        'type': 'library', 'name': 'openssl', 'version': 'unknown',
         'description': 'Key, CSR, and certificate operations. Debian: openssl, Alpine: openssl',
         'externalReferences': [
             {'type': 'distribution', 'url': 'https://packages.debian.org/trixie/openssl'},
@@ -295,74 +429,51 @@ deps = [
         ]
     },
 ]
-
 print(json.dumps(deps, indent=2))
 ")
 
-TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-SERIAL="urn:uuid:$(python3 -c "import uuid; print(uuid.uuid4())")"
-
 python3 -c "
 import json, sys
-
 source = json.loads(sys.argv[1])
 deps   = json.loads(sys.argv[2])
-
 sbom = {
-    'bomFormat': 'CycloneDX',
-    'specVersion': '1.6',
-    'serialNumber': '$SERIAL',
-    'version': 1,
+    'bomFormat': 'CycloneDX', 'specVersion': '1.6',
+    'serialNumber': '$SERIAL', 'version': 1,
     'metadata': {
         'timestamp': '$TIMESTAMP',
         'tools': [{'name': 'make-release.sh', 'version': '$VERSION'}],
         'component': {
             'type': 'application',
-            'name': 'dispatcher',
+            'name': 'ctrl-exec',
             'version': '$VERSION',
             'description': 'Perl mTLS remote script execution system',
             'licenses': [{'license': {'id': 'AGPL-3.0-only'}}],
             'externalReferences': [
-                {'type': 'vcs', 'url': 'https://github.com/OpenDigitalCC/dispatcher'},
+                {'type': 'vcs', 'url': 'https://github.com/OpenDigitalCC/ctrl-exec'},
             ]
         }
     },
     'components': source + deps
 }
-
 print(json.dumps(sbom, indent=2))
 " "$SOURCE_COMPONENTS" "$DEPS_JSON" > sbom.json
 
 info "sbom.json written ($(wc -l < sbom.json) lines)"
-
-# Copy sbom into the staged release too
 cp sbom.json "$STAGE/sbom.json"
-
-# --- create tarball ---
 
 info "Creating tarball: $TARBALL"
 
-# Remove previous release tarballs from the local filesystem (not from git)
 while IFS= read -r old; do
-    [[ "$old" == "$TARBALL" ]] && continue
-    rm -f "$old" "${old}.sha256"
+    [[ "$old" == "./$TARBALL" ]] && continue
+    rm -f "$old" "${old%.tar.gz}.sha256"
     info "Removed previous tarball: $old"
-done < <(find . -maxdepth 1 -name 'dispatcher-*.tar.gz' | sort)
-
-# Remove any previously committed tarballs from git index (they should not
-# be tracked; committed accidentally or from an earlier release workflow).
-while IFS= read -r tracked; do
-    git rm --cached --quiet "$tracked" "${tracked}.sha256" 2>/dev/null || true
-    info "Removed from git index: $tracked"
-done < <(git ls-files 'dispatcher-*.tar.gz')
+done < <(find . -maxdepth 1 -name 'ctrl-exec-*.tar.gz' | sort)
 
 tar -czf "$TARBALL" -C "$STAGE_DIR" "$RELEASE_NAME"
 
 TARBALL_HASH=$(sha256sum "$TARBALL" | awk '{print $1}')
 info "SHA-256: $TARBALL_HASH"
 echo "$TARBALL_HASH  $TARBALL" > "${TARBALL}.sha256"
-
-# --- git tag ---
 
 TAG="v${VERSION}"
 if git rev-parse "$TAG" &>/dev/null 2>&1; then
@@ -372,16 +483,12 @@ else
     info "Tagged: $TAG"
 fi
 
-# --- bump patch version for next release ---
-
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 MINOR=$(echo "$VERSION" | cut -d. -f2)
 PATCH=$(echo "$VERSION" | cut -d. -f3)
 NEXT_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
 echo "$NEXT_VERSION" > VERSION
 info "VERSION bumped to $NEXT_VERSION for next release."
-
-# --- summary ---
 
 echo ""
 echo "================================================================"
@@ -393,6 +500,9 @@ echo "  Checksum:  ${TARBALL}.sha256"
 echo "  SBOM:      sbom.json"
 echo "  Tag:       $TAG  ($COMMIT)"
 echo "  Next ver:  $NEXT_VERSION"
+echo ""
+echo "  To build the xi-exec package from this release:"
+echo "    ./make-release.sh --brand xi --from $TARBALL"
 echo ""
 
 if [[ "$AUTO" -eq 1 ]]; then

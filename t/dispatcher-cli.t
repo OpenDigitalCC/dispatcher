@@ -4,13 +4,13 @@ use warnings;
 use Test::More tests => 28;
 use FindBin qw($Bin);
 
-# Load just the parsing and formatting functions from bin/dispatcher
+# Load just the parsing and formatting functions from bin/ctrl-exec
 # by requiring it into a package that won't execute main()
 {
     no warnings 'redefine';
     local *main::main = sub {};   # suppress main() execution
-    do "$Bin/../bin/dispatcher";
-    die "Could not load dispatcher: $@" if $@;
+    do "$Bin/../bin/ctrl-exec";
+    die "Could not load ctrl-exec: $@" if $@;
 }
 
 # --- _parse_run_args ---

@@ -1,11 +1,11 @@
 #!/bin/bash
 # 12-serial-check.sh
 #
-# Verifies that /run and /ping enforce the dispatcher serial check.
+# Verifies that /run and /ping enforce the ctrl-exec serial check.
 #
-# The agent loads dispatcher-serial from /etc/dispatcher-agent/dispatcher-serial
+# The agent loads ctrl-exec-serial from /etc/ctrl-exec-agent/ctrl-exec-serial
 # (or the path configured by dispatcher_serial_path). This file holds the
-# hex serial of the legitimate dispatcher cert, recorded at pairing time.
+# hex serial of the legitimate ctrl-exec cert, recorded at pairing time.
 #
 # Three behaviours to confirm:
 #   1. Normal operation: ping and run succeed when serial matches
@@ -26,8 +26,8 @@ source "${_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/lib.sh"
 require_agents 1
 
 SSH_USER="${AGENT_SSH_USER:-root}"
-SERIAL_FILE="/etc/dispatcher-agent/dispatcher-serial"
-SERIAL_BAK="/etc/dispatcher-agent/dispatcher-serial.bak"
+SERIAL_FILE="/etc/ctrl-exec-agent/ctrl-exec-serial"
+SERIAL_BAK="/etc/ctrl-exec-agent/ctrl-exec-serial.bak"
 
 # --- helpers ---
 
@@ -47,11 +47,11 @@ agent_ssh_available() {
 }
 
 agent_reload() {
-    agent_run 'systemctl reload dispatcher-agent 2>/dev/null || \
-        ([ -f /etc/init.d/dispatcher-agent ] && /etc/init.d/dispatcher-agent reload 2>/dev/null) || \
-        kill -HUP $(cat /var/run/dispatcher-agent.pid 2>/dev/null || \
-                    cat /run/dispatcher-agent.pid 2>/dev/null) 2>/dev/null || \
-        pkill -HUP -x dispatcher-agent 2>/dev/null || true'
+    agent_run 'systemctl reload ctrl-exec-agent 2>/dev/null || \
+        ([ -f /etc/init.d/ctrl-exec-agent ] && /etc/init.d/ctrl-exec-agent reload 2>/dev/null) || \
+        kill -HUP $(cat /var/run/ctrl-exec-agent.pid 2>/dev/null || \
+                    cat /run/ctrl-exec-agent.pid 2>/dev/null) 2>/dev/null || \
+        pkill -HUP -x ctrl-exec-agent 2>/dev/null || true'
     sleep 1
 }
 
@@ -122,9 +122,9 @@ else
     # Confirm serial file exists before proceeding
     if ! agent_run "[ -f '$SERIAL_FILE' ]"; then
         skip "Serial absent: ping returns 403" \
-             "dispatcher-serial not present on $AGENT1 - re-pair before testing"
+             "ctrl-exec-serial not present on $AGENT1 - re-pair before testing"
         skip "Serial absent: run returns 403" \
-             "dispatcher-serial not present on $AGENT1 - re-pair before testing"
+             "ctrl-exec-serial not present on $AGENT1 - re-pair before testing"
     else
         # Move the serial file away and reload
         agent_run "mv '$SERIAL_FILE' '$SERIAL_BAK'"
@@ -173,7 +173,7 @@ if ! agent_ssh_available; then
 else
     skip "Syslog serial-reject verification" \
          "requires live 403 trigger with syslog read - verify manually:
-        journalctl -t dispatcher-agent | grep serial-reject"
+        journalctl -t ctrl-exec-agent | grep serial-reject"
 fi
 
 summary

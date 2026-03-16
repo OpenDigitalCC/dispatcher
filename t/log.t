@@ -31,23 +31,23 @@ BEGIN {
     };
 }
 
-use Dispatcher::Log qw();
+use Exec::Log qw();
 
-Dispatcher::Log::init('test-dispatcher');
+Exec::Log::init('test-ctrl-exec');
 
 sub last_log { $logged[-1] }
 sub clear_log { @logged = () }
 
 subtest 'log_action: ACTION appears first' => sub {
     clear_log();
-    Dispatcher::Log::log_action('INFO', { ACTION => 'run', SCRIPT => 'backup', EXIT => 0 });
+    Exec::Log::log_action('INFO', { ACTION => 'run', SCRIPT => 'backup', EXIT => 0 });
     my $msg = last_log()->{msg};
     like $msg, qr/^ACTION=run\b/, 'ACTION is first field';
 };
 
 subtest 'log_action: all fields present' => sub {
     clear_log();
-    Dispatcher::Log::log_action('INFO', {
+    Exec::Log::log_action('INFO', {
         ACTION => 'run',
         SCRIPT => 'check-disk',
         EXIT   => 0,
@@ -64,7 +64,7 @@ subtest 'log_action: all fields present' => sub {
 
 subtest 'log_action: values with spaces are quoted' => sub {
     clear_log();
-    Dispatcher::Log::log_action('INFO', {
+    Exec::Log::log_action('INFO', {
         ACTION => 'deny',
         ERROR  => 'script not permitted',
     });
@@ -73,18 +73,18 @@ subtest 'log_action: values with spaces are quoted' => sub {
 };
 
 subtest 'log_action: missing ACTION dies' => sub {
-    eval { Dispatcher::Log::log_action('INFO', { SCRIPT => 'x' }) };
+    eval { Exec::Log::log_action('INFO', { SCRIPT => 'x' }) };
     like $@, qr/ACTION field required/, 'dies without ACTION';
 };
 
 subtest 'log_action: non-hashref dies' => sub {
-    eval { Dispatcher::Log::log_action('INFO', ['foo']) };
+    eval { Exec::Log::log_action('INFO', ['foo']) };
     like $@, qr/fields must be a hashref/, 'dies on arrayref';
 };
 
 subtest 'log_action: remaining fields in alphabetical order' => sub {
     clear_log();
-    Dispatcher::Log::log_action('INFO', {
+    Exec::Log::log_action('INFO', {
         ACTION => 'ping',
         ZZLAST => 'z',
         AAFIRST => 'a',
@@ -98,7 +98,7 @@ subtest 'log_action: remaining fields in alphabetical order' => sub {
 
 subtest 'log_action: undef value rendered as empty string' => sub {
     clear_log();
-    Dispatcher::Log::log_action('INFO', { ACTION => 'test', FOO => undef });
+    Exec::Log::log_action('INFO', { ACTION => 'test', FOO => undef });
     my $msg = last_log()->{msg};
     like $msg, qr/FOO=(\s|$)/, 'undef renders as empty';
 };

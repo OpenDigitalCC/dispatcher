@@ -6,18 +6,18 @@
 # and as a JSON object on stdin.
 #
 # Environment variables:
-#   DISPATCHER_ACTION      run | ping
-#   DISPATCHER_SCRIPT      script name (empty for ping and api requests)
-#   DISPATCHER_HOSTS       comma-separated host list
-#   DISPATCHER_ARGS_JSON   script args as a JSON array (use this)
-#   DISPATCHER_USERNAME    username from request (may be empty)
-#   DISPATCHER_TOKEN       token from request (may be empty)
-#   DISPATCHER_SOURCE_IP   originating IP address
-#   DISPATCHER_TIMESTAMP   ISO8601 UTC timestamp
+#   ENVEXEC_ACTION      run | ping
+#   ENVEXEC_SCRIPT      script name (empty for ping and api requests)
+#   ENVEXEC_HOSTS       comma-separated host list
+#   ENVEXEC_ARGS_JSON   script args as a JSON array (use this)
+#   ENVEXEC_USERNAME    username from request (may be empty)
+#   ENVEXEC_TOKEN       token from request (may be empty)
+#   ENVEXEC_SOURCE_IP   originating IP address
+#   ENVEXEC_TIMESTAMP   ISO8601 UTC timestamp
 #
-# DISPATCHER_ARGS (space-joined) is also set for backward compatibility
+# ENVEXEC_ARGS (space-joined) is also set for backward compatibility
 # but is deprecated. It is lossy for args containing spaces or newlines.
-# Always use DISPATCHER_ARGS_JSON for argument inspection.
+# Always use ENVEXEC_ARGS_JSON for argument inspection.
 #
 # stdin: full request context as a JSON object (same fields as above,
 #        with hosts and args as arrays)
@@ -40,12 +40,12 @@
 # exit 0
 
 # Example 3: Token-based authorisation
-# Requires DISPATCHER_TOKEN to be set and match a known value.
+# Requires ENVEXEC_TOKEN to be set and match a known value.
 # Suitable when callers supply a shared secret token.
 #
 # REQUIRED_TOKEN="changeme"
-# if [ "$DISPATCHER_TOKEN" != "$REQUIRED_TOKEN" ]; then
-#     logger -t dispatcher-auth "denied: bad token for $DISPATCHER_ACTION from $DISPATCHER_SOURCE_IP"
+# if [ "$ENVEXEC_TOKEN" != "$REQUIRED_TOKEN" ]; then
+#     logger -t ctrl-exec-auth "denied: bad token for $ENVEXEC_ACTION from $ENVEXEC_SOURCE_IP"
 #     exit 2
 # fi
 # exit 0
@@ -53,26 +53,26 @@
 # Example 4: Restrict run actions to specific scripts
 # Bypasses access checks for all non-run actions (e.g. ping); restricts run to named scripts.
 #
-# if [ "$DISPATCHER_ACTION" = "run" ]; then
-#     case "$DISPATCHER_SCRIPT" in
+# if [ "$ENVEXEC_ACTION" = "run" ]; then
+#     case "$ENVEXEC_SCRIPT" in
 #         deploy-app|restart-service|backup-db)
 #             exit 0
 #             ;;
 #         *)
-#             logger -t dispatcher-auth "denied: script '$DISPATCHER_SCRIPT' not permitted"
+#             logger -t ctrl-exec-auth "denied: script '$ENVEXEC_SCRIPT' not permitted"
 #             exit 1
 #             ;;
 #     esac
 # fi
 # exit 0
 
-# Example 5: Inspect args using DISPATCHER_ARGS_JSON
+# Example 5: Inspect args using ENVEXEC_ARGS_JSON
 # Requires jq. Denies run if more than 3 args are supplied.
 #
-# if [ "$DISPATCHER_ACTION" = "run" ]; then
-#     arg_count=$(echo "$DISPATCHER_ARGS_JSON" | jq 'length')
+# if [ "$ENVEXEC_ACTION" = "run" ]; then
+#     arg_count=$(echo "$ENVEXEC_ARGS_JSON" | jq 'length')
 #     if [ "$arg_count" -gt 3 ]; then
-#         logger -t dispatcher-auth "denied: too many args ($arg_count)"
+#         logger -t ctrl-exec-auth "denied: too many args ($arg_count)"
 #         exit 1
 #     fi
 # fi

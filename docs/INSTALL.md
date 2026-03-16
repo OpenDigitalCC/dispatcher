@@ -32,13 +32,13 @@ Agent (`--agent`)
 - Debian: `libio-socket-ssl-perl`, `libjson-perl`
 - Alpine: `perl-io-socket-ssl`, `perl-json`
 
-Dispatcher (`--dispatcher`)
+Dispatcher (`--ctrl-exec`)
 
 - Debian: `libwww-perl`, `libio-socket-ssl-perl`, `libjson-perl`
 - Alpine: `perl-libwww`, `perl-io-socket-ssl`, `perl-json`
 
 API (`--api`)
-: No additional packages beyond the dispatcher role.
+: No additional packages beyond the ctrl-exec role.
 
 All roles require `openssl` (present on any standard installation) and `perl`.
 
@@ -52,8 +52,8 @@ The installer must be run as root. A role must be specified.
 
 ```bash
 sudo ./install.sh --agent        # on each remote host
-sudo ./install.sh --dispatcher   # on the control host
-sudo ./install.sh --api          # on the control host, after --dispatcher
+sudo ./install.sh --ctrl-exec   # on the control host
+sudo ./install.sh --api          # on the control host, after --ctrl-exec
 sudo ./install.sh --uninstall    # remove files (preserves config and certs)
 sudo ./install.sh --run-tests    # run test suite from source directory
 ```
@@ -64,32 +64,32 @@ or used alone to test without installing.
 ### Installed paths
 
 ```
-/usr/local/bin/dispatcher
-/usr/local/bin/dispatcher-agent
-/usr/local/bin/dispatcher-api
-/usr/local/lib/dispatcher/          Perl library modules
-/etc/dispatcher/                    Dispatcher config, CA material, auth hook
-/etc/dispatcher-agent/              Agent config and certs
-/opt/dispatcher-scripts/            Managed scripts on agent hosts
-/var/lib/dispatcher/pairing/        Pending pairing requests
-/var/lib/dispatcher/agents/         Agent registry
-/var/lib/dispatcher/locks/          Concurrency lock files (transient)
-/etc/systemd/system/dispatcher-agent.service   (systemd platforms only)
-/etc/systemd/system/dispatcher-api.service     (systemd platforms only)
+/usr/local/bin/ctrl-exec
+/usr/local/bin/ctrl-exec-agent
+/usr/local/bin/ctrl-exec-api
+/usr/local/lib/ctrl-exec/          Perl library modules
+/etc/ctrl-exec/                    Dispatcher config, CA material, auth hook
+/etc/ctrl-exec-agent/              Agent config and certs
+/opt/ctrl-exec-scripts/            Managed scripts on agent hosts
+/var/lib/ctrl-exec/pairing/        Pending pairing requests
+/var/lib/ctrl-exec/agents/         Agent registry
+/var/lib/ctrl-exec/locks/          Concurrency lock files (transient)
+/etc/systemd/system/ctrl-exec-agent.service   (systemd platforms only)
+/etc/systemd/system/ctrl-exec-api.service     (systemd platforms only)
 ```
 
 The installer stamps the release version from the `VERSION` file into the three
 binaries at install time. The source files in the distribution carry the
 sentinel value `UNINSTALLED` until the installer runs. After installation,
-`dispatcher --version` reports the version of the release that was installed.
+`ctrl-exec --version` reports the version of the release that was installed.
 
 ### Dispatcher group
 
-The installer creates a `dispatcher` system group. Add yourself to it for
+The installer creates a `ctrl-exec` system group. Add yourself to it for
 CLI access without sudo:
 
 ```bash
-sudo usermod -aG dispatcher $USER
+sudo usermod -aG ctrl-exec $USER
 # Log out and back in for the group to take effect
 ```
 
@@ -109,7 +109,7 @@ sudo ./install.sh --agent --run-tests
 ```
 
 `t/lock.t` requires `t/lock-holder.pl` to be present alongside it.
-`t/auth.t` and `t/pairing-dispatcher.t` require `libjson-perl` / `perl-json`
+`t/auth.t` and `t/pairing-ctrl-exec.t` require `libjson-perl` / `perl-json`
 and are skipped automatically if not available.
 
 
@@ -120,28 +120,28 @@ and are skipped automatically if not available.
 Initialise the CA (once only - do not repeat on an existing installation):
 
 ```bash
-sudo dispatcher setup-ca
+sudo ctrl-exec setup-ca
 ```
 
-Generate the dispatcher's own certificate:
+Generate the ctrl-exec's own certificate:
 
 ```bash
-sudo dispatcher setup-dispatcher
+sudo ctrl-exec setup-ctrl-exec
 ```
 
-Both commands write to `/etc/dispatcher/`. The CA private key (`ca.key`) is
+Both commands write to `/etc/ctrl-exec/`. The CA private key (`ca.key`) is
 set 0600 and must not leave this host. Back it up to encrypted offline storage.
 
-### 2. Configure the dispatcher
+### 2. Configure the ctrl-exec
 
-Edit `/etc/dispatcher/dispatcher.conf`:
+Edit `/etc/ctrl-exec/ctrl-exec.conf`:
 
 ```ini
 port      = 7443
-cert      = /etc/dispatcher/dispatcher.crt
-key       = /etc/dispatcher/dispatcher.key
-ca        = /etc/dispatcher/ca.crt
-auth_hook = /etc/dispatcher/auth-hook
+cert      = /etc/ctrl-exec/ctrl-exec.crt
+key       = /etc/ctrl-exec/ctrl-exec.key
+ca        = /etc/ctrl-exec/ca.crt
+auth_hook = /etc/ctrl-exec/auth-hook
 
 # Cert lifetime for new and renewed agent certs (days)
 cert_days = 365
@@ -153,19 +153,19 @@ production deployments accessible from outside.
 
 ### 3. Agent host - configure before pairing
 
-Edit `/etc/dispatcher-agent/agent.conf`:
+Edit `/etc/ctrl-exec-agent/agent.conf`:
 
 ```ini
 port = 7443
-cert = /etc/dispatcher-agent/agent.crt
-key  = /etc/dispatcher-agent/agent.key
-ca   = /etc/dispatcher-agent/ca.crt
+cert = /etc/ctrl-exec-agent/agent.crt
+key  = /etc/ctrl-exec-agent/agent.key
+ca   = /etc/ctrl-exec-agent/ca.crt
 
 # Restrict scripts to approved directories (recommended)
-script_dirs = /opt/dispatcher-scripts
+script_dirs = /opt/ctrl-exec-scripts
 
 # Optional: agent-side auth hook for independent token validation
-# auth_hook = /etc/dispatcher-agent/auth-hook
+# auth_hook = /etc/ctrl-exec-agent/auth-hook
 
 # Optional tags - reported in discovery responses
 [tags]
@@ -174,28 +174,28 @@ role = db
 site = london
 ```
 
-Edit the allowlist `/etc/dispatcher-agent/scripts.conf`:
+Edit the allowlist `/etc/ctrl-exec-agent/scripts.conf`:
 
 ```ini
 # name = /absolute/path/to/script
-backup-mysql  = /opt/dispatcher-scripts/backup-mysql.sh
-check-disk    = /opt/dispatcher-scripts/check-disk.sh
+backup-mysql  = /opt/ctrl-exec-scripts/backup-mysql.sh
+check-disk    = /opt/ctrl-exec-scripts/check-disk.sh
 ```
 
 Place scripts in the managed directory:
 
 ```bash
-sudo cp your-script.sh /opt/dispatcher-scripts/
-sudo chmod 750 /opt/dispatcher-scripts/your-script.sh
-sudo chown root:dispatcher-agent /opt/dispatcher-scripts/your-script.sh
+sudo cp your-script.sh /opt/ctrl-exec-scripts/
+sudo chmod 750 /opt/ctrl-exec-scripts/your-script.sh
+sudo chown root:ctrl-exec-agent /opt/ctrl-exec-scripts/your-script.sh
 ```
 
 ### 4. Pairing
 
-On the dispatcher host, start pairing mode:
+On the ctrl-exec host, start pairing mode:
 
 ```bash
-sudo dispatcher pairing-mode
+sudo ctrl-exec pairing-mode
 ```
 
 This blocks until interrupted. When run in a terminal it is interactive -
@@ -205,7 +205,7 @@ or deny.
 On the agent host:
 
 ```bash
-sudo dispatcher-agent request-pairing --dispatcher <dispatcher-hostname>
+sudo ctrl-exec-agent request-pairing --ctrl-exec <ctrl-exec-hostname>
 ```
 
 The agent connects and waits. A prompt appears in the pairing mode terminal:
@@ -233,15 +233,15 @@ For non-interactive use (scripted or from a service), use separate commands
 from another terminal while pairing mode runs:
 
 ```bash
-dispatcher list-requests
-dispatcher approve <reqid>
-dispatcher deny <reqid>
+ctrl-exec list-requests
+ctrl-exec approve <reqid>
+ctrl-exec deny <reqid>
 ```
 
 Confirm the agent is registered:
 
 ```bash
-dispatcher list-agents
+ctrl-exec list-agents
 ```
 
 ### 5. Start the agent
@@ -249,21 +249,21 @@ dispatcher list-agents
 On systemd platforms:
 
 ```bash
-sudo systemctl enable dispatcher-agent
-sudo systemctl start dispatcher-agent
-sudo systemctl status dispatcher-agent
+sudo systemctl enable ctrl-exec-agent
+sudo systemctl start ctrl-exec-agent
+sudo systemctl status ctrl-exec-agent
 ```
 
 On Alpine or without systemd:
 
 ```bash
-dispatcher-agent serve
+ctrl-exec-agent serve
 ```
 
-### 6. Verify from the dispatcher
+### 6. Verify from the ctrl-exec
 
 ```bash
-dispatcher ping <agent-hostname>
+ctrl-exec ping <agent-hostname>
 ```
 
 Expected output:
@@ -279,14 +279,14 @@ agent-hostname   ok        45ms   Jun  7 16:28:00 2027 GMT      0.1
 On systemd platforms:
 
 ```bash
-sudo systemctl enable dispatcher-api
-sudo systemctl start dispatcher-api
+sudo systemctl enable ctrl-exec-api
+sudo systemctl start ctrl-exec-api
 ```
 
 On Alpine or without systemd:
 
 ```bash
-dispatcher-api
+ctrl-exec-api
 ```
 
 Verify:
@@ -302,41 +302,41 @@ curl -s http://localhost:7445/health | python3 -m json.tool
 
 ```bash
 # Run a script on one host
-dispatcher run host-a backup-mysql
+ctrl-exec run host-a backup-mysql
 
 # With arguments (everything after -- is passed to the script)
-dispatcher run host-a logger -- -t my-tag "hello from dispatcher"
+ctrl-exec run host-a logger -- -t my-tag "hello from ctrl-exec"
 
 # Multiple hosts in parallel
-dispatcher run host-a host-b host-c check-disk
+ctrl-exec run host-a host-b host-c check-disk
 
 # Custom port on one host
-dispatcher run host-a:7450 host-b backup-mysql
+ctrl-exec run host-a:7450 host-b backup-mysql
 
 # JSON output
-dispatcher run host-a backup-mysql --json
+ctrl-exec run host-a backup-mysql --json
 
 # With auth token (preferred: via environment, does not appear in ps)
-DISPATCHER_TOKEN=mytoken dispatcher run host-a backup-mysql
-dispatcher run host-a backup-mysql --token mytoken --username deploy
+ENVEXEC_TOKEN=mytoken ctrl-exec run host-a backup-mysql
+ctrl-exec run host-a backup-mysql --token mytoken --username deploy
 ```
 
 ### Ping
 
 ```bash
-dispatcher ping host-a
-dispatcher ping host-a host-b host-c
-dispatcher ping host-a --json
+ctrl-exec ping host-a
+ctrl-exec ping host-a host-b host-c
+ctrl-exec ping host-a --json
 ```
 
 ### Agent management
 
 ```bash
-dispatcher list-agents                  # all paired agents with cert expiry
-dispatcher list-requests                # pending pairing requests
-dispatcher approve <reqid>              # approve a pairing request
-dispatcher deny <reqid>                 # deny a pairing request
-dispatcher unpair <hostname>            # remove agent from registry
+ctrl-exec list-agents                  # all paired agents with cert expiry
+ctrl-exec list-requests                # pending pairing requests
+ctrl-exec approve <reqid>              # approve a pairing request
+ctrl-exec deny <reqid>                 # deny a pairing request
+ctrl-exec unpair <hostname>            # remove agent from registry
 ```
 
 `unpair` removes the registry entry. The agent cert remains valid until its
@@ -396,21 +396,21 @@ curl -s http://localhost:7445/discovery | python3 -m json.tool
 
 ### API TLS
 
-Add to `/etc/dispatcher/dispatcher.conf`:
+Add to `/etc/ctrl-exec/ctrl-exec.conf`:
 
 ```ini
-api_cert = /etc/dispatcher/dispatcher.crt
-api_key  = /etc/dispatcher/dispatcher.key
+api_cert = /etc/ctrl-exec/ctrl-exec.crt
+api_key  = /etc/ctrl-exec/ctrl-exec.key
 ```
 
-Restart the API service. Clients use `--cacert /etc/dispatcher/ca.crt` or a
+Restart the API service. Clients use `--cacert /etc/ctrl-exec/ca.crt` or a
 certificate from a public CA if clients do not have the private CA cert.
 
 
 ## Auth Hook
 
 The auth hook is called before every `run` and `ping` from both CLI and API.
-It is the sole policy engine - dispatcher has no built-in ACLs.
+It is the sole policy engine - ctrl-exec has no built-in ACLs.
 
 The hook receives request context as environment variables and as a JSON object
 on stdin. Tokens and usernames are forwarded through to agent hooks and to
@@ -420,15 +420,15 @@ execution pipeline.
 ### Environment variables
 
 ```
-DISPATCHER_ACTION      run | ping
-DISPATCHER_SCRIPT      script name (empty for ping)
-DISPATCHER_HOSTS       comma-separated host list
-DISPATCHER_ARGS        space-joined args (ambiguous if args contain spaces)
-DISPATCHER_ARGS_JSON   args as a JSON array string (use this for arg inspection)
-DISPATCHER_USERNAME    username from request (may be empty)
-DISPATCHER_TOKEN       token from request (may be empty)
-DISPATCHER_SOURCE_IP   127.0.0.1 for CLI, caller IP for API
-DISPATCHER_TIMESTAMP   ISO 8601 UTC timestamp
+ENVEXEC_ACTION      run | ping
+ENVEXEC_SCRIPT      script name (empty for ping)
+ENVEXEC_HOSTS       comma-separated host list
+ENVEXEC_ARGS        space-joined args (ambiguous if args contain spaces)
+ENVEXEC_ARGS_JSON   args as a JSON array string (use this for arg inspection)
+ENVEXEC_USERNAME    username from request (may be empty)
+ENVEXEC_TOKEN       token from request (may be empty)
+ENVEXEC_SOURCE_IP   127.0.0.1 for CLI, caller IP for API
+ENVEXEC_TIMESTAMP   ISO 8601 UTC timestamp
 ```
 
 ### Exit codes
@@ -448,7 +448,7 @@ Static token check:
 
 ```bash
 #!/bin/bash
-[[ "$DISPATCHER_TOKEN" == "mysecrettoken" ]] || exit 2
+[[ "$ENVEXEC_TOKEN" == "mysecrettoken" ]] || exit 2
 exit 0
 ```
 
@@ -456,9 +456,9 @@ Per-token script restriction:
 
 ```bash
 #!/bin/bash
-case "$DISPATCHER_TOKEN" in
+case "$ENVEXEC_TOKEN" in
     backup-token)
-        [[ "$DISPATCHER_SCRIPT" == backup-* ]] || exit 3
+        [[ "$ENVEXEC_SCRIPT" == backup-* ]] || exit 3
         exit 0 ;;
     ops-token)
         exit 0 ;;
@@ -467,11 +467,11 @@ case "$DISPATCHER_TOKEN" in
 esac
 ```
 
-Argument count check using `DISPATCHER_ARGS_JSON`:
+Argument count check using `ENVEXEC_ARGS_JSON`:
 
 ```bash
 #!/bin/bash
-ARG_COUNT=$(echo "$DISPATCHER_ARGS_JSON" \
+ARG_COUNT=$(echo "$ENVEXEC_ARGS_JSON" \
     | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
 [[ "$ARG_COUNT" -le 2 ]] || exit 3
 exit 0
@@ -481,44 +481,44 @@ exit 0
 
 Agents can also run an auth hook, configured via `auth_hook` in `agent.conf`.
 This runs after allowlist validation and receives the same context including
-token and username forwarded from the dispatcher. Useful for independent token
-validation in zero-trust or multi-dispatcher deployments.
+token and username forwarded from the ctrl-exec. Useful for independent token
+validation in zero-trust or multi-ctrl-exec deployments.
 
 
 ## Configuration Reference
 
-### `/etc/dispatcher/dispatcher.conf`
+### `/etc/ctrl-exec/ctrl-exec.conf`
 
 ```ini
 port      = 7443                          # mTLS port agents connect to
-cert      = /etc/dispatcher/dispatcher.crt
-key       = /etc/dispatcher/dispatcher.key
-ca        = /etc/dispatcher/ca.crt
-auth_hook = /etc/dispatcher/auth-hook     # optional
+cert      = /etc/ctrl-exec/ctrl-exec.crt
+key       = /etc/ctrl-exec/ctrl-exec.key
+ca        = /etc/ctrl-exec/ca.crt
+auth_hook = /etc/ctrl-exec/auth-hook     # optional
 api_port  = 7445                          # API server port
-api_cert  = /etc/dispatcher/dispatcher.crt  # optional, enables TLS on API
-api_key   = /etc/dispatcher/dispatcher.key  # optional
+api_cert  = /etc/ctrl-exec/ctrl-exec.crt  # optional, enables TLS on API
+api_key   = /etc/ctrl-exec/ctrl-exec.key  # optional
 cert_days = 365                           # lifetime for new/renewed agent certs
 ```
 
-### `/etc/dispatcher-agent/agent.conf`
+### `/etc/ctrl-exec-agent/agent.conf`
 
 ```ini
 port = 7443
-cert = /etc/dispatcher-agent/agent.crt
-key  = /etc/dispatcher-agent/agent.key
-ca   = /etc/dispatcher-agent/ca.crt
+cert = /etc/ctrl-exec-agent/agent.crt
+key  = /etc/ctrl-exec-agent/agent.key
+ca   = /etc/ctrl-exec-agent/ca.crt
 
 # Colon-separated list of approved script directories (optional)
-script_dirs = /opt/dispatcher-scripts
+script_dirs = /opt/ctrl-exec-scripts
 
 # Agent-side auth hook executable (optional)
-# auth_hook = /etc/dispatcher-agent/auth-hook
+# auth_hook = /etc/ctrl-exec-agent/auth-hook
 
 # Pairing port (default: 7444)
 # pairing_port = 7444
 
-# Restrict connections to known dispatcher IPs (optional)
+# Restrict connections to known ctrl-exec IPs (optional)
 # allowed_ips = 192.168.1.10, 10.0.0.0/8
 
 # Rate limiting (defaults shown - omit to use defaults)
@@ -532,27 +532,27 @@ role = db
 site = london
 ```
 
-### `/etc/dispatcher-agent/scripts.conf`
+### `/etc/ctrl-exec-agent/scripts.conf`
 
 ```ini
 # name = /absolute/path/to/script
-backup-mysql  = /opt/dispatcher-scripts/backup-mysql.sh
-check-disk    = /opt/dispatcher-scripts/check-disk.sh
+backup-mysql  = /opt/ctrl-exec-scripts/backup-mysql.sh
+check-disk    = /opt/ctrl-exec-scripts/check-disk.sh
 ```
 
 
 ## Adding Scripts to an Agent
 
 ```bash
-sudo cp check-disk.sh /opt/dispatcher-scripts/
-sudo chmod 750 /opt/dispatcher-scripts/check-disk.sh
-sudo chown root:dispatcher-agent /opt/dispatcher-scripts/check-disk.sh
+sudo cp check-disk.sh /opt/ctrl-exec-scripts/
+sudo chmod 750 /opt/ctrl-exec-scripts/check-disk.sh
+sudo chown root:ctrl-exec-agent /opt/ctrl-exec-scripts/check-disk.sh
 
-echo "check-disk = /opt/dispatcher-scripts/check-disk.sh" \
-    | sudo tee -a /etc/dispatcher-agent/scripts.conf
+echo "check-disk = /opt/ctrl-exec-scripts/check-disk.sh" \
+    | sudo tee -a /etc/ctrl-exec-agent/scripts.conf
 
 # Reload without restart
-sudo systemctl kill --signal=HUP dispatcher-agent
+sudo systemctl kill --signal=HUP ctrl-exec-agent
 ```
 
 Scripts receive positional arguments as passed. They should exit 0 on success,
@@ -576,7 +576,7 @@ exec sudo -u appuser /usr/local/bin/my-script.sh "$@"
 Add a targeted sudoers rule:
 
 ```
-dispatcher-agent ALL=(appuser) NOPASSWD: /usr/local/bin/my-script.sh
+ctrl-exec-agent ALL=(appuser) NOPASSWD: /usr/local/bin/my-script.sh
 ```
 
 This hands privilege management to `sudo`, which has exactly that job.
@@ -592,42 +592,42 @@ No operator action is needed during normal operation. To check cert status:
 
 ```bash
 # On the agent host
-sudo dispatcher-agent pairing-status
+sudo ctrl-exec-agent pairing-status
 
-# From the dispatcher (CERT EXPIRY column)
-dispatcher ping host-a host-b
+# From the ctrl-exec (CERT EXPIRY column)
+ctrl-exec ping host-a host-b
 ```
 
-Renewal failure is logged at ERR level on the dispatcher and retried on the
+Renewal failure is logged at ERR level on the ctrl-exec and retried on the
 next ping. A cert that fails repeatedly will eventually expire and require
 re-pairing.
 
-To change cert lifetime, update `cert_days` in `dispatcher.conf`. Existing
+To change cert lifetime, update `cert_days` in `ctrl-exec.conf`. Existing
 certs are unaffected until their next renewal.
 
 
 ## Dispatcher Redundancy
 
-Two dispatcher installations can share a CA and manage the same agent fleet
-independently. Each dispatcher signs certs and maintains its own registry.
-Agents accept connections from any dispatcher that shares the CA.
+Two ctrl-exec installations can share a CA and manage the same agent fleet
+independently. Each ctrl-exec signs certs and maintains its own registry.
+Agents accept connections from any ctrl-exec that shares the CA.
 
-On the primary dispatcher after `setup-ca` and `setup-dispatcher`:
+On the primary ctrl-exec after `setup-ca` and `setup-ctrl-exec`:
 
 ```bash
 # Transfer CA material to secondary over a secure channel
-sudo scp /etc/dispatcher/ca.key root@secondary:/etc/dispatcher/ca.key
-sudo scp /etc/dispatcher/ca.crt root@secondary:/etc/dispatcher/ca.crt
+sudo scp /etc/ctrl-exec/ca.key root@secondary:/etc/ctrl-exec/ca.key
+sudo scp /etc/ctrl-exec/ca.crt root@secondary:/etc/ctrl-exec/ca.crt
 ```
 
 On the secondary:
 
 ```bash
-sudo dispatcher setup-dispatcher
+sudo ctrl-exec setup-ctrl-exec
 ```
 
-Each dispatcher then pairs with agents independently. Agents must pair with
-each dispatcher separately. This is active-active with independent registries -
+Each ctrl-exec then pairs with agents independently. Agents must pair with
+each ctrl-exec separately. This is active-active with independent registries -
 registry synchronisation is an operational responsibility.
 
 
@@ -636,7 +636,7 @@ registry synchronisation is an operational responsibility.
 Agent config and allowlist reload without downtime:
 
 ```bash
-sudo systemctl kill --signal=HUP dispatcher-agent
+sudo systemctl kill --signal=HUP ctrl-exec-agent
 # or on Alpine/non-systemd: kill -HUP <pid>
 ```
 
@@ -646,53 +646,53 @@ and `[tags]`. Changes take effect for subsequent requests.
 Restart agent (drops in-flight connections):
 
 ```bash
-sudo systemctl restart dispatcher-agent
+sudo systemctl restart ctrl-exec-agent
 ```
 
 Restart API server:
 
 ```bash
-sudo systemctl restart dispatcher-api
+sudo systemctl restart ctrl-exec-api
 ```
 
 
 ## Troubleshooting
 
 Agent unreachable after pairing
-: Check the service is running: `systemctl status dispatcher-agent`.
+: Check the service is running: `systemctl status ctrl-exec-agent`.
   Check port 7443 is open: `ss -tlnp | grep 7443`.
-  Verify cert: `sudo dispatcher-agent pairing-status`.
+  Verify cert: `sudo ctrl-exec-agent pairing-status`.
 
 Connection refused
-: The agent service is not running. `sudo systemctl start dispatcher-agent`.
+: The agent service is not running. `sudo systemctl start ctrl-exec-agent`.
 
 SSL handshake failure
 : Cert or CA mismatch. Re-pair the agent.
 
 Script not found
 : Check `scripts.conf` - path must be absolute and the file must be executable
-  by the `dispatcher-agent` user. Check syslog for `ACTION=deny` lines.
+  by the `ctrl-exec-agent` user. Check syslog for `ACTION=deny` lines.
   If `script_dirs` is set, confirm the path is under an approved directory.
 
 Auth denied unexpectedly
-: Confirm `auth_hook` is absent or commented out in `dispatcher.conf` if no
+: Confirm `auth_hook` is absent or commented out in `ctrl-exec.conf` if no
   hook is intended. Restart the API service after config changes.
 
 Pairing request missing from `list-requests`
-: Agent may have failed mid-pairing (run `sudo dispatcher-agent request-pairing`
+: Agent may have failed mid-pairing (run `sudo ctrl-exec-agent request-pairing`
   to retry). Stale requests older than 10 minutes are cleaned automatically.
-  Check dispatcher syslog for `ACTION=pair-request`.
+  Check ctrl-exec syslog for `ACTION=pair-request`.
 
 Cert renewal not occurring
 : Renewal is triggered by ping. Check `CERT EXPIRY` in ping output.
-  Check dispatcher syslog for `ACTION=renew` and `ERR` lines.
+  Check ctrl-exec syslog for `ACTION=renew` and `ERR` lines.
 
 Connection blocked unexpectedly (`ACTION=rate-block` in syslog)
 : The agent has rate-limited the source IP. The volume threshold (default: 10
   connections in 60 seconds) can be triggered by the integration test suite or
   rapid repeated pings. The block expires automatically (default: 5 minutes for
   volume, 1 hour for probe). To clear immediately, reload the agent:
-  `sudo systemctl reload dispatcher-agent` (rate limit state is held in memory
+  `sudo systemctl reload ctrl-exec-agent` (rate limit state is held in memory
   and reset on SIGHUP). To disable rate limiting during testing, set
   `rate_limit_disable = 1` in `agent.conf` and reload. Remove it before
   returning to production use.
@@ -707,10 +707,10 @@ sudo ./install.sh --uninstall
 Config, certs, and the agent registry are preserved. To remove everything:
 
 ```bash
-sudo rm -rf /etc/dispatcher-agent /etc/dispatcher
-sudo rm -rf /var/lib/dispatcher /opt/dispatcher-scripts
+sudo rm -rf /etc/ctrl-exec-agent /etc/ctrl-exec
+sudo rm -rf /var/lib/ctrl-exec /opt/ctrl-exec-scripts
 # Debian
-sudo userdel dispatcher-agent && sudo groupdel dispatcher
+sudo userdel ctrl-exec-agent && sudo groupdel ctrl-exec
 # Alpine
-sudo deluser dispatcher-agent && sudo delgroup dispatcher
+sudo deluser ctrl-exec-agent && sudo delgroup ctrl-exec
 ```

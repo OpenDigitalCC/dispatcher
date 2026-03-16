@@ -5,23 +5,23 @@ brand: odcc
 ---
 
 
-This document is the authoritative reference for all `dispatcher` and
-`dispatcher-agent` commands. It covers every mode, option, and environment
+This document is the authoritative reference for all `ctrl-exec` and
+`ctrl-exec-agent` commands. It covers every mode, option, and environment
 variable for both binaries.
 
 For installation and initial setup, see INSTALL.md. For a hands-on
-introduction to what the system can do, run the dispatcher-demonstrator
+introduction to what the system can do, run the ctrl-exec-demonstrator
 script on a paired agent - see INSTALL.md for instructions on enabling it.
 
-## dispatcher
+## ctrl-exec
 
-The `dispatcher` binary runs on the control host. It manages the CA,
+The `ctrl-exec` binary runs on the control host. It manages the CA,
 handles agent pairing, and dispatches commands to paired agents.
 
 ### Synopsis
 
 ```bash
-dispatcher <mode> [options] [args]
+ctrl-exec <mode> [options] [args]
 ```
 
 ### Global options
@@ -29,7 +29,7 @@ dispatcher <mode> [options] [args]
 These options apply to all modes.
 
 `--config <path>`
-: Path to `dispatcher.conf`. Default: `/etc/dispatcher/dispatcher.conf`.
+: Path to `ctrl-exec.conf`. Default: `/etc/ctrl-exec/ctrl-exec.conf`.
 
 `--port <n>`
 : Override the default agent port (7443) for all hosts in this invocation.
@@ -50,12 +50,12 @@ These options apply to all modes.
 
 `--token <token>`
 : Auth token to include in the request context. Defaults to the
-  `$DISPATCHER_TOKEN` environment variable if set. Consumed by auth hooks
+  `$ENVEXEC_TOKEN` environment variable if set. Consumed by auth hooks
   on the agent side.
 
 ### Environment variables
 
-`DISPATCHER_TOKEN`
+`ENVEXEC_TOKEN`
 : Default auth token. Equivalent to `--token`. Useful for scripted or
   automated invocations where passing a token on the command line is
   undesirable.
@@ -70,41 +70,41 @@ These options apply to all modes.
 Run an allowlisted script on one or more agents in parallel.
 
 ```bash
-dispatcher run <host>[:<port>] [<host>...] <script> [-- <arg>...]
+ctrl-exec run <host>[:<port>] [<host>...] <script> [-- <arg>...]
 ```
 
 The script name must match an entry in the agent's `scripts.conf` allowlist.
 Everything after `--` is passed to the script as positional arguments.
-Arguments are evaluated on the dispatcher host before being sent - use
+Arguments are evaluated on the ctrl-exec host before being sent - use
 `--` to pass static strings, not shell expressions intended to run on
 the agent.
 
-The dispatcher sends a JSON context object to the script via stdin on the
+The ctrl-exec sends a JSON context object to the script via stdin on the
 agent. This includes the script name, username, token, arguments, timestamp,
 peer IP, and request ID. See INSTALL.md for the full context structure.
 
 ```bash
 # Single host
-dispatcher run web-01 deploy-app
+ctrl-exec run web-01 deploy-app
 
 # Multiple hosts in parallel
-dispatcher run web-01 web-02 web-03 deploy-app
+ctrl-exec run web-01 web-02 web-03 deploy-app
 
 # Pass arguments to the script
-dispatcher run db-01 backup-mysql -- --database myapp
+ctrl-exec run db-01 backup-mysql -- --database myapp
 
 # Custom port for one host
-dispatcher run web-01:7450 deploy-app
+ctrl-exec run web-01:7450 deploy-app
 
 # Identify the operator explicitly
-dispatcher run web-01 deploy-app --username alice
+ctrl-exec run web-01 deploy-app --username alice
 
 # Pass an auth token
-dispatcher run web-01 deploy-app --token mytoken
-DISPATCHER_TOKEN=mytoken dispatcher run web-01 deploy-app
+ctrl-exec run web-01 deploy-app --token mytoken
+ENVEXEC_TOKEN=mytoken ctrl-exec run web-01 deploy-app
 
 # JSON output
-dispatcher run web-01 deploy-app --json
+ctrl-exec run web-01 deploy-app --json
 ```
 
 Output shows per-host status, exit code, round-trip time, stdout, and stderr.
@@ -119,18 +119,18 @@ Test mTLS connectivity to one or more agents and report cert expiry and
 agent version.
 
 ```bash
-dispatcher ping <host>[:<port>] [<host>...]
+ctrl-exec ping <host>[:<port>] [<host>...]
 ```
 
 ```bash
 # Single host
-dispatcher ping web-01
+ctrl-exec ping web-01
 
 # Multiple hosts in parallel
-dispatcher ping web-01 web-02 web-03
+ctrl-exec ping web-01 web-02 web-03
 
 # JSON output
-dispatcher ping web-01 --json
+ctrl-exec ping web-01 --json
 ```
 
 Output columns: host, status (ok/error), round-trip time, cert expiry,
@@ -145,7 +145,7 @@ to submit a CSR; this mode receives the request, displays it for operator
 approval, and signs and returns the certificate on approval.
 
 ```bash
-dispatcher pairing-mode
+ctrl-exec pairing-mode
 ```
 
 The prompt shows the requesting agent's hostname, IP, request ID, and a
@@ -164,7 +164,7 @@ unattended approval workflows, use `list-requests` and `approve`.
 List pending pairing requests that have not yet been approved or denied.
 
 ```bash
-dispatcher list-requests
+ctrl-exec list-requests
 ```
 
 Output columns: request ID, hostname, IP, confirmation code, received timestamp.
@@ -179,7 +179,7 @@ Approve a pending pairing request by ID. Signs the agent's CSR and
 delivers the certificate on the agent's next poll.
 
 ```bash
-dispatcher approve <reqid>
+ctrl-exec approve <reqid>
 ```
 
 The request ID is shown by `list-requests` and `pairing-mode`.
@@ -192,7 +192,7 @@ Deny a pending pairing request by ID. Removes the request without
 signing.
 
 ```bash
-dispatcher deny <reqid>
+ctrl-exec deny <reqid>
 ```
 
 ---
@@ -202,8 +202,8 @@ dispatcher deny <reqid>
 List all registered (paired) agents.
 
 ```bash
-dispatcher list-agents
-dispatcher list-agents --json
+ctrl-exec list-agents
+ctrl-exec list-agents --json
 ```
 
 Output columns: hostname, IP address, paired timestamp, cert expiry.
@@ -229,61 +229,61 @@ With `--json`, returns an array of objects with fields:
 
 ### setup-ca
 
-One-time initialisation of the dispatcher CA. Generates the CA key and
+One-time initialisation of the ctrl-exec CA. Generates the CA key and
 self-signed certificate used to sign all agent certificates. Run once
-on the dispatcher host before any pairing.
+on the ctrl-exec host before any pairing.
 
 ```bash
-dispatcher setup-ca
+ctrl-exec setup-ca
 ```
 
-Writes to `/etc/dispatcher/`. Does not overwrite an existing CA.
+Writes to `/etc/ctrl-exec/`. Does not overwrite an existing CA.
 
 ---
 
-### setup-dispatcher
+### setup-ctrl-exec
 
-Generate the dispatcher's own key and certificate, signed by the CA.
+Generate the ctrl-exec's own key and certificate, signed by the CA.
 Run after `setup-ca`. If an existing cert is found and registered agents
 exist, the command displays the agent count and requires confirmation before
 proceeding - replacing the cert changes its serial and agents will need
 re-pairing if they miss the rotation broadcast.
 
 ```bash
-dispatcher setup-dispatcher
+ctrl-exec setup-ctrl-exec
 ```
 
-Writes to `/etc/dispatcher/`.
+Writes to `/etc/ctrl-exec/`.
 
 ---
 
 ### rotate-cert
 
-Rotate the dispatcher certificate immediately. Generates a new cert, marks
+Rotate the ctrl-exec certificate immediately. Generates a new cert, marks
 all registered agents as pending, broadcasts the new serial to all agents
 in parallel, and reports per-agent results.
 
 ```bash
-dispatcher rotate-cert
+ctrl-exec rotate-cert
 ```
 
 Agents that were unreachable during the broadcast are retried automatically
 by the internal check loop. Agents that remain unreachable after
 `cert_overlap_days` are marked `stale` and require re-pairing.
 
-The `update-dispatcher-serial` script must be in the agent's `scripts.conf`
+The `update-ctrl-exec-serial` script must be in the agent's `scripts.conf`
 allowlist for the broadcast to succeed. See `scripts.conf.example`.
 
 ---
 
 ### serial-status
 
-Show the current dispatcher serial, previous serial, rotation timestamps,
+Show the current ctrl-exec serial, previous serial, rotation timestamps,
 overlap expiry, and per-agent serial state.
 
 ```bash
-dispatcher serial-status
-dispatcher serial-status --json
+ctrl-exec serial-status
+ctrl-exec serial-status --json
 ```
 
 Output columns: hostname, status (current/pending/stale/unknown), last
@@ -298,21 +298,21 @@ Status values:
 
 ---
 
-## dispatcher.conf
+## ctrl-exec.conf
 
-Configuration file for the dispatcher and dispatcher-api processes.
-Default path: `/etc/dispatcher/dispatcher.conf`.
+Configuration file for the ctrl-exec and ctrl-exec-api processes.
+Default path: `/etc/ctrl-exec/ctrl-exec.conf`.
 
 Key settings:
 
 `cert`, `key`, `ca`
-: Paths to the dispatcher's TLS certificate, private key, and CA
+: Paths to the ctrl-exec's TLS certificate, private key, and CA
   certificate. Required for all mTLS operations.
 
 `read_timeout`
-: How long (in seconds) the dispatcher waits for a response from an agent
+: How long (in seconds) the ctrl-exec waits for a response from an agent
   before reporting a timeout error. Default: 60. The script continues
-  running on the agent after a timeout - only the dispatcher's ability to
+  running on the agent after a timeout - only the ctrl-exec's ability to
   receive the output is affected. Raise this value for scripts that are
   expected to take longer than 60 seconds.
 
@@ -324,7 +324,7 @@ Key settings:
 : Deprecated alias for `read_timeout`. Accepted for backward compatibility.
 
 `api_port`
-: Port for the `dispatcher-api` HTTP server. Default: 7445.
+: Port for the `ctrl-exec-api` HTTP server. Default: 7445.
 
 `api_cert`, `api_key`
 : TLS certificate and key for the API server. If both are present and
@@ -354,11 +354,11 @@ Key settings:
 ### Cert rotation settings
 
 `cert_days`
-: Lifetime of the dispatcher certificate in days. Default: 365. Applied when
-  generating a new cert via `setup-dispatcher` or automatic rotation.
+: Lifetime of the ctrl-exec certificate in days. Default: 365. Applied when
+  generating a new cert via `setup-ctrl-exec` or automatic rotation.
 
 `cert_renewal_days`
-: Begin renewal this many days before the dispatcher cert expires. Default: 90.
+: Begin renewal this many days before the ctrl-exec cert expires. Default: 90.
   With `cert_days = 365`, renewal begins at day 275 of the cert's life.
 
 `cert_overlap_days`
@@ -384,13 +384,13 @@ Key settings:
 
 ## agent.conf
 
-Configuration file for the `dispatcher-agent` process.
-Default path: `/etc/dispatcher-agent/agent.conf`.
+Configuration file for the `ctrl-exec-agent` process.
+Default path: `/etc/ctrl-exec-agent/agent.conf`.
 
 Key settings:
 
 `port`
-: Port the agent listens on for mTLS connections from the dispatcher. Default: 7443.
+: Port the agent listens on for mTLS connections from the ctrl-exec. Default: 7443.
 
 `cert`, `key`, `ca`
 : Paths to the agent's TLS certificate, private key, and CA certificate.
@@ -410,20 +410,20 @@ Key settings:
 
   Lines beginning with `#` are treated as comments.
 
-  Default: `/etc/dispatcher-agent/revoked-serials`. A missing or empty file
+  Default: `/etc/ctrl-exec-agent/revoked-serials`. A missing or empty file
   means no certs are revoked.
 
   ```
-  revoked_serials = /etc/dispatcher-agent/revoked-serials
+  revoked_serials = /etc/ctrl-exec-agent/revoked-serials
   ```
 
 `dispatcher_serial_path`
-: Path to the stored dispatcher cert serial file. Written automatically by
+: Path to the stored ctrl-exec cert serial file. Written automatically by
   `request-pairing` - do not edit manually. The `/capabilities` endpoint
   rejects peers whose cert serial does not match the stored value. Re-pair
-  the agent to update after a dispatcher cert rotation.
+  the agent to update after a ctrl-exec cert rotation.
 
-  Default: `/etc/dispatcher-agent/dispatcher-serial`. Reloaded on SIGHUP.
+  Default: `/etc/ctrl-exec-agent/ctrl-exec-serial`. Reloaded on SIGHUP.
 
 `dispatcher_cn`
 : Removed. Previously used to restrict `/capabilities` by cert CN. Replaced
@@ -435,13 +435,13 @@ Key settings:
   rejected at load time and re-validated at execution time.
 
   ```
-  script_dirs = /opt/dispatcher-scripts:/usr/local/lib/dispatcher-scripts
+  script_dirs = /opt/ctrl-exec-scripts:/usr/local/lib/ctrl-exec-scripts
   ```
 
 `auth_hook`
 : Path to an executable called before every `run` request on the agent,
   after allowlist validation. Enables independent downstream token validation
-  separate from the dispatcher's own hook.
+  separate from the ctrl-exec's own hook.
 
   The hook receives request context as a JSON object on stdin and as individual
   environment variables. Exit codes:
@@ -454,13 +454,13 @@ Key settings:
   If no hook is configured, the request is authorised unconditionally - the agent
   relies on mTLS for identity; the hook is for additional policy enforcement only.
 
-  See the [Auth hook (agent-side)] section under `dispatcher-agent` for context
-  fields, environment variables, and differences from the dispatcher-side hook.
+  See the [Auth hook (agent-side)] section under `ctrl-exec-agent` for context
+  fields, environment variables, and differences from the ctrl-exec-side hook.
 
 `pairing_port`
 : Port the agent listens on during pairing. Default: 7444. Must match the
-  `--port` value passed to `dispatcher-agent request-pairing` and the port
-  used by `dispatcher pairing-mode`.
+  `--port` value passed to `ctrl-exec-agent request-pairing` and the port
+  used by `ctrl-exec pairing-mode`.
 
   ```
   pairing_port = 7444
@@ -564,25 +564,25 @@ with no `[tags]` section returns `"tags": {}`.
 
 ---
 
-## dispatcher-agent
+## ctrl-exec-agent
 
-The `dispatcher-agent` binary runs on each managed host. It serves the
+The `ctrl-exec-agent` binary runs on each managed host. It serves the
 mTLS listener, handles pairing, and executes allowlisted scripts on
-request from the dispatcher.
+request from the ctrl-exec.
 
 ### Synopsis
 
 ```bash
-dispatcher-agent <mode> [options]
+ctrl-exec-agent <mode> [options]
 ```
 
 ### Global options
 
 `--config <path>`
-: Path to `agent.conf`. Default: `/etc/dispatcher-agent/agent.conf`.
+: Path to `agent.conf`. Default: `/etc/ctrl-exec-agent/agent.conf`.
 
 `--allowlist <path>`
-: Path to `scripts.conf`. Default: `/etc/dispatcher-agent/scripts.conf`.
+: Path to `scripts.conf`. Default: `/etc/ctrl-exec-agent/scripts.conf`.
 
 `--port <n>`
 : Override the pairing port (default 7444). Applies to `request-pairing`
@@ -593,10 +593,10 @@ dispatcher-agent <mode> [options]
 ### serve
 
 Start the agent server. Listens on the port configured in `agent.conf`
-(default 7443) for incoming mTLS connections from the dispatcher.
+(default 7443) for incoming mTLS connections from the ctrl-exec.
 
 ```bash
-dispatcher-agent serve
+ctrl-exec-agent serve
 ```
 
 Under normal operation this is started and managed by the init system
@@ -608,30 +608,30 @@ restarting:
 
 ```bash
 # On systemd hosts (preferred)
-systemctl reload dispatcher-agent
+systemctl reload ctrl-exec-agent
 
 # On systems without systemd
-kill -HUP $(pidof dispatcher-agent)
+kill -HUP $(pidof ctrl-exec-agent)
 ```
 
 ---
 
 ### request-pairing
 
-Submit a pairing request to a dispatcher host. Generates a key and CSR
-for this agent, connects to the dispatcher's pairing port (7444), and
+Submit a pairing request to a ctrl-exec host. Generates a key and CSR
+for this agent, connects to the ctrl-exec's pairing port (7444), and
 waits for the operator to approve the request.
 
 ```bash
-dispatcher-agent request-pairing --dispatcher <host>
-dispatcher-agent request-pairing --dispatcher <host> --background [--timeout <n>]
+ctrl-exec-agent request-pairing --ctrl-exec <host>
+ctrl-exec-agent request-pairing --ctrl-exec <host> --background [--timeout <n>]
 ```
 
-`--dispatcher <host>`
-: Hostname or IP of the dispatcher host. Required.
+`--ctrl-exec <host>`
+: Hostname or IP of the ctrl-exec host. Required.
 
 `--port <n>`
-: Override the pairing port on the dispatcher (default 7444).
+: Override the pairing port on the ctrl-exec (default 7444).
 
 `--background`
 : Non-interactive mode for orchestrated installations. Prints the request
@@ -645,14 +645,14 @@ dispatcher-agent request-pairing --dispatcher <host> --background [--timeout <n>
   background process exits with code 2 and logs `ACTION=pair-timeout`.
   Only valid with `--background`.
 
-The command blocks until the dispatcher approves or denies the request,
+The command blocks until the ctrl-exec approves or denies the request,
 or until the connection times out. On approval, the signed certificate
 and CA certificate are written to the config directory and the agent is
 ready to serve.
 
 If the connection fails with a configuration error, check that the
-dispatcher host is reachable, that `pairing-mode` is active on the
-dispatcher, and that the correct address was specified.
+ctrl-exec host is reachable, that `pairing-mode` is active on the
+ctrl-exec, and that the correct address was specified.
 
 ---
 
@@ -660,21 +660,21 @@ dispatcher, and that the correct address was specified.
 
 For automated provisioning workflows where interactive approval is not
 possible, `--background` separates the pairing request submission from the
-approval wait. The foreground process exits as soon as the dispatcher
+approval wait. The foreground process exits as soon as the ctrl-exec
 acknowledges the request, printing the request ID to stdout. A background
 process holds the connection open and writes the certificate when approval
 arrives.
 
 The orchestrator's responsibility is to capture the request ID and call
-`dispatcher approve` on the dispatcher host before the timeout expires.
+`ctrl-exec approve` on the ctrl-exec host before the timeout expires.
 
 #### Flow
 
 On the agent host (as part of a provisioning script):
 
 ```bash
-# Start pairing-mode on the dispatcher first, then:
-REQID=$(dispatcher-agent request-pairing --dispatcher dispatcher.example.com \
+# Start pairing-mode on the ctrl-exec first, then:
+REQID=$(ctrl-exec-agent request-pairing --ctrl-exec ctrl-exec.example.com \
     --background --timeout 60)
 echo "Request ID: $REQID"
 ```
@@ -682,19 +682,19 @@ echo "Request ID: $REQID"
 The command exits 0 immediately, printing the request ID. The background
 process is now waiting for approval.
 
-On the dispatcher host (or via the orchestrator calling it remotely):
+On the ctrl-exec host (or via the orchestrator calling it remotely):
 
 ```bash
-dispatcher approve "$REQID"
+ctrl-exec approve "$REQID"
 ```
 
 The background process receives the certificate, writes it to
-`/etc/dispatcher-agent/`, logs `ACTION=pair-complete`, and exits 0.
+`/etc/ctrl-exec-agent/`, logs `ACTION=pair-complete`, and exits 0.
 
 Confirm pairing succeeded on the agent host:
 
 ```bash
-dispatcher-agent pairing-status
+ctrl-exec-agent pairing-status
 # Exits 0 if paired, 1 if not yet paired
 ```
 
@@ -713,13 +713,13 @@ dispatcher-agent pairing-status
 #### Timing
 
 The background process holds the connection open for up to `--timeout`
-seconds (default 30, maximum 600). The dispatcher's own polling window is
+seconds (default 30, maximum 600). The ctrl-exec's own polling window is
 600 seconds — approval must arrive within whichever is shorter. For
 orchestrated workflows where the approval step may take time, increase
 `--timeout` accordingly:
 
 ```bash
-REQID=$(dispatcher-agent request-pairing --dispatcher dispatcher.example.com \
+REQID=$(ctrl-exec-agent request-pairing --ctrl-exec ctrl-exec.example.com \
     --background --timeout 120)
 ```
 
@@ -727,11 +727,11 @@ REQID=$(dispatcher-agent request-pairing --dispatcher dispatcher.example.com \
 
 The background process inherits the connection socket from the foreground
 process — no reconnection occurs. The maximum `--timeout` of 600 seconds
-is enforced because the dispatcher closes the connection after its own
+is enforced because the ctrl-exec closes the connection after its own
 600-second polling window, making longer waits unreliable.
 
 The request ID printed to stdout is the same ID shown by
-`dispatcher list-requests` on the dispatcher host. Both the confirmation
+`ctrl-exec list-requests` on the ctrl-exec host. Both the confirmation
 code and the request ID are available via `list-requests` for verification
 before approving.
 
@@ -742,7 +742,7 @@ before approving.
 Report whether the agent is paired and show the certificate expiry date.
 
 ```bash
-dispatcher-agent pairing-status
+ctrl-exec-agent pairing-status
 ```
 
 Exits 0 if paired, 1 if not paired. Suitable for use in scripts and
@@ -755,7 +755,7 @@ health checks.
 When `auth_hook` is configured in `agent.conf`, the hook is executed after
 every `run` request passes allowlist validation, before the script is
 spawned. It provides an independent authorisation layer separate from the
-dispatcher's own hook.
+ctrl-exec's own hook.
 
 #### Context fields
 
@@ -780,29 +780,29 @@ hook for `ping` requests - those are handled before the hook path is reached.
 
 The same context is available as environment variables:
 
-`DISPATCHER_ACTION`
+`ENVEXEC_ACTION`
 : Always `run` on the agent.
 
-`DISPATCHER_SCRIPT`
+`ENVEXEC_SCRIPT`
 : The script name from the allowlist.
 
-`DISPATCHER_ARGS`
+`ENVEXEC_ARGS`
 : Space-joined argument string. Deprecated - lossy if arguments contain
-  spaces. Prefer `DISPATCHER_ARGS_JSON`.
+  spaces. Prefer `ENVEXEC_ARGS_JSON`.
 
-`DISPATCHER_ARGS_JSON`
+`ENVEXEC_ARGS_JSON`
 : JSON array of arguments. Reliable for all argument values.
 
-`DISPATCHER_USERNAME`
-: Username passed by the dispatcher in the request body.
+`ENVEXEC_USERNAME`
+: Username passed by the ctrl-exec in the request body.
 
-`DISPATCHER_TOKEN`
-: Token passed by the dispatcher in the request body.
+`ENVEXEC_TOKEN`
+: Token passed by the ctrl-exec in the request body.
 
-`DISPATCHER_SOURCE_IP`
-: IP address of the dispatcher connection.
+`ENVEXEC_SOURCE_IP`
+: IP address of the ctrl-exec connection.
 
-`DISPATCHER_TIMESTAMP`
+`ENVEXEC_TIMESTAMP`
 : ISO 8601 UTC timestamp when the hook was invoked.
 
 #### Exit codes
@@ -823,9 +823,9 @@ The same context is available as environment variables:
 
 Any other non-zero exit code is treated as denied with reason `hook exited N`.
 
-#### Differences from the dispatcher-side hook
+#### Differences from the ctrl-exec-side hook
 
-The dispatcher-side hook (configured in `dispatcher.conf`) runs on the
+The ctrl-exec-side hook (configured in `ctrl-exec.conf`) runs on the
 control host before dispatch and covers both `run` and `ping` actions
 across all target hosts. The agent-side hook runs on each managed host
 independently, covering only `run` requests for that agent.
@@ -834,7 +834,7 @@ A request passes both hooks before any script is executed. The hooks are
 independent - there is no shared state between them.
 
 The agent hook does not receive a `hosts` field; the agent is unaware of
-which other hosts are targeted in the same dispatcher invocation.
+which other hosts are targeted in the same ctrl-exec invocation.
 
 If no hook is configured on the agent, the request is authorised
 unconditionally at the agent level. The agent relies on mTLS and the
@@ -849,7 +849,7 @@ Validate the local configuration, allowlist, and certificates without
 making any network connections. Reports each check individually.
 
 ```bash
-dispatcher-agent ping-self
+ctrl-exec-agent ping-self
 ```
 
 Checks performed:
@@ -867,19 +867,19 @@ configuration changes to confirm the agent will start cleanly.
 
 ---
 
-## dispatcher-api
+## ctrl-exec-api
 
-The `dispatcher-api` binary exposes the dispatcher's run, ping, and
+The `ctrl-exec-api` binary exposes the ctrl-exec's run, ping, and
 discovery operations as an HTTP REST API. It is installed as a systemd
-service (`dispatcher-api.service`) and listens on `api_port` (default 7445).
+service (`ctrl-exec-api.service`) and listens on `api_port` (default 7445).
 
 Start manually for testing:
 
 ```bash
-dispatcher-api --config /etc/dispatcher/dispatcher.conf
+ctrl-exec-api --config /etc/ctrl-exec/ctrl-exec.conf
 ```
 
-TLS is enabled if `api_cert` and `api_key` are set in `dispatcher.conf`
+TLS is enabled if `api_cert` and `api_key` are set in `ctrl-exec.conf`
 and the files exist. Plain HTTP is used otherwise.
 
 Full endpoint documentation is in API.md. Summary:
@@ -921,8 +921,8 @@ found, 409 lock conflict, 500 server error.
 ## Syslog
 
 Both binaries log structured key=value records to syslog under the
-`daemon` facility. The dispatcher and dispatcher-api log under the tag
-`dispatcher`; the agent logs under `dispatcher-agent`. Scripts themselves
+`daemon` facility. The ctrl-exec and ctrl-exec-api log under the tag
+`ctrl-exec`; the agent logs under `ctrl-exec-agent`. Scripts themselves
 may log under any tag they choose.
 
 All log entries use the `ACTION=<name>` field to identify the event type.
@@ -932,7 +932,7 @@ alerting guidance — is in LOGGING.md.
 Key quick-reference patterns for common operations:
 
 ```
-ACTION=run EXIT=<n> SCRIPT=<name> TARGET=<host:port> RTT=<ms> REQID=<id>   (dispatcher)
+ACTION=run EXIT=<n> SCRIPT=<name> TARGET=<host:port> RTT=<ms> REQID=<id>   (ctrl-exec)
 ACTION=run EXIT=<n> SCRIPT=<name> PEER=<ip> REQID=<id>                      (agent)
 ACTION=ping STATUS=ok|error PEER=<ip> REQID=<id> RTT=<ms>
 ACTION=revoked-cert PEER=<ip> SERIAL=<hex>
@@ -941,7 +941,7 @@ ACTION=rate-block PEER=<ip> REASON=volume|probe
 ACTION=ip-block PEER=<ip>
 ```
 
-To correlate a dispatcher log entry with agent log entries, filter both
+To correlate a ctrl-exec log entry with agent log entries, filter both
 sides by `REQID`:
 
 ```bash
@@ -955,7 +955,7 @@ alert pattern tables.
 
 ## Managing long-running processes
 
-When a script is expected to run longer than `read_timeout`, the dispatcher
+When a script is expected to run longer than `read_timeout`, the ctrl-exec
 will report a timeout and return a non-zero exit, but the script continues
 running on the agent. There is no mechanism to cancel it remotely.
 
@@ -966,40 +966,40 @@ To run a long-lived process and retrieve its output later:
   to a known path.
 - Use a second allowlisted script to poll status or retrieve output by
   reading that path.
-- Raise `read_timeout` in `dispatcher.conf` if the script must complete
-  within a single dispatcher invocation and the runtime is known and bounded.
+- Raise `read_timeout` in `ctrl-exec.conf` if the script must complete
+  within a single ctrl-exec invocation and the runtime is known and bounded.
 
 The agent logs `ACTION=run` only when the script process exits. If the
-dispatcher times out before the script completes, no `ACTION=run` entry
+ctrl-exec times out before the script completes, no `ACTION=run` entry
 appears in the agent's syslog until the script eventually exits. An operator
 cannot determine from syslog alone that a script is currently running —
-only that it was started (from the dispatcher-side `ACTION=run` entry) and
+only that it was started (from the ctrl-exec-side `ACTION=run` entry) and
 has not yet completed.
 
 ---
 
 ## Getting started with examples
 
-The dispatcher-demonstrator script exercises all core dispatcher
+The ctrl-exec-demonstrator script exercises all core ctrl-exec
 capabilities from a single agent-side script: stdout and stderr capture,
 exit code propagation, argument passing, JSON context logging, and
 agent-side information. It is installed on every agent host by the
 installer and is disabled in `scripts.conf` by default.
 
-To enable it, uncomment the entry in `/etc/dispatcher-agent/scripts.conf`
+To enable it, uncomment the entry in `/etc/ctrl-exec-agent/scripts.conf`
 on the agent host and reload the allowlist:
 
 ```bash
 # On systemd hosts (preferred)
-systemctl reload dispatcher-agent
+systemctl reload ctrl-exec-agent
 
 # On systems without systemd
-kill -HUP $(pidof dispatcher-agent)
+kill -HUP $(pidof ctrl-exec-agent)
 ```
 
 Then run the script directly on the agent host to see all available
-subcommands and the exact dispatcher invocations that exercise them:
+subcommands and the exact ctrl-exec invocations that exercise them:
 
 ```bash
-/opt/dispatcher-scripts/dispatcher-demonstrator.sh
+/opt/ctrl-exec-scripts/ctrl-exec-demonstrator.sh
 ```

@@ -1,11 +1,11 @@
 #!/bin/bash
-# lib.sh - shared functions for dispatcher integration tests
+# lib.sh - shared functions for ctrl-exec integration tests
 #
 # Source this file at the top of each test script:
 #   source "$(dirname "$0")/lib.sh"
 #
 # Agent discovery:
-#   Agents are discovered from "dispatcher list-agents" at startup.
+#   Agents are discovered from "ctrl-exec list-agents" at startup.
 #   No hostnames are hardcoded here or in any test file.
 #
 # Exported arrays (populated by discover_agents, called from run-tests.sh):
@@ -16,7 +16,7 @@
 # Each test script calls require_agents <n> near the top to skip the
 # entire file if fewer than n agents are reachable.
 
-DISPATCHER="${DISPATCHER:-dispatcher}"
+DISPATCHER="${DISPATCHER:-ctrl-exec}"
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- counters ---
@@ -69,14 +69,14 @@ summary() {
     return 0
 }
 
-# _list_agent_hostnames: extract hostnames from "dispatcher list-agents" output.
+# _list_agent_hostnames: extract hostnames from "ctrl-exec list-agents" output.
 # Skips the header and separator lines.
 _list_agent_hostnames() {
     sudo "$DISPATCHER" list-agents 2>/dev/null \
         | awk 'NR > 2 && /^[A-Za-z0-9]/ { print $1 }'
 }
 
-# _ping_agent <hostname>: returns 0 if agent responds to dispatcher ping.
+# _ping_agent <hostname>: returns 0 if agent responds to ctrl-exec ping.
 _ping_agent() {
     local agent="$1"
     sudo "$DISPATCHER" ping "$agent" > /dev/null 2>&1
@@ -87,7 +87,7 @@ _ping_agent() {
 # Also called automatically when AGENT1 is unset (standalone test execution).
 # Exports results so sourced test scripts inherit them.
 discover_agents() {
-    printf 'Discovering agents from dispatcher list-agents...\n'
+    printf 'Discovering agents from ctrl-exec list-agents...\n'
 
     local all_agents=()
     while IFS= read -r hostname; do
@@ -95,7 +95,7 @@ discover_agents() {
     done < <(_list_agent_hostnames)
 
     if [ "${#all_agents[@]}" -eq 0 ]; then
-        printf 'ERROR: No agents registered. Run "dispatcher list-agents" to check.\n' >&2
+        printf 'ERROR: No agents registered. Run "ctrl-exec list-agents" to check.\n' >&2
         exit 1
     fi
 
@@ -298,7 +298,7 @@ _check_rate_warning() {
             printf '\n'
             _yellow "  WARNING: 3 consecutive \"no response from child\" errors"
             _yellow "  (started at connection $_FAIL_STREAK_START of $_CONN_TOTAL total)"
-            _yellow "  This is consistent with agent rate-limiting blocking the dispatcher IP."
+            _yellow "  This is consistent with agent rate-limiting blocking the ctrl-exec IP."
             _yellow "  Set 'disable_rate_limit = 1' in agent.conf and reload, then re-run."
             printf '\n'
         fi
@@ -309,13 +309,13 @@ _check_rate_warning() {
 
 export _CONN_TOTAL _FAIL_STREAK _FAIL_STREAK_START
 
-# run_dispatcher <args...> - runs dispatcher, sets OUT, ERR, RC
-# Passes DISPATCHER_TOKEN explicitly so sudo does not strip it.
+# run_dispatcher <args...> - runs ctrl-exec, sets OUT, ERR, RC
+# Passes ENVEXEC_TOKEN explicitly so sudo does not strip it.
 # Tracks per-agent and total connection counts; detects rate-limit signatures.
 run_dispatcher() {
     local token_env=""
-    if [ -n "${DISPATCHER_TOKEN:-}" ]; then
-        token_env="DISPATCHER_TOKEN=${DISPATCHER_TOKEN}"
+    if [ -n "${ENVEXEC_TOKEN:-}" ]; then
+        token_env="ENVEXEC_TOKEN=${ENVEXEC_TOKEN}"
     fi
 
     # Extract the agent name from the argument list for per-agent counting.

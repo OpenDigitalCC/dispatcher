@@ -28,23 +28,23 @@ access to `/dev/log`. Fix: `PrivateDevices=no` and add `AF_UNIX` to
 On each agent host, trigger a ping and check the log:
 
 ```bash
-# From the dispatcher host
-sudo dispatcher ping <agent>
+# From the ctrl-exec host
+sudo ctrl-exec ping <agent>
 
 # On the agent host (Debian/systemd)
-sudo journalctl -u dispatcher-agent --since "1 minute ago"
+sudo journalctl -u ctrl-exec-agent --since "1 minute ago"
 
 # On the agent host (OpenWrt)
-logread | grep dispatcher-agent | tail -10
+logread | grep ctrl-exec-agent | tail -10
 ```
 
 Pass
-: `ACTION=ping PEER=<dispatcher-ip> REQID=<hex>` appears within a few seconds
+: `ACTION=ping PEER=<ctrl-exec-ip> REQID=<hex>` appears within a few seconds
   of the ping.
 
 Fail
 : No entry appears. Check `PrivateDevices` and `RestrictAddressFamilies` in
-  the unit file. Restart after any change: `systemctl restart dispatcher-agent`.
+  the unit file. Restart after any change: `systemctl restart ctrl-exec-agent`.
 
 
 ## 2. Systemd Unit Hardening — AF_UNIX Present
@@ -54,7 +54,7 @@ blocks all syslog output because `Sys::Syslog` uses a Unix domain socket to
 reach journald.
 
 ```bash
-systemctl cat dispatcher-agent | grep RestrictAddressFamilies
+systemctl cat ctrl-exec-agent | grep RestrictAddressFamilies
 ```
 
 Pass
@@ -86,19 +86,19 @@ For a quick manual check on any deployment, configure a minimal hook that logs
 to syslog and permits all requests:
 
 ```bash
-cat > /etc/dispatcher/auth-hook << 'EOF'
+cat > /etc/ctrl-exec/auth-hook << 'EOF'
 #!/bin/sh
-logger -t dispatcher-auth "hook called: SCRIPT=$DISPATCHER_SCRIPT USER=$DISPATCHER_USERNAME"
+logger -t ctrl-exec-auth "hook called: SCRIPT=$ENVEXEC_SCRIPT USER=$ENVEXEC_USERNAME"
 exit 0
 EOF
-chmod 755 /etc/dispatcher/auth-hook
+chmod 755 /etc/ctrl-exec/auth-hook
 ```
 
 Run a script, then check the log on the agent host:
 
 ```bash
-sudo dispatcher run <agent> env-dump
-sudo journalctl -t dispatcher-auth --since "1 minute ago"
+sudo ctrl-exec run <agent> env-dump
+sudo journalctl -t ctrl-exec-auth --since "1 minute ago"
 ```
 
 Pass
@@ -117,14 +117,14 @@ that newly added entries take effect immediately.
 
 ```bash
 # Add a new entry to scripts.conf on the agent
-echo "reload-test = /opt/dispatcher-scripts/env-dump.sh" \
-    >> /etc/dispatcher-agent/scripts.conf
+echo "reload-test = /opt/ctrl-exec-scripts/env-dump.sh" \
+    >> /etc/ctrl-exec-agent/scripts.conf
 
 # Reload without restart
-systemctl reload dispatcher-agent   # or: /etc/init.d/dispatcher-agent reload
+systemctl reload ctrl-exec-agent   # or: /etc/init.d/ctrl-exec-agent reload
 
-# Attempt to run the new entry from the dispatcher
-sudo dispatcher run <agent> reload-test
+# Attempt to run the new entry from the ctrl-exec
+sudo ctrl-exec run <agent> reload-test
 ```
 
 Pass
@@ -146,16 +146,16 @@ Not suitable for automated suite runs — it requires deliberately triggering an
 waiting out a 5-minute block.
 
 ```bash
-# Fire 11 rapid pings from the dispatcher to one agent
-for i in $(seq 1 11); do sudo dispatcher ping <agent>; done
+# Fire 11 rapid pings from the ctrl-exec to one agent
+for i in $(seq 1 11); do sudo ctrl-exec ping <agent>; done
 
 # The 11th should fail or return an error
 # Check the agent log for the rate-block entry
-sudo journalctl -u dispatcher-agent --since "1 minute ago" | grep rate-block
+sudo journalctl -u ctrl-exec-agent --since "1 minute ago" | grep rate-block
 ```
 
 Pass
-: `ACTION=rate-block PEER=<dispatcher-ip> REASON=volume` appears in the log.
+: `ACTION=rate-block PEER=<ctrl-exec-ip> REASON=volume` appears in the log.
   Subsequent pings fail with `no response from child` for approximately 5
   minutes, then recover automatically.
 
@@ -171,42 +171,42 @@ Note
 ## 6. Pairing Flow — Fresh Agent
 
 Confirms the full pairing sequence works end-to-end: agent submits CSR,
-dispatcher displays the pairing code, operator approves, agent stores certs.
+ctrl-exec displays the pairing code, operator approves, agent stores certs.
 
 Run on a host that has not previously been paired, or after clearing
-`/etc/dispatcher-agent/agent.{key,crt}`:
+`/etc/ctrl-exec-agent/agent.{key,crt}`:
 
 ```bash
 # On the agent host
-sudo dispatcher-agent request-pairing --dispatcher <dispatcher-hostname>
+sudo ctrl-exec-agent request-pairing --ctrl-exec <ctrl-exec-hostname>
 
-# On the dispatcher host (in a separate terminal)
-sudo dispatcher list-requests
+# On the ctrl-exec host (in a separate terminal)
+sudo ctrl-exec list-requests
 # Verify the hostname, source IP, and 6-digit pairing code match
 # what the agent displayed, then approve:
-sudo dispatcher approve <agent-hostname>
+sudo ctrl-exec approve <agent-hostname>
 
 # Confirm the agent accepted the cert
-sudo dispatcher ping <agent-hostname>
+sudo ctrl-exec ping <agent-hostname>
 ```
 
 Pass
-: `ACTION=pair-complete` appears in the agent log. `dispatcher ping` returns ok.
+: `ACTION=pair-complete` appears in the agent log. `ctrl-exec ping` returns ok.
 
 Fail
 : Pairing code mismatch - reject and investigate. Nonce mismatch - check for
   clock skew or concurrent pairing requests. Writability failure - check
-  `/etc/dispatcher-agent` permissions.
+  `/etc/ctrl-exec-agent` permissions.
 
 
 ## 7. Cert Rotation Broadcast
 
-Confirms that `dispatcher rotate-cert` reaches all registered agents and that
-each agent updates its stored dispatcher serial.
+Confirms that `ctrl-exec rotate-cert` reaches all registered agents and that
+each agent updates its stored ctrl-exec serial.
 
 ```bash
-sudo dispatcher rotate-cert
-sudo dispatcher serial-status
+sudo ctrl-exec rotate-cert
+sudo ctrl-exec serial-status
 ```
 
 Pass
@@ -226,19 +226,19 @@ subsequent connections from that cert to be rejected, without restarting the
 agent.
 
 ```bash
-# Obtain the dispatcher cert serial
-openssl x509 -noout -serial -in /etc/dispatcher/dispatcher.crt \
+# Obtain the ctrl-exec cert serial
+openssl x509 -noout -serial -in /etc/ctrl-exec/ctrl-exec.crt \
     | sed 's/serial=//' | tr 'A-F' 'a-f'
 
 # Add to revoked-serials on the agent and reload
-echo "<serial>" >> /etc/dispatcher-agent/revoked-serials
-systemctl reload dispatcher-agent
+echo "<serial>" >> /etc/ctrl-exec-agent/revoked-serials
+systemctl reload ctrl-exec-agent
 
 # Attempt a ping - should fail
-sudo dispatcher ping <agent>
+sudo ctrl-exec ping <agent>
 
 # Check the agent log
-sudo journalctl -u dispatcher-agent --since "1 minute ago" | grep revoked
+sudo journalctl -u ctrl-exec-agent --since "1 minute ago" | grep revoked
 ```
 
 Pass
@@ -256,19 +256,19 @@ in the unit file is functioning.
 
 ```bash
 # On the agent host, kill the agent process abruptly
-sudo kill -9 $(systemctl show -p MainPID dispatcher-agent | cut -d= -f2)
+sudo kill -9 $(systemctl show -p MainPID ctrl-exec-agent | cut -d= -f2)
 
 # Wait 5 seconds (RestartSec=5) then check
 sleep 6
-systemctl is-active dispatcher-agent
-sudo dispatcher ping <agent>
+systemctl is-active ctrl-exec-agent
+sudo ctrl-exec ping <agent>
 ```
 
 Pass
 : Agent returns to `active` within a few seconds. Ping succeeds.
 
 Fail
-: Agent remains in `failed` state. Check `journalctl -u dispatcher-agent` for
+: Agent remains in `failed` state. Check `journalctl -u ctrl-exec-agent` for
   the failure reason. Common causes: cert file permissions changed, config
   parse error introduced since last start.
 
@@ -280,15 +280,15 @@ logs to the ring buffer readable via `logread`.
 
 ```bash
 # On the OpenWrt agent
-/etc/init.d/dispatcher-agent restart
+/etc/init.d/ctrl-exec-agent restart
 sleep 3
-/etc/init.d/dispatcher-agent status
+/etc/init.d/ctrl-exec-agent status
 
-# From the dispatcher host
-sudo dispatcher ping <openwrt-agent>
+# From the ctrl-exec host
+sudo ctrl-exec ping <openwrt-agent>
 
 # On the OpenWrt agent
-logread | grep dispatcher-agent | tail -10
+logread | grep ctrl-exec-agent | tail -10
 ```
 
 Pass
@@ -296,9 +296,9 @@ Pass
   output.
 
 Fail
-: Agent does not start. Check `/etc/init.d/dispatcher-agent` script for correct
+: Agent does not start. Check `/etc/init.d/ctrl-exec-agent` script for correct
   interpreter path. OpenWrt may have Perl in a non-standard location — verify
-  with `which perl` and ensure the shebang line in `dispatcher-agent` matches.
+  with `which perl` and ensure the shebang line in `ctrl-exec-agent` matches.
 
 
 ## When to Run These Checks
