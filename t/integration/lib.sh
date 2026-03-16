@@ -16,7 +16,7 @@
 # Each test script calls require_agents <n> near the top to skip the
 # entire file if fewer than n agents are reachable.
 
-DISPATCHER="${DISPATCHER:-ctrl-exec}"
+DISPATCHER="${DISPATCHER:-ctrl-exec-dispatcher}"
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- counters ---

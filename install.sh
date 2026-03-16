@@ -526,16 +526,19 @@ install_agent() {
     fi
 
     info "ctrl-exec-agent installed at $BIN_DIR/ctrl-exec-agent"
+    # Shortcut symlink
+    ln -sf "$BIN_DIR/ctrl-exec-agent" "$BIN_DIR/cea"
+    info "Shortcut: cea -> ctrl-exec-agent"
 }
 
 # --- ctrl-exec installation ---
 
-install_ctrl_exec() {
+install_ctrl_exec_dispatcher() {
     info "Installing ctrl-exec CLI..."
 
     create_system_group "$EXEC_GROUP"
 
-    safe_install 755 "$SOURCE_DIR/bin/ctrl-exec" "$BIN_DIR/ctrl-exec"
+    safe_install 755 "$SOURCE_DIR/bin/ctrl-exec-dispatcher" "$BIN_DIR/ctrl-exec-dispatcher"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
         "$BIN_DIR/ctrl-exec"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
@@ -591,10 +594,16 @@ install_api() {
     info "Installing ctrl-exec-api..."
 
     safe_install 755 "$SOURCE_DIR/bin/ctrl-exec-api" "$BIN_DIR/ctrl-exec-api"
+        "$BIN_DIR/ced"
+        "$BIN_DIR/cea"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
         "$BIN_DIR/ctrl-exec-api"
+        "$BIN_DIR/ced"
+        "$BIN_DIR/cea"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
         "$BIN_DIR/ctrl-exec-api"
+        "$BIN_DIR/ced"
+        "$BIN_DIR/cea"
 
     install_service_unit "$API_SERVICE"
 
@@ -628,6 +637,8 @@ uninstall() {
         "$BIN_DIR/ctrl-exec-agent"
         "$BIN_DIR/ctrl-exec"
         "$BIN_DIR/ctrl-exec-api"
+        "$BIN_DIR/ced"
+        "$BIN_DIR/cea"
     )
 
     if [[ "$HAS_SYSTEMD" == true ]]; then
@@ -740,7 +751,7 @@ print_next_steps_agent() {
     echo "================================================================"
 }
 
-print_next_steps_ctrl_exec() {
+print_next_steps_ctrl_exec_dispatcher() {
     echo ""
     echo "================================================================"
     echo " ctrl-exec installed"
@@ -823,7 +834,7 @@ DO_RUN_TESTS=false
 for arg in "$@"; do
     case "$arg" in
         --agent)      ROLE="agent" ;;
-        --ctrl-exec) ROLE="ctrl-exec" ;;
+        --ctrl-exec) ROLE="ctrl-exec-dispatcher" ;;
         --api)        ROLE="api" ;;
         --uninstall)  DO_UNINSTALL=true ;;
         --run-tests)  DO_RUN_TESTS=true ;;
@@ -880,9 +891,9 @@ case "$ROLE" in
         install_agent
         print_next_steps_agent
         ;;
-    ctrl-exec)
-        install_ctrl_exec
-        print_next_steps_ctrl_exec
+    ctrl-exec-dispatcher)
+        install_ctrl_exec_dispatcher
+        print_next_steps_ctrl_exec_dispatcher
         ;;
     api)
         # API requires the ctrl-exec role to already be installed

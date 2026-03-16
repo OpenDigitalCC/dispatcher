@@ -85,8 +85,14 @@ if [[ -n "$BRAND" ]]; then
     # Unpack ctrl-exec tarball
     tar -xzf "$FROM" -C "$STAGE_DIR"
 
+    # Detect the actual top-level directory name inside the tarball
+    # (may be ctrl-exec-<version> or dispatcher-<version> from a pre-rename build)
+    UNPACKED_DIR=$(tar -tzf "$FROM" | head -1 | cut -d/ -f1)
+    [[ -d "$STAGE_DIR/$UNPACKED_DIR" ]] \
+        || die "Expected unpacked directory not found: $STAGE_DIR/$UNPACKED_DIR"
+
     # Rename top-level directory to brand name
-    mv "$STAGE_DIR/ctrl-exec-${VERSION}" "$STAGE_DIR/$BRAND_NAME"
+    mv "$STAGE_DIR/$UNPACKED_DIR" "$STAGE_DIR/$BRAND_NAME"
     STAGE="$STAGE_DIR/$BRAND_NAME"
 
     # -----------------------------------------------------------------------
@@ -103,6 +109,7 @@ if [[ -n "$BRAND" ]]; then
     | while IFS= read -r f; do
         grep -q "ctrl" "$f" 2>/dev/null || continue
         sed -i \
+            -e "s/ctrl-exec-dispatcher/${BRAND}-exec-dispatcher/g" \
             -e "s/ctrl-exec-agent/${BRAND}-exec-agent/g" \
             -e "s/ctrl-exec-api/${BRAND}-exec-api/g" \
             -e "s/ctrl-exec-plugins/${BRAND}-exec-plugins/g" \
@@ -120,7 +127,7 @@ if [[ -n "$BRAND" ]]; then
 
     # Rename files
     declare -A FMAP=(
-        ["bin/ctrl-exec"]="bin/${BRAND}-exec"
+        ["bin/ctrl-exec-dispatcher"]="bin/${BRAND}-exec-dispatcher"
         ["bin/ctrl-exec-agent"]="bin/${BRAND}-exec-agent"
         ["bin/ctrl-exec-api"]="bin/${BRAND}-exec-api"
         ["bin/update-ctrl-exec-serial"]="bin/update-${BRAND}-exec-serial"
@@ -288,7 +295,7 @@ STAGE="${STAGE_DIR}/${RELEASE_NAME}"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
 SHIP_FILES=(
-    bin/ctrl-exec
+    bin/ctrl-exec-dispatcher
     bin/ctrl-exec-agent
     bin/ctrl-exec-api
     bin/update-ctrl-exec-serial
@@ -325,7 +332,7 @@ done
 
 info "Stamping version $VERSION in binaries..."
 chmod 755 "$STAGE/install.sh"
-for bin in ctrl-exec ctrl-exec-agent ctrl-exec-api; do
+for bin in ctrl-exec-dispatcher ctrl-exec-agent ctrl-exec-api; do
     [[ -f "$STAGE/bin/$bin" ]] || continue
     sed -i "s/our \$VERSION = .*/our \$VERSION = '$VERSION';/" \
         "$STAGE/bin/$bin"

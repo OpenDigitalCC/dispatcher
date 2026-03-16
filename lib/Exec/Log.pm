@@ -12,7 +12,7 @@ use Carp qw(croak);
 my $ident = 'ctrl-exec';
 my $opened = 0;
 
-# Call once at startup: init('ctrl-exec-agent') or init('ctrl-exec')
+# Call once at startup: init('ctrl-exec-agent') or init('ctrl-exec-dispatcher')
 sub init {
     my ($program_name) = @_;
     croak "program name required" unless $program_name;

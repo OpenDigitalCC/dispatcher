@@ -37,7 +37,7 @@ sub main {
 
     my $mode = shift @ARGV // die usage();
 
-    Exec::Log::init('ctrl-exec');
+    Exec::Log::init('ctrl-exec-dispatcher');
 
     my %dispatch = (
         'run'               => \&mode_run,
