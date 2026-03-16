@@ -178,7 +178,7 @@ Run on a host that has not previously been paired, or after clearing
 
 ```bash
 # On the agent host
-sudo ctrl-exec-agent request-pairing --ctrl-exec <ctrl-exec-hostname>
+sudo ctrl-exec-agent request-pairing --dispatcher <ctrl-exec-hostname>
 
 # On the ctrl-exec host (in a separate terminal)
 sudo ctrl-exec list-requests

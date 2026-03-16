@@ -257,7 +257,7 @@ Recovery procedure:
    ```bash
    # On each agent host
    rm /etc/ctrl-exec-agent/agent.{key,crt}
-   ctrl-exec-agent request-pairing --ctrl-exec <ctrl-exec>
+   ctrl-exec-agent request-pairing --dispatcher <ctrl-exec>
    ```
 
 5. Once all agents are re-paired, decommission the compromised CA material.

@@ -205,7 +205,7 @@ or deny.
 On the agent host:
 
 ```bash
-sudo ctrl-exec-agent request-pairing --ctrl-exec <ctrl-exec-hostname>
+sudo ctrl-exec-agent request-pairing --dispatcher <ctrl-exec-hostname>
 ```
 
 The agent connects and waits. A prompt appears in the pairing mode terminal:

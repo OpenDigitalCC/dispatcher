@@ -160,7 +160,7 @@ fi
 # then the container is restarted to begin serving.
 if [ ! -f "$CERT" ]; then
     echo "[entrypoint] No cert found - requesting pairing with $CTRL_EXEC_HOST..."
-    ctrl-exec-agent request-pairing --ctrl-exec "$CTRL_EXEC_HOST"
+    ctrl-exec-agent request-pairing --dispatcher "$CTRL_EXEC_HOST"
     echo "[entrypoint] Pairing request sent. Approve on the ctrl-exec, then restart this container."
     exit 0
 fi
@@ -179,7 +179,7 @@ instead. This prints the `reqid` and pairing code to stdout, then waits for
 approval without requiring an interactive terminal:
 
 ```bash
-ctrl-exec-agent request-pairing --ctrl-exec "$CTRL_EXEC_HOST" --background
+ctrl-exec-agent request-pairing --dispatcher "$CTRL_EXEC_HOST" --background
 ```
 
 The container still exits after pairing; the `reqid` can be captured by the

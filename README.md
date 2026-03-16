@@ -157,7 +157,7 @@ sudo ctrl-exec pairing-mode
 On the agent host, request pairing:
 
 ```bash
-sudo ctrl-exec-agent request-pairing --ctrl-exec <ctrl-exec-hostname>
+sudo ctrl-exec-agent request-pairing --dispatcher <ctrl-exec-hostname>
 ```
 
 A pairing code is displayed on both hosts. Confirm they match, then type `a`

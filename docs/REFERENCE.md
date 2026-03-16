@@ -623,8 +623,8 @@ for this agent, connects to the ctrl-exec's pairing port (7444), and
 waits for the operator to approve the request.
 
 ```bash
-ctrl-exec-agent request-pairing --ctrl-exec <host>
-ctrl-exec-agent request-pairing --ctrl-exec <host> --background [--timeout <n>]
+ctrl-exec-agent request-pairing --dispatcher <host>
+ctrl-exec-agent request-pairing --dispatcher <host> --background [--timeout <n>]
 ```
 
 `--ctrl-exec <host>`
@@ -674,7 +674,7 @@ On the agent host (as part of a provisioning script):
 
 ```bash
 # Start pairing-mode on the ctrl-exec first, then:
-REQID=$(ctrl-exec-agent request-pairing --ctrl-exec ctrl-exec.example.com \
+REQID=$(ctrl-exec-agent request-pairing --dispatcher ctrl-exec.example.com \
     --background --timeout 60)
 echo "Request ID: $REQID"
 ```
@@ -719,7 +719,7 @@ orchestrated workflows where the approval step may take time, increase
 `--timeout` accordingly:
 
 ```bash
-REQID=$(ctrl-exec-agent request-pairing --ctrl-exec ctrl-exec.example.com \
+REQID=$(ctrl-exec-agent request-pairing --dispatcher ctrl-exec.example.com \
     --background --timeout 120)
 ```
 
