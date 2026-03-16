@@ -143,7 +143,7 @@ sudo systemctl start ctrl-exec-agent
 Verify the agent configuration is valid before pairing:
 
 ```bash
-sudo ctrl-exec-agent ping-self
+sudo ctrl-exec-agent self-check
 ```
 
 ### 3. Pair the agent

@@ -400,4 +400,4 @@ case "$MODE" in
         ;;
 esac
 
-echo "Done. Verify with: sudo ctrl-exec-agent ping-self"
+echo "Done. Verify with: sudo ctrl-exec-agent self-check"

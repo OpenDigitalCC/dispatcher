@@ -959,7 +959,7 @@ Modes:
 `pairing-status`
 : Calls `Exec::Agent::AgentPairing::pairing_status()` and prints the result.
 
-`ping-self`
+`self-check`
 : Loads config, allowlist, and cert status without starting the server.
   Validates each allowlisted script is executable.
 

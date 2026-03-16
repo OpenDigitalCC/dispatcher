@@ -843,13 +843,13 @@ policy enforcement such as token validation or time-of-day restrictions.
 
 ---
 
-### ping-self
+### self-check
 
 Validate the local configuration, allowlist, and certificates without
 making any network connections. Reports each check individually.
 
 ```bash
-ctrl-exec-agent ping-self
+ctrl-exec-agent self-check
 ```
 
 Checks performed:
