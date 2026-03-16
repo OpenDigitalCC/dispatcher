@@ -1,12 +1,12 @@
 ---
-title: Dispatcher - High Availability
+title: ctrl-exec - High Availability
 subtitle: Running redundant ctrl-exec instances with shared state
 brand: xisl
 ---
 
-# Dispatcher - High Availability
+# ctrl-exec - High Availability
 
-Dispatcher is designed so that all persistent state lives on disk in known
+ctrl-exec is designed so that all persistent state lives on disk in known
 paths, and the ctrl-exec process itself holds no runtime state that cannot
 be reconstructed from those files. This property makes horizontal redundancy
 straightforward: any number of ctrl-exec instances sharing the same state
@@ -22,7 +22,7 @@ and cert security guidance, see SECURITY.md and SECURITY-OPERATIONS.md.
 
 ## What State Exists and Where
 
-All Dispatcher state is on the filesystem of the ctrl-exec host. There is
+All ctrl-exec state is on the filesystem of the ctrl-exec host. There is
 no embedded database, no in-memory cluster state, and no daemon with
 persistent connections that must be preserved across restarts.
 
@@ -247,7 +247,7 @@ Registry writes
 
 ## Cert Rotation in an HA Setup
 
-Dispatcher cert rotation updates the serial stored on every agent. In an
+ctrl-exec cert rotation updates the serial stored on every agent. In an
 HA setup, all instances must present the new cert immediately after rotation
 — an instance still presenting the old cert will be rejected by agents that
 have already updated their stored serial.

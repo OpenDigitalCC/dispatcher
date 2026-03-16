@@ -54,7 +54,7 @@ To enable, add to /etc/ctrl-exec-agent/scripts.conf on this host:
 Then run the following from the ctrl-exec host (replace <agent> with this
 hostname):
 
-  Subcommand       Dispatcher command
+  Subcommand       ctrl-exec command
   ───────────────────────────────────────────────────────────────────────────
   stdout           sudo ctrl-exec run <agent> ctrl-exec-demonstrator -- stdout
                    Shows that script stdout is returned to the ctrl-exec.

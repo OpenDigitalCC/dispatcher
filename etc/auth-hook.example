@@ -1,5 +1,5 @@
 #!/bin/bash
-# auth-hook.example - Dispatcher authorisation hook
+# auth-hook.example - ctrl-exec authorisation hook
 #
 # This hook is called before every run and ping request, from both the
 # CLI and the API. It receives request context as environment variables

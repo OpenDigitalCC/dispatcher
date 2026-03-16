@@ -48,7 +48,7 @@ _VERSION="${_VERSION:-UNINSTALLED}"
 printf '\n'
 printf '=%.0s' {1..60}
 printf '\n'
-printf 'Dispatcher Integration Tests  v%s\n' "$_VERSION"
+printf 'ctrl-exec Integration Tests  v%s\n' "$_VERSION"
 printf '  DISPATCHER = %s\n' "$DISPATCHER"
 printf '=%.0s' {1..60}
 printf '\n'
@@ -129,7 +129,7 @@ for _row in "${_SUMMARY_ROWS[@]}"; do
     fi
 done
 printf '\n'
-printf 'Dispatcher v%s — suite complete: %d test files passed, %d failed\n' "$_VERSION" "$PASS_FILES" "$FAIL_FILES"
+printf 'ctrl-exec v%s — suite complete: %d test files passed, %d failed\n' "$_VERSION" "$PASS_FILES" "$FAIL_FILES"
 printf '=%.0s' {1..60}
 printf '\n'
 

@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Dispatcher API",
-    "description": "REST gateway for the Dispatcher mTLS remote script execution system. Provides programmatic access to the run, ping, discovery, and health endpoints. Authentication is delegated to the configured auth hook on the ctrl-exec host; pass credentials in the request body.",
+    "title": "ctrl-exec API",
+    "description": "REST gateway for the ctrl-exec mTLS remote script execution system. Provides programmatic access to the run, ping, discovery, and health endpoints. Authentication is delegated to the configured auth hook on the ctrl-exec host; pass credentials in the request body.",
     "version": "0.2.8",
     "license": {
       "name": "AGPL-3.0-only"
@@ -200,7 +200,7 @@
         "required": ["ok", "version"],
         "properties": {
           "ok":      { "type": "boolean", "enum": [true] },
-          "version": { "type": "string", "description": "Dispatcher version string", "example": "0.2.8" }
+          "version": { "type": "string", "description": "ctrl-exec version string", "example": "0.2.8" }
         }
       },
       "PingRequest": {
@@ -287,7 +287,7 @@
           "stderr": { "type": "string", "description": "Script standard error." },
           "rtt":    { "type": "string", "description": "Round-trip time including script execution.", "example": "4210ms" },
           "reqid":  { "type": "string", "description": "Request ID. Matches the REQID field in syslog on both ctrl-exec and agent. Use to correlate results with log entries.", "example": "a1b2c3d4" },
-          "error":  { "type": "string", "description": "Dispatcher-side error message. Present when exit is -1.", "example": "read timeout after 60s" },
+          "error":  { "type": "string", "description": "ctrl-exec error message. Present when exit is -1.", "example": "read timeout after 60s" },
           "script": { "type": "string", "description": "Script name as dispatched." }
         }
       },

@@ -1,10 +1,10 @@
 ---
-title: Dispatcher - Docker Deployment
+title: ctrl-exec - Docker Deployment
 subtitle: Running ctrl-exec and agents in Alpine Linux containers
 brand: odcc
 ---
 
-# Dispatcher - Docker Deployment
+# ctrl-exec - Docker Deployment
 
 This document covers deploying ctrl-exec and ctrl-exec-agent as Alpine Linux
 Docker containers. The application has no awareness of containers - the
@@ -31,7 +31,7 @@ Volumes hold all state. Containers are otherwise stateless and can be rebuilt
 from the image without loss of pairing or configuration.
 
 
-## Dispatcher Container
+## ctrl-exec Container
 
 ### Dockerfile
 
@@ -149,9 +149,9 @@ set -e
 CONF_DIR=/etc/ctrl-exec-agent
 CERT="$CONF_DIR/agent.crt"
 
-# DISPATCHER_HOST must be set in the container environment or compose file.
-if [ -z "$DISPATCHER_HOST" ]; then
-    echo "[entrypoint] ERROR: DISPATCHER_HOST environment variable not set." >&2
+# CTRL_EXEC_HOST must be set in the container environment or compose file.
+if [ -z "$CTRL_EXEC_HOST" ]; then
+    echo "[entrypoint] ERROR: CTRL_EXEC_HOST environment variable not set." >&2
     exit 1
 fi
 
@@ -159,8 +159,8 @@ fi
 # Request pairing and then exit. The operator approves on the ctrl-exec,
 # then the container is restarted to begin serving.
 if [ ! -f "$CERT" ]; then
-    echo "[entrypoint] No cert found - requesting pairing with $DISPATCHER_HOST..."
-    ctrl-exec-agent request-pairing --ctrl-exec "$DISPATCHER_HOST"
+    echo "[entrypoint] No cert found - requesting pairing with $CTRL_EXEC_HOST..."
+    ctrl-exec-agent request-pairing --ctrl-exec "$CTRL_EXEC_HOST"
     echo "[entrypoint] Pairing request sent. Approve on the ctrl-exec, then restart this container."
     exit 0
 fi
@@ -179,7 +179,7 @@ instead. This prints the `reqid` and pairing code to stdout, then waits for
 approval without requiring an interactive terminal:
 
 ```bash
-ctrl-exec-agent request-pairing --ctrl-exec "$DISPATCHER_HOST" --background
+ctrl-exec-agent request-pairing --ctrl-exec "$CTRL_EXEC_HOST" --background
 ```
 
 The container still exits after pairing; the `reqid` can be captured by the
@@ -211,7 +211,7 @@ services:
     container_name: agent
     restart: on-failure
     environment:
-      DISPATCHER_HOST: ctrl-exec   # Docker DNS resolves service name
+      CTRL_EXEC_HOST: ctrl-exec   # Docker DNS resolves service name
     ports:
       - "7443:7443"
     volumes:
@@ -232,7 +232,7 @@ networks:
   ctrl-exec-net:
 ```
 
-`DISPATCHER_HOST: ctrl-exec` uses Docker's internal DNS to resolve the
+`CTRL_EXEC_HOST: ctrl-exec` uses Docker's internal DNS to resolve the
 ctrl-exec service by name. No IP addresses required.
 
 
@@ -413,7 +413,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.agent
     environment:
-      DISPATCHER_HOST: ctrl-exec
+      CTRL_EXEC_HOST: ctrl-exec
     volumes:
       - agent-db-data:/etc/ctrl-exec-agent
       - agent-db-scripts:/opt/ctrl-exec-scripts
@@ -425,7 +425,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.agent
     environment:
-      DISPATCHER_HOST: ctrl-exec
+      CTRL_EXEC_HOST: ctrl-exec
     volumes:
       - agent-web-data:/etc/ctrl-exec-agent
       - agent-web-scripts:/opt/ctrl-exec-scripts
@@ -469,7 +469,7 @@ Then pass values via container environment:
 agent-db:
   hostname: agent-db
   environment:
-    DISPATCHER_HOST: ctrl-exec
+    CTRL_EXEC_HOST: ctrl-exec
     AGENT_ENV: production
     AGENT_ROLE: database
 ```

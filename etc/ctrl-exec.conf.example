@@ -1,4 +1,4 @@
-# ctrl-exec.conf - Dispatcher control host configuration
+# ctrl-exec.conf - ctrl-exec control host configuration
 
 # mTLS certificate material (required)
 cert = /etc/ctrl-exec/ctrl-exec.crt
@@ -21,7 +21,7 @@ auth_hook = /etc/ctrl-exec/auth-hook
 # api_cert = /etc/ctrl-exec/ctrl-exec.crt
 # api_key  = /etc/ctrl-exec/ctrl-exec.key
 
-# Dispatcher certificate rotation
+# ctrl-exec certificate rotation
 #
 # cert_days: lifetime in days for new and renewed certs - both agent certs signed
 #   at pairing/renewal and the ctrl-exec's own cert (default: 365).

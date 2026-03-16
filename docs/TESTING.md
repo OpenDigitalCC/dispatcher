@@ -1,12 +1,12 @@
 ---
-title: Dispatcher - Testing Guide
+title: ctrl-exec - Testing Guide
 subtitle: Running, understanding, and extending the test suite
 brand: odcc
 ---
 
-# Dispatcher - Testing Guide
+# ctrl-exec - Testing Guide
 
-Dispatcher has two levels of testing: unit tests that run entirely on the
+ctrl-exec has two levels of testing: unit tests that run entirely on the
 control host without any network or agent involvement, and integration tests
 that require at least one live paired agent.
 
@@ -216,7 +216,7 @@ results via dispatch.
 ### Environment Variables
 
 `DISPATCHER`
-: Dispatcher binary name or path. Default: `ctrl-exec`. Override if the
+: ctrl-exec binary name or path. Default: `ctrl-exec`. Override if the
   binary is not in PATH or you want to test a specific build.
 
 `AGENT_SSH_USER`

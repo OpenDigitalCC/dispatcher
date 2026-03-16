@@ -1,15 +1,15 @@
 ---
-title: Dispatcher - Security Model
+title: ctrl-exec - Security Model
 subtitle: Trust boundaries, threat model, file permissions, and operational guidance
 brand: odcc
 ---
 
-# Dispatcher - Security Model
+# ctrl-exec - Security Model
 
 
 ## Trust Model
 
-Dispatcher uses a private CA for all mTLS trust. The CA is created once on
+ctrl-exec uses a private CA for all mTLS trust. The CA is created once on
 the ctrl-exec host. All agent certificates are signed by this CA. Neither
 the ctrl-exec nor any agent trusts certs from public CAs or other sources for
 the operational port - only certs from the private CA are accepted.
@@ -165,7 +165,7 @@ Default auth mode
   hook is configured.
 
 `username` is advisory
-: The `username` field is a caller-supplied string. Dispatcher does not
+: The `username` field is a caller-supplied string. ctrl-exec does not
   authenticate it or verify it matches any local or remote account. It is
   forwarded unchanged to the hook and to the agent. Its intended purpose is
   to carry an identity assertion that the hook can forward to an external
@@ -228,8 +228,8 @@ Agent-side hook
 ```
 /etc/ctrl-exec/ca.key              0600  root         CA private key
 /etc/ctrl-exec/ca.crt              0644  root         CA certificate
-/etc/ctrl-exec/ctrl-exec.key      0600  root         Dispatcher private key
-/etc/ctrl-exec/ctrl-exec.crt      0644  root         Dispatcher certificate
+/etc/ctrl-exec/ctrl-exec.key      0600  root         ctrl-exec private key
+/etc/ctrl-exec/ctrl-exec.crt      0644  root         ctrl-exec certificate
 /etc/ctrl-exec/auth-hook           0755  root         Auth hook executable
 /etc/ctrl-exec/                    0750  root:ctrl-exec
 
@@ -293,7 +293,7 @@ Unix domain socket to deliver syslog messages - omitting it silently blocks
 all logging.
 
 
-## Dispatcher Serial Tracking and Cert Rotation
+## ctrl-exec Serial Tracking and Cert Rotation
 
 At pairing time, the ctrl-exec includes its own cert serial in the approval
 payload. The agent stores this at `/etc/ctrl-exec-agent/ctrl-exec-serial`.
@@ -353,7 +353,7 @@ Overlap window
   broadcasts immediately, and reports per-agent results. Use after a suspected
   compromise or to test the rotation path.
 
-Dispatcher re-keying
+ctrl-exec re-keying
 : Running `setup-ctrl-exec` again generates a new cert with a new serial
   and marks all agents as pending. The ctrl-exec binary checks the registry
   before proceeding and displays the number of agents that will require
@@ -480,7 +480,7 @@ TLS version and cipher restriction
 Request body size limit
 : The agent limits incoming request bodies to 1 MB. Any request declaring a
   `Content-Length` above this threshold is rejected with HTTP 413 before the
-  body is read. No legitimate Dispatcher request approaches this limit - the
+  body is read. No legitimate ctrl-exec request approaches this limit - the
   largest legitimate body (a `/renew-complete` cert delivery) is under 10 KB.
 
 HTTP header count limit
@@ -490,7 +490,7 @@ HTTP header count limit
   valid CA-signed cert.
 
 Argument validation scope
-: Dispatcher does not validate script argument values. Validation of arguments
+: ctrl-exec does not validate script argument values. Validation of arguments
   is the responsibility of the allowlisted script itself and the auth hook.
   The hook receives arguments as a JSON array via `ENVEXEC_ARGS_JSON` and
   on stdin; the script receives them directly as `@ARGV`. Neither path involves

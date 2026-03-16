@@ -18,7 +18,7 @@ sub generate_ca {
     my (%opts) = @_;
     my $days  = $opts{days}  // 3650;
     my $bits  = $opts{bits}  // 4096;
-    my $cn    = $opts{cn}    // 'Dispatcher CA';
+    my $cn    = $opts{cn}    // 'ctrl-exec CA';
     my $force = $opts{force} // 0;
     my $ca_dir = $opts{ca_dir} // $CA_DIR;
 
@@ -76,7 +76,7 @@ sub generate_dispatcher_cert {
     croak "CA key not found at '$ca_key' - run setup-ca first" unless -f $ca_key;
 
     if (-f $disp_crt && !$force) {
-        croak "Dispatcher cert already exists at '$disp_crt'. Use force => 1 to overwrite.";
+        croak "ctrl-exec cert already exists at '$disp_crt'. Use force => 1 to overwrite.";
     }
 
     _run_or_die('openssl', 'genrsa', '-out', $disp_key, $bits);

@@ -1,10 +1,10 @@
 ---
-title: Dispatcher - Logging Reference
+title: ctrl-exec - Logging Reference
 subtitle: Complete reference for structured syslog output from ctrl-exec and ctrl-exec-agent
 brand: xisl
 ---
 
-# Dispatcher - Logging Reference
+# ctrl-exec - Logging Reference
 
 This document is the authoritative reference for every structured log line
 emitted by `ctrl-exec` and `ctrl-exec-agent`. It is intended for operators
@@ -68,7 +68,7 @@ entry appears until the script eventually exits. An operator cannot
 determine from syslog alone that a script is currently running.
 
 
-## Dispatcher-Side Actions
+## ctrl-exec-Side Actions
 
 These actions are emitted by `bin/ctrl-exec` and `bin/ctrl-exec-api` via
 `Exec::Engine`, `Exec::Auth`, `Exec::Lock`, and
@@ -697,7 +697,7 @@ interrupted.
 
 The agent-side auth hook is called after allowlist validation on every
 `/run` request. The same action name and field structure as the
-ctrl-exec-side auth log. See the auth description under Dispatcher-Side
+ctrl-exec-side auth log. See the auth description under ctrl-exec-Side
 Actions for the full field and variant reference.
 
 On the agent side:
@@ -1313,13 +1313,13 @@ ACTION=rotation-state-corrupt PATH=/var/lib/ctrl-exec/rotation.json ERROR="..." 
 | ACTION | string | Event type identifier. Always first. |
 | AGENT | string | Agent hostname (used in `unpair`, `pair-approve`, `pair-deny`, `serial-confirmed`, `serial-stale`) |
 | AGENTS | integer | Count of agents marked pending for serial broadcast (used in `cert-rotated`) |
-| AUTHACTION | string | Dispatcher operation being authorised: `run`, `ping`, or `api` |
+| AUTHACTION | string | ctrl-exec operation being authorised: `run`, `ping`, or `api` |
 | BIND | string | Network address the API is bound to (used in `api-start`) |
 | BYTES | integer | Byte count (used in `stdin-timeout`) |
 | CONFLICTS | string | Comma-separated `host:script` pairs in lock conflict |
 | COUNT | integer | Table capacity ceiling that triggered eviction (used in `rate-evict`) |
 | DAYS_LEFT | integer | Days remaining on the ctrl-exec cert (used in `cert-check`, `cert-renewal-start`) |
-| DISPATCHER | string | Dispatcher hostname as contacted by agent during pairing |
+| DISPATCHER | string | ctrl-exec hostname as contacted by agent during pairing |
 | ENTRY | string | Offending config entry (used in `config-warn`) |
 | ERROR | string | Error description for failure actions |
 | EXIT | integer | Script exit code |
@@ -1376,7 +1376,7 @@ Security events
 | --- | --- | --- |
 | `ACTION=rate-block REASON=volume` | Source IP exceeded connection volume threshold | Investigate source IP; sustained occurrences indicate scanning or connection flooding |
 | `ACTION=rate-block REASON=probe` | Source IP exceeded TLS handshake failure threshold | Investigate source IP; consistent probe failures indicate certificate probing or brute-force attempts |
-| `ACTION=serial-reject` | Dispatcher cert serial mismatch on agent | Check rotation broadcast status; run `ctrl-exec serial-status`; should not occur during normal post-rotation operation |
+| `ACTION=serial-reject` | ctrl-exec cert serial mismatch on agent | Check rotation broadcast status; run `ctrl-exec serial-status`; should not occur during normal post-rotation operation |
 | `ACTION=revoked-cert` | Revoked cert presented to agent | Treat as a security event; investigate source IP immediately |
 | `ACTION=ip-block` | Connection from IP outside `allowed_ips` | Review `allowed_ips` config; unexpected occurrences indicate traffic from an unrecognised source |
 | `ACTION=deny` (repeated, same PEER) | Script not in allowlist or hook denying repeatedly | Check agent allowlist; may indicate misconfiguration or probing for available scripts |
@@ -1387,10 +1387,10 @@ Execution failures
 | Pattern | Meaning | Response |
 | --- | --- | --- |
 | `ACTION=run EXIT=<non-zero>` (agent-side) | Script exited with a failure code | The non-zero exit is logged at INFO priority on both sides; correlate with REQID to find output; check script behaviour |
-| `ACTION=run ERROR=` (ctrl-exec-side) | Dispatcher could not reach agent or parse response | Check agent reachability and cert validity |
+| `ACTION=run ERROR=` (ctrl-exec-side) | ctrl-exec could not reach agent or parse response | Check agent reachability and cert validity |
 | `ACTION=ping ERROR=` | Ping failed | Agent unreachable or cert issue; cert renewal will not trigger until ping succeeds |
 | `ACTION=renew ERROR=` | Cert renewal failed | Check agent connectivity; cert will expire if renewals continue to fail |
-| `ACTION=cert-rotation-fail` | Dispatcher cert rotation failed | Investigate immediately; rotation retried on next check interval |
+| `ACTION=cert-rotation-fail` | ctrl-exec cert rotation failed | Investigate immediately; rotation retried on next check interval |
 
 Rotation events
 

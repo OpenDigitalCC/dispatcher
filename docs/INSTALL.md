@@ -1,10 +1,10 @@
 ---
-title: Dispatcher - Installation and Operations
+title: ctrl-exec - Installation and Operations
 subtitle: Platform requirements, setup, configuration, and operational reference
 brand: odcc
 ---
 
-# Dispatcher - Installation and Operations
+# ctrl-exec - Installation and Operations
 
 
 ## Platform Requirements
@@ -32,7 +32,7 @@ Agent (`--agent`)
 - Debian: `libio-socket-ssl-perl`, `libjson-perl`
 - Alpine: `perl-io-socket-ssl`, `perl-json`
 
-Dispatcher (`--ctrl-exec`)
+ctrl-exec (`--ctrl-exec`)
 
 - Debian: `libwww-perl`, `libio-socket-ssl-perl`, `libjson-perl`
 - Alpine: `perl-libwww`, `perl-io-socket-ssl`, `perl-json`
@@ -68,7 +68,7 @@ or used alone to test without installing.
 /usr/local/bin/ctrl-exec-agent
 /usr/local/bin/ctrl-exec-api
 /usr/local/lib/ctrl-exec/          Perl library modules
-/etc/ctrl-exec/                    Dispatcher config, CA material, auth hook
+/etc/ctrl-exec/                    ctrl-exec config, CA material, auth hook
 /etc/ctrl-exec-agent/              Agent config and certs
 /opt/ctrl-exec-scripts/            Managed scripts on agent hosts
 /var/lib/ctrl-exec/pairing/        Pending pairing requests
@@ -83,7 +83,7 @@ binaries at install time. The source files in the distribution carry the
 sentinel value `UNINSTALLED` until the installer runs. After installation,
 `ctrl-exec --version` reports the version of the release that was installed.
 
-### Dispatcher group
+### ctrl-exec group
 
 The installer creates a `ctrl-exec` system group. Add yourself to it for
 CLI access without sudo:
@@ -115,7 +115,7 @@ and are skipped automatically if not available.
 
 ## Initial Setup
 
-### 1. Dispatcher host - CA and certificates
+### 1. ctrl-exec host - CA and certificates
 
 Initialise the CA (once only - do not repeat on an existing installation):
 
@@ -606,7 +606,7 @@ To change cert lifetime, update `cert_days` in `ctrl-exec.conf`. Existing
 certs are unaffected until their next renewal.
 
 
-## Dispatcher Redundancy
+## ctrl-exec Redundancy
 
 Two ctrl-exec installations can share a CA and manage the same agent fleet
 independently. Each ctrl-exec signs certs and maintains its own registry.

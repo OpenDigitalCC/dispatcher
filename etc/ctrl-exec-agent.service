@@ -1,5 +1,5 @@
 [Unit]
-Description=Dispatcher Agent - remote script execution service
+Description=ctrl-exec Agent - remote script execution service
 Documentation=https://github.com/yourorg/ctrl-exec
 After=network.target
 Wants=network.target

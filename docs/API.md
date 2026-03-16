@@ -1,5 +1,5 @@
 ---
-title: Dispatcher API
+title: ctrl-exec API
 subtitle: HTTP REST API reference, OpenAPI spec, and live spec generator
 brand: odcc
 ---
@@ -287,7 +287,7 @@ containing spaces or newlines.
 ## OpenAPI spec
 
 The static OpenAPI 3.1 spec is installed at
-`/usr/local/lib/ctrl-exec/Dispatcher/openapi.json` and served verbatim from
+`/usr/local/lib/ctrl-exec/ctrl-exec/openapi.json` and served verbatim from
 `GET /openapi.json`. The version field is stamped with the release version at
 install time.
 
@@ -344,7 +344,7 @@ current scope.
 
 ## `Exec::API` module
 
-Implemented in `lib/Dispatcher/API.pm`. Public interface:
+Implemented in `lib/ctrl-exec/API.pm`. Public interface:
 
 `run(%opts)`
 : Required: `config`. Starts the server and blocks until SIGTERM or SIGINT.

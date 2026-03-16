@@ -81,12 +81,12 @@ subtest 'days validation: sign_csr accepts days => 1 (fires before openssl with 
 # ---------------------------------------------------------------------------
 
 subtest 'CN validation: slash rejected' => sub {
-    eval { Exec::CA::generate_ca(cn => 'Dispatcher CA/O=Evil', ca_dir => $scratch) };
+    eval { Exec::CA::generate_ca(cn => 'ctrl-exec CA/O=Evil', ca_dir => $scratch) };
     like $@, qr/Invalid CN/, 'slash in CN croaks';
 };
 
 subtest 'CN validation: null byte rejected' => sub {
-    eval { Exec::CA::generate_ca(cn => "Dispatcher\0CA", ca_dir => $scratch) };
+    eval { Exec::CA::generate_ca(cn => "ctrl-exec\0CA", ca_dir => $scratch) };
     like $@, qr/Invalid CN/, 'null byte in CN croaks';
 };
 
@@ -305,7 +305,7 @@ SKIP: {
         my $d = tempdir(CLEANUP => 1);
         eval {
             Exec::CA::generate_ca(
-                cn     => 'Dispatcher CA-01',
+                cn     => 'ctrl-exec CA-01',
                 ca_dir => $d,
                 days   => 1,
                 bits   => 2048,

@@ -129,11 +129,11 @@ if [ -n "$REQID" ]; then
     if echo "$DISP_LOG" | grep -q "$REQID"; then
         pass "ctrl-exec syslog contains reqid $REQID"
     else
-        skip "Dispatcher syslog check" \
+        skip "ctrl-exec syslog check" \
             "cannot read ctrl-exec syslog - verify manually: journalctl -t ctrl-exec | grep $REQID"
     fi
 else
-    skip "Dispatcher syslog check" "no reqid to search for"
+    skip "ctrl-exec syslog check" "no reqid to search for"
 fi
 
 # Check agent is still running the script (process-level, requires SSH)

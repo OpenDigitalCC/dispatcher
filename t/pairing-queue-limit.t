@@ -157,7 +157,7 @@ sub populate_queue {
 # Detect whether _handle_pair_request accepts a pairing_dir 5th argument
 # by inspecting the source.
 my $has_pairing_dir_param = do {
-    my $src = "$Bin/../lib/Dispatcher/Pairing.pm";
+    my $src = "$Bin/../lib/Exec/Pairing.pm";
     if (-f $src) {
         open my $fh, '<', $src or die $!;
         local $/; my $text = <$fh>;

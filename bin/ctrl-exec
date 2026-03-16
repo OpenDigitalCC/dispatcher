@@ -267,7 +267,7 @@ sub mode_deny {
 }
 
 sub mode_setup_ca {
-    print "Setting up Dispatcher CA...\n";
+    print "Setting up ctrl-exec CA...\n";
     my $result = Exec::CA::generate_ca(ca_dir => '/etc/ctrl-exec');
     print "CA created:\n";
     print "  Key:  $result->{ca_key}\n";
@@ -310,7 +310,7 @@ sub mode_setup_dispatcher {
         ca_dir => $ca_dir,
         force  => 1,
     );
-    print "Dispatcher cert created:\n";
+    print "ctrl-exec cert created:\n";
     print "  Key:  $result->{key}\n";
     print "  Cert: $result->{cert}\n";
     print "Run 'ctrl-exec pairing-mode' to re-pair agents as needed.\n"

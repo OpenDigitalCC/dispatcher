@@ -1,18 +1,18 @@
 ---
-title: Dispatcher - Security Operations
+title: ctrl-exec - Security Operations
 subtitle: Operational security guidance, monitoring, incident response, and known limitations
 brand: odcc
 ---
 
-# Dispatcher - Security Operations
+# ctrl-exec - Security Operations
 
-This document covers the operational security posture of a running Dispatcher
+This document covers the operational security posture of a running ctrl-exec
 deployment: what to monitor, how to respond to incidents, known limitations,
 and deployment-specific guidance. For the system's security model and
 architecture, see SECURITY.md.
 
 
-## Dispatcher Host Security
+## ctrl-exec Host Security
 
 The security of the entire fleet depends on the security of the ctrl-exec
 host. The CA key, ctrl-exec cert and key, full agent registry, and lock files
@@ -35,13 +35,13 @@ is a privilege; treat it accordingly.
 
 ## Token and Credential Lifecycle
 
-Dispatcher has no built-in token management. Tokens are arbitrary strings that
+ctrl-exec has no built-in token management. Tokens are arbitrary strings that
 callers include in requests; they are forwarded to the auth hook as
 `ENVEXEC_TOKEN` and to agents via the request body. All token issuance,
 validation, expiry, and revocation logic lives in the auth hook.
 
 The `username` field is a caller-supplied string with no structural meaning
-within Dispatcher. The ctrl-exec does not authenticate it, and it is not
+within ctrl-exec. The ctrl-exec does not authenticate it, and it is not
 verified to match any local or remote identity. Its purpose is to carry an
 identity assertion that an auth hook can forward to an external authentication
 service alongside the token. A hook that grants elevated permissions based
@@ -69,7 +69,7 @@ maintain its own user database; it delegates to the identity service.
 
 Token revocation for a compromised service: update the auth hook to reject the
 service's token. If the hook validates against a central service, revoke the
-token there. No Dispatcher restart is required; the hook's own logic takes
+token there. No ctrl-exec restart is required; the hook's own logic takes
 effect on the next request.
 
 
@@ -80,7 +80,7 @@ Hook update path
   by a script that a compromised token can invoke, the hook that validates that
   token can be overwritten. Update hooks through direct filesystem access,
   configuration management tooling (Ansible, Salt, Puppet), or a dedicated
-  privileged deployment channel that does not pass through Dispatcher itself.
+  privileged deployment channel that does not pass through ctrl-exec itself.
 
 Token exposure in hook logging
 : The token is available in the hook's `ENVEXEC_TOKEN` environment variable
@@ -94,7 +94,7 @@ External validation service availability
   that service must result in a denied request (exit code 1 or 2). Do not
   fail open. The operational impact of blocking all requests during a
   validation service outage is preferable to authorising unvalidated requests.
-  Design the validation service for high availability if Dispatcher operations
+  Design the validation service for high availability if ctrl-exec operations
   are time-critical.
 
 Two-token pattern
@@ -197,7 +197,7 @@ fi
 
 # Rate limit: one successful call per agent per window
 mkdir -p "$RATE_DIR"
-STATE_FILE="$RATE_DIR/${DISPATCHER_HOST//[^a-zA-Z0-9._-]/_}.last"
+STATE_FILE="$RATE_DIR/${CTRL_EXEC_HOST//[^a-zA-Z0-9._-]/_}.last"
 NOW=$(date +%s)
 
 if [ -f "$STATE_FILE" ]; then
@@ -213,7 +213,7 @@ echo "$NOW" > "$STATE_FILE"
 exit 0
 ```
 
-`DISPATCHER_HOST` is the target agent hostname as recorded in the registry —
+`CTRL_EXEC_HOST` is the target agent hostname as recorded in the registry —
 it is not caller-supplied and cannot be spoofed. The state directory should
 be `0700` owned by the user the hook runs as. The hook should be set `0700`
 with root ownership; its parent directory should not be writable by the
@@ -246,7 +246,7 @@ Recovery procedure:
    ctrl-exec setup-ctrl-exec  # generates new ctrl-exec cert signed by new CA
    ```
 
-3. Distribute the new CA cert to all agents. This cannot be done via Dispatcher
+3. Distribute the new CA cert to all agents. This cannot be done via ctrl-exec
    (the agents do not trust the new CA yet). Use SSH or configuration
    management tooling to push `/etc/ctrl-exec/ca.crt` to
    `/etc/ctrl-exec-agent/ca.crt` on each agent.
@@ -274,9 +274,9 @@ designed for bulk re-pairing scenarios.
 
 ## Monitoring and Alerting
 
-Dispatcher's structured logging provides the data for detection. Alerting
+ctrl-exec's structured logging provides the data for detection. Alerting
 must be configured in the operator's log management tooling (Graylog,
-Elasticsearch, Loki, syslog-ng filters, etc.). Dispatcher does not include
+Elasticsearch, Loki, syslog-ng filters, etc.). ctrl-exec does not include
 a monitoring component.
 
 The complete alert pattern reference — covering security events, execution
@@ -415,15 +415,15 @@ Stale pairing request
   re-triggers the pairing, the request is silently deleted. Recovery: restart
   the agent container; it will send a fresh pairing request.
 
-`DISPATCHER_HOST` trust
-: The `DISPATCHER_HOST` environment variable in the agent container determines
+`CTRL_EXEC_HOST` trust
+: The `CTRL_EXEC_HOST` environment variable in the agent container determines
   which host receives the pairing request including the agent's CSR. If this
   variable is misconfigured to point at an attacker-controlled host, the
   attacker receives the CSR and can return a certificate signed by their own
   CA. The agent stores whatever cert is returned. All subsequent operations use
-  the attacker's CA as the trust anchor. Verify `DISPATCHER_HOST` points at
+  the attacker's CA as the trust anchor. Verify `CTRL_EXEC_HOST` points at
   the correct ctrl-exec before starting agent containers. For production
-  deployments, consider setting `DISPATCHER_HOST` in a compose file under
+  deployments, consider setting `CTRL_EXEC_HOST` in a compose file under
   version control rather than passing it as a runtime variable.
 
 `allowed_ips` in containerised deployments

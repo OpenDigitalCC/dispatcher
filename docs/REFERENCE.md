@@ -1,5 +1,5 @@
 ---
-title: Dispatcher - Installation and Operations
+title: ctrl-exec - Installation and Operations
 subtitle: Platform requirements, setup, configuration, and operational reference
 brand: odcc
 ---
@@ -41,7 +41,7 @@ These options apply to all modes.
 `--username <n>`
 : Username to include in the request context. Defaults to `$USER`. This is an
   advisory field - it is forwarded to auth hooks and to the agent unchanged,
-  but is not authenticated or verified by Dispatcher. Its intended use is to
+  but is not authenticated or verified by ctrl-exec. Its intended use is to
   carry an identity assertion that the auth hook can forward to an external
   authentication service alongside the token, allowing that service to verify
   whether the claimed identity is consistent with the token's authority. Do

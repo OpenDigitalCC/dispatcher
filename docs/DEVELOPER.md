@@ -1,14 +1,14 @@
 ---
-title: Dispatcher and agent - Developer document
+title: ctrl-exec and agent - Developer document
 subtitle: Purpose, contents, protocol, logging, security model and extending
 brand: opendigitalcc
 ---
 
-# Dispatcher - Developer Documentation
+# ctrl-exec - Developer Documentation
 
 ## Purpose and Design Criteria
 
-Dispatcher is a Perl machine-to-machine remote script execution system. It
+ctrl-exec is a Perl machine-to-machine remote script execution system. It
 allows a control host (the ctrl-exec) to run scripts on remote hosts (agents)
 over mTLS-authenticated HTTPS, with no SSH involved.
 
@@ -102,14 +102,14 @@ function-based design
 
 ## Certificate Layout
 
-Dispatcher host (`/etc/ctrl-exec/`)
+ctrl-exec host (`/etc/ctrl-exec/`)
 
 ```
 ca.key          CA private key (0600, root only, never leaves this host)
 ca.crt          CA certificate (distributed to agents during pairing)
 ca.serial       Serial counter for issued certs
-ctrl-exec.key  Dispatcher's own private key (0600)
-ctrl-exec.crt  Dispatcher's own cert, signed by CA
+ctrl-exec.key  ctrl-exec's own private key (0600)
+ctrl-exec.crt  ctrl-exec's own cert, signed by CA
 auth-hook       Auth hook executable (0755)
 ```
 
@@ -206,7 +206,7 @@ Functions:
 
 ### `Exec::Pairing`
 
-Dispatcher-side pairing server and approval queue. Handles the initial
+ctrl-exec-side pairing server and approval queue. Handles the initial
 certificate exchange from the ctrl-exec's perspective.
 
 The pairing flow uses the filesystem as a message queue between the main
@@ -282,7 +282,7 @@ Important SSL note - `SSL_no_shutdown => 1` on parent close
 
 ### `Exec::Rotation`
 
-Dispatcher cert lifecycle management. Monitors the ctrl-exec's own cert
+ctrl-exec cert lifecycle management. Monitors the ctrl-exec's own cert
 expiry, rotates it when approaching expiry, and broadcasts the new serial to
 all registered agents so they can update their trusted-ctrl-exec serial.
 
@@ -529,7 +529,7 @@ all requests pass unconditionally.
 The hook is an external executable called with request context as environment
 variables and a JSON object on stdin. Its exit code determines the outcome.
 
-The hook is the intended policy engine. Dispatcher deliberately does not
+The hook is the intended policy engine. ctrl-exec deliberately does not
 implement config-based ACLs. Per-token script restrictions, per-host targeting
 rules, argument validation, and user-based privilege separation are all
 implemented in the hook.
@@ -813,7 +813,7 @@ Context hashref fields:
 script      Script name as requested
 args        Arrayref of positional arguments
 reqid       Request ID
-peer_ip     Dispatcher's IP address
+peer_ip     ctrl-exec's IP address
 username    Username from the ctrl-exec request (may be empty)
 token       Auth token from the ctrl-exec request (may be empty)
 timestamp   ISO 8601 UTC timestamp of the request
@@ -1081,7 +1081,7 @@ Endpoints handled in `handle_connection`:
   `$config->{tags}` (populated from `[tags]` section of `agent.conf`).
 
 `POST /renew`
-: Dispatcher-initiated cert renewal request. Loads config to find the existing
+: ctrl-exec-initiated cert renewal request. Loads config to find the existing
   key path, calls `Exec::Agent::AgentPairing::generate_csr_only`, returns
   `{ status: "ok", csr: "<PEM>", reqid }`. Dies on config or CSR generation
   failure.
@@ -1331,7 +1331,7 @@ auth hook token
   token appearing in `ps` output.
 
 file permissions
-: CA key: 0600 root. Dispatcher cert/key: 0600 root. Agent cert/key: 0640
+: CA key: 0600 root. ctrl-exec cert/key: 0600 root. Agent cert/key: 0640
   root:ctrl-exec-agent. Scripts: 0750 root:ctrl-exec-agent. The
   `ctrl-exec-agent` system user has no login shell and no home directory.
   Runtime dirs: 0770 root:ctrl-exec.
@@ -1452,7 +1452,7 @@ Adding a new ctrl-exec CLI mode
   in `Exec::Output`; keep the mode function thin.
 
 Adding a new library module
-: Place in `lib/Dispatcher/` or `lib/Dispatcher/Agent/`. Use `use strict;
+: Place in `lib/ctrl-exec/` or `lib/ctrl-exec/Agent/`. Use `use strict;
   use warnings;`. All callers use `Module::function()` syntax - nothing exported
   by default. Private helpers prefixed `_`. Add a corresponding test in `t/`.
 
@@ -1490,7 +1490,7 @@ libjson-perl             perl-json                 JSON
 openssl                  openssl                   (binary) key, CSR, cert ops
 ```
 
-Dispatcher role
+ctrl-exec role
 
 ```
 Debian                   Alpine                   Module / binary

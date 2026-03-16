@@ -19,7 +19,7 @@
 # Uncomment to enable:
 # ctrl-exec-demonstrator = /opt/ctrl-exec-scripts/ctrl-exec-demonstrator.sh
 
-# --- Dispatcher certificate rotation ---
+# --- ctrl-exec certificate rotation ---
 #
 # Required for automatic ctrl-exec cert rotation. When the ctrl-exec
 # rotates its certificate, it calls this script on each agent to update

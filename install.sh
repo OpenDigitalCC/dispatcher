@@ -1,11 +1,11 @@
 #!/bin/bash
-# install.sh - Install dispatcher agent, dispatcher CLI, or API server
+# install.sh - Install ctrl-exec agent, ctrl-exec CLI, or API server
 # Must be run as root. Role must be specified explicitly.
 #
 # Usage:
 #   ./install.sh --agent        Install the agent (on remote hosts)
-#   ./install.sh --dispatcher   Install the dispatcher CLI (on control host)
-#   ./install.sh --api          Install the API server (on control host, after --dispatcher)
+#   ./install.sh --ctrl-exec   Install the ctrl-exec CLI (on control host)
+#   ./install.sh --api          Install the API server (on control host, after --ctrl-exec)
 #   ./install.sh --uninstall    Remove installed files (preserves config/certs)
 #   ./install.sh --run-tests    Run test suite from the source directory
 #
@@ -15,22 +15,22 @@ set -euo pipefail
 
 # --- configuration ---
 
-AGENT_USER="dispatcher-agent"
-AGENT_GROUP="dispatcher-agent"
-DISPATCHER_GROUP="dispatcher"
+AGENT_USER="ctrl-exec-agent"
+AGENT_GROUP="ctrl-exec-agent"
+EXEC_GROUP="ctrl-exec"
 
 BIN_DIR="/usr/local/bin"
-LIB_DIR="/usr/local/lib/dispatcher"
-AGENT_CONF_DIR="/etc/dispatcher-agent"
-DISPATCHER_CONF_DIR="/etc/dispatcher"
-SCRIPTS_DIR="/opt/dispatcher-scripts"
-PAIRING_DIR="/var/lib/dispatcher/pairing"
-AGENTS_DIR="/var/lib/dispatcher/agents"
-LOCKS_DIR="/var/lib/dispatcher/locks"
-RUNS_DIR="/var/lib/dispatcher/runs"
+LIB_DIR="/usr/local/lib/ctrl-exec"
+AGENT_CONF_DIR="/etc/ctrl-exec-agent"
+EXEC_CONF_DIR="/etc/ctrl-exec"
+SCRIPTS_DIR="/opt/ctrl-exec-scripts"
+PAIRING_DIR="/var/lib/ctrl-exec/pairing"
+AGENTS_DIR="/var/lib/ctrl-exec/agents"
+LOCKS_DIR="/var/lib/ctrl-exec/locks"
+RUNS_DIR="/var/lib/ctrl-exec/runs"
 SYSTEMD_DIR="/etc/systemd/system"
-AGENT_SERVICE="dispatcher-agent.service"
-API_SERVICE="dispatcher-api.service"
+AGENT_SERVICE="ctrl-exec-agent.service"
+API_SERVICE="ctrl-exec-api.service"
 
 # Colours
 RED='\033[0;31m'
@@ -178,8 +178,8 @@ detect_init() {
     else
         warn "No supported init system found (systemd or procd) - service files will not be installed."
         warn "Start services manually once configured:"
-        warn "  dispatcher-agent serve"
-        warn "  dispatcher-api"
+        warn "  ctrl-exec-agent serve"
+        warn "  ctrl-exec-api"
     fi
 }
 
@@ -190,9 +190,9 @@ install_service_unit() {
         safe_install 644 "$SOURCE_DIR/etc/$unit" "$SYSTEMD_DIR/$unit"
         systemctl daemon-reload
     elif [[ "$HAS_PROCD" == true ]]; then
-        local init_script="/etc/init.d/dispatcher-agent"
+        local init_script="/etc/init.d/ctrl-exec-agent"
         info "Installing procd init script $init_script..."
-        safe_install 755 "$SOURCE_DIR/etc/dispatcher-agent.init" "$init_script"
+        safe_install 755 "$SOURCE_DIR/etc/ctrl-exec-agent.init" "$init_script"
         "$init_script" enable
     fi
 }
@@ -216,7 +216,7 @@ check_perl_modules() {
         ["Sys::Hostname"]="perl"
         ["POSIX"]="perl"
     )
-    declare -A DEB_DISPATCHER_DEPS=(
+    declare -A DEB_EXEC_DEPS=(
         ["LWP::UserAgent"]="libwww-perl"
         ["IO::Socket::SSL"]="libio-socket-ssl-perl"
         ["JSON"]="libjson-perl"
@@ -244,7 +244,7 @@ check_perl_modules() {
         ["Sys::Hostname"]="perl"
         ["POSIX"]="perl"
     )
-    declare -A APK_DISPATCHER_DEPS=(
+    declare -A APK_EXEC_DEPS=(
         ["LWP::UserAgent"]="perl-libwww"
         ["IO::Socket::SSL"]="perl-io-socket-ssl"
         ["JSON"]="perl-json"
@@ -278,7 +278,7 @@ check_perl_modules() {
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
     )
-    declare -A OPENWRT_DISPATCHER_DEPS=(
+    declare -A OPENWRT_EXEC_DEPS=(
         ["LWP::UserAgent"]="perl-www"
         ["IO::Socket::SSL"]="perl-io-socket-ssl"
         ["JSON::PP"]="perlbase-json-pp"
@@ -317,7 +317,7 @@ check_perl_modules() {
         ["Carp"]="perlbase-essential"
         ["FindBin"]="perlbase-findbin"
     )
-    declare -A OPKG_DISPATCHER_DEPS=(
+    declare -A OPKG_EXEC_DEPS=(
         ["LWP::UserAgent"]="perl-www"
         ["IO::Socket::SSL"]="perl-io-socket-ssl"
         ["JSON::PP"]="perl-json"
@@ -340,13 +340,13 @@ check_perl_modules() {
     # Select the right map
     local map_name
     if [[ "$PKG_MGR" == "openwrt" ]]; then
-        [[ "$role" == "agent" ]] && map_name="OPENWRT_AGENT_DEPS" || map_name="OPENWRT_DISPATCHER_DEPS"
+        [[ "$role" == "agent" ]] && map_name="OPENWRT_AGENT_DEPS" || map_name="OPENWRT_EXEC_DEPS"
     elif [[ "$PKG_MGR" == "openwrt-opkg" ]]; then
-        [[ "$role" == "agent" ]] && map_name="OPKG_AGENT_DEPS" || map_name="OPKG_DISPATCHER_DEPS"
+        [[ "$role" == "agent" ]] && map_name="OPKG_AGENT_DEPS" || map_name="OPKG_EXEC_DEPS"
     elif [[ "$PKG_MGR" == "apk" ]]; then
-        [[ "$role" == "agent" ]] && map_name="APK_AGENT_DEPS" || map_name="APK_DISPATCHER_DEPS"
+        [[ "$role" == "agent" ]] && map_name="APK_AGENT_DEPS" || map_name="APK_EXEC_DEPS"
     else
-        [[ "$role" == "agent" ]] && map_name="DEB_AGENT_DEPS" || map_name="DEB_DISPATCHER_DEPS"
+        [[ "$role" == "agent" ]] && map_name="DEB_AGENT_DEPS" || map_name="DEB_EXEC_DEPS"
     fi
 
     local -n DEP_MAP="$map_name"
@@ -449,18 +449,18 @@ run_tests() {
 # fw4 restarts and reboots. A uci-defaults script is written and optionally
 # run immediately. The script self-removes after running.
 install_openwrt_firewall() {
-    local uci_defaults="/etc/uci-defaults/99-dispatcher-agent"
+    local uci_defaults="/etc/uci-defaults/99-ctrl-exec-agent"
     cat > "$uci_defaults" << 'EOF'
 #!/bin/sh
 uci add firewall rule
-uci set firewall.@rule[-1].name="Allow-dispatcher-agent"
+uci set firewall.@rule[-1].name="Allow-ctrl-exec-agent"
 uci set firewall.@rule[-1].src="wan"
 uci set firewall.@rule[-1].dest_port="7443"
 uci set firewall.@rule[-1].proto="tcp"
 uci set firewall.@rule[-1].target="ACCEPT"
 uci commit firewall
 fw4 restart
-rm -f /etc/uci-defaults/99-dispatcher-agent
+rm -f /etc/uci-defaults/99-ctrl-exec-agent
 EOF
     chmod 755 "$uci_defaults"
     info "OpenWRT: applying firewall rule for port 7443..."
@@ -471,16 +471,16 @@ EOF
 # --- agent installation ---
 
 install_agent() {
-    info "Installing dispatcher-agent..."
+    info "Installing ctrl-exec-agent..."
 
     create_system_group "$AGENT_GROUP"
-    create_system_user "$AGENT_USER" "$AGENT_GROUP" "Dispatcher agent service user"
+    create_system_user "$AGENT_USER" "$AGENT_GROUP" "ctrl-exec agent service user"
 
-    safe_install 755 "$SOURCE_DIR/bin/dispatcher-agent" "$BIN_DIR/dispatcher-agent"
+    safe_install 755 "$SOURCE_DIR/bin/ctrl-exec-agent" "$BIN_DIR/ctrl-exec-agent"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
-        "$BIN_DIR/dispatcher-agent"
+        "$BIN_DIR/ctrl-exec-agent"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
-        "$BIN_DIR/dispatcher-agent"
+        "$BIN_DIR/ctrl-exec-agent"
 
     # Config directory - readable by agent group, not world
     mkdir -p "$AGENT_CONF_DIR"
@@ -514,10 +514,10 @@ install_agent() {
     fi
 
     # Install demonstrator script - disabled in scripts.conf by default,
-    # uncomment the entry to enable it for evaluating dispatcher capabilities
-    safe_install 750 "$SOURCE_DIR/etc/dispatcher-demonstrator.sh" "$SCRIPTS_DIR/dispatcher-demonstrator.sh"
-    chown root:"$AGENT_GROUP" "$SCRIPTS_DIR/dispatcher-demonstrator.sh"
-    info "Demonstrator script installed at $SCRIPTS_DIR/dispatcher-demonstrator.sh"
+    # uncomment the entry to enable it for evaluating ctrl-exec capabilities
+    safe_install 750 "$SOURCE_DIR/etc/ctrl-exec-demonstrator.sh" "$SCRIPTS_DIR/ctrl-exec-demonstrator.sh"
+    chown root:"$AGENT_GROUP" "$SCRIPTS_DIR/ctrl-exec-demonstrator.sh"
+    info "Demonstrator script installed at $SCRIPTS_DIR/ctrl-exec-demonstrator.sh"
 
     install_service_unit "$AGENT_SERVICE"
 
@@ -525,86 +525,86 @@ install_agent() {
         install_openwrt_firewall
     fi
 
-    info "dispatcher-agent installed at $BIN_DIR/dispatcher-agent"
+    info "ctrl-exec-agent installed at $BIN_DIR/ctrl-exec-agent"
 }
 
-# --- dispatcher installation ---
+# --- ctrl-exec installation ---
 
-install_dispatcher() {
-    info "Installing dispatcher CLI..."
+install_ctrl_exec() {
+    info "Installing ctrl-exec CLI..."
 
-    create_system_group "$DISPATCHER_GROUP"
+    create_system_group "$EXEC_GROUP"
 
-    safe_install 755 "$SOURCE_DIR/bin/dispatcher" "$BIN_DIR/dispatcher"
+    safe_install 755 "$SOURCE_DIR/bin/ctrl-exec" "$BIN_DIR/ctrl-exec"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
-        "$BIN_DIR/dispatcher"
+        "$BIN_DIR/ctrl-exec"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
-        "$BIN_DIR/dispatcher"
+        "$BIN_DIR/ctrl-exec"
 
     # Config directory
-    mkdir -p "$DISPATCHER_CONF_DIR"
-    chmod 750 "$DISPATCHER_CONF_DIR"
-    chown root:"$DISPATCHER_GROUP" "$DISPATCHER_CONF_DIR"
+    mkdir -p "$EXEC_CONF_DIR"
+    chmod 750 "$EXEC_CONF_DIR"
+    chown root:"$EXEC_GROUP" "$EXEC_CONF_DIR"
 
     # Pairing queue
     mkdir -p "$PAIRING_DIR"
-    chown root:"$DISPATCHER_GROUP" "$PAIRING_DIR"
+    chown root:"$EXEC_GROUP" "$PAIRING_DIR"
     chmod 770 "$PAIRING_DIR"
 
     # Agent registry - written by approve, read by list-agents and API
     mkdir -p "$AGENTS_DIR"
-    chown root:"$DISPATCHER_GROUP" "$AGENTS_DIR"
+    chown root:"$EXEC_GROUP" "$AGENTS_DIR"
     chmod 770 "$AGENTS_DIR"
 
     # Lock files - written during dispatch
     mkdir -p "$LOCKS_DIR"
-    chown root:"$DISPATCHER_GROUP" "$LOCKS_DIR"
+    chown root:"$EXEC_GROUP" "$LOCKS_DIR"
     chmod 770 "$LOCKS_DIR"
 
     mkdir -p "$RUNS_DIR"
-    chown root:"$DISPATCHER_GROUP" "$RUNS_DIR"
+    chown root:"$EXEC_GROUP" "$RUNS_DIR"
     chmod 770 "$RUNS_DIR"
 
-    # Dispatcher config
-    if [[ ! -f "$DISPATCHER_CONF_DIR/dispatcher.conf" ]]; then
-        safe_install 640 "$SOURCE_DIR/etc/dispatcher.conf.example" "$DISPATCHER_CONF_DIR/dispatcher.conf"
-        chown root:"$DISPATCHER_GROUP" "$DISPATCHER_CONF_DIR/dispatcher.conf"
-        warn "Dispatcher config written to $DISPATCHER_CONF_DIR/dispatcher.conf - review before use."
+    # ctrl-exec config
+    if [[ ! -f "$EXEC_CONF_DIR/ctrl-exec.conf" ]]; then
+        safe_install 640 "$SOURCE_DIR/etc/ctrl-exec.conf.example" "$EXEC_CONF_DIR/ctrl-exec.conf"
+        chown root:"$EXEC_GROUP" "$EXEC_CONF_DIR/ctrl-exec.conf"
+        warn "ctrl-exec config written to $EXEC_CONF_DIR/ctrl-exec.conf - review before use."
     else
-        info "Dispatcher config already exists, not overwriting."
+        info "ctrl-exec config already exists, not overwriting."
     fi
 
     # Auth hook - install example only if not already present
-    if [[ ! -f "$DISPATCHER_CONF_DIR/auth-hook" ]]; then
-        safe_install 755 "$SOURCE_DIR/etc/auth-hook.example" "$DISPATCHER_CONF_DIR/auth-hook"
-        info "Auth hook installed at $DISPATCHER_CONF_DIR/auth-hook (always-authorise default)."
+    if [[ ! -f "$EXEC_CONF_DIR/auth-hook" ]]; then
+        safe_install 755 "$SOURCE_DIR/etc/auth-hook.example" "$EXEC_CONF_DIR/auth-hook"
+        info "Auth hook installed at $EXEC_CONF_DIR/auth-hook (always-authorise default)."
     else
         info "Auth hook already exists, not overwriting."
     fi
 
-    info "dispatcher installed at $BIN_DIR/dispatcher"
+    info "ctrl-exec installed at $BIN_DIR/ctrl-exec"
 }
 
 # --- api installation ---
 
 install_api() {
-    info "Installing dispatcher-api..."
+    info "Installing ctrl-exec-api..."
 
-    safe_install 755 "$SOURCE_DIR/bin/dispatcher-api" "$BIN_DIR/dispatcher-api"
+    safe_install 755 "$SOURCE_DIR/bin/ctrl-exec-api" "$BIN_DIR/ctrl-exec-api"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
-        "$BIN_DIR/dispatcher-api"
+        "$BIN_DIR/ctrl-exec-api"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
-        "$BIN_DIR/dispatcher-api"
+        "$BIN_DIR/ctrl-exec-api"
 
     install_service_unit "$API_SERVICE"
 
-    info "dispatcher-api installed at $BIN_DIR/dispatcher-api"
+    info "ctrl-exec-api installed at $BIN_DIR/ctrl-exec-api"
 }
 
 # --- uninstall ---
 
 uninstall() {
-    info "Uninstalling dispatcher..."
+    info "Uninstalling ctrl-exec..."
 
     if [[ "$HAS_SYSTEMD" == true ]]; then
         if systemctl is-active --quiet "$AGENT_SERVICE" 2>/dev/null; then
@@ -616,7 +616,7 @@ uninstall() {
             systemctl disable "$AGENT_SERVICE"
         fi
     elif [[ "$HAS_PROCD" == true ]]; then
-        local init_script="/etc/init.d/dispatcher-agent"
+        local init_script="/etc/init.d/ctrl-exec-agent"
         if [[ -f "$init_script" ]]; then
             info "Stopping and disabling procd service..."
             "$init_script" stop  2>/dev/null || true
@@ -625,9 +625,9 @@ uninstall() {
     fi
 
     local files=(
-        "$BIN_DIR/dispatcher-agent"
-        "$BIN_DIR/dispatcher"
-        "$BIN_DIR/dispatcher-api"
+        "$BIN_DIR/ctrl-exec-agent"
+        "$BIN_DIR/ctrl-exec"
+        "$BIN_DIR/ctrl-exec-api"
     )
 
     if [[ "$HAS_SYSTEMD" == true ]]; then
@@ -636,7 +636,7 @@ uninstall() {
             "$SYSTEMD_DIR/$API_SERVICE"
         )
     elif [[ "$HAS_PROCD" == true ]]; then
-        files+=( "/etc/init.d/dispatcher-agent" )
+        files+=( "/etc/init.d/ctrl-exec-agent" )
     fi
 
     # Remove lock files (transient, not config)
@@ -670,20 +670,20 @@ uninstall() {
     echo ""
     warn "The following were NOT removed (may contain keys, certs, or data):"
     warn "  $AGENT_CONF_DIR"
-    warn "  $DISPATCHER_CONF_DIR"
+    warn "  $EXEC_CONF_DIR"
     warn "  $PAIRING_DIR"
     warn "  $AGENTS_DIR"
     warn "  $SCRIPTS_DIR"
     warn ""
     warn "To remove completely:"
-    warn "  $SUDO_CMD rm -rf $AGENT_CONF_DIR $DISPATCHER_CONF_DIR"
-    warn "  $SUDO_CMD rm -rf /var/lib/dispatcher $SCRIPTS_DIR"
+    warn "  $SUDO_CMD rm -rf $AGENT_CONF_DIR $EXEC_CONF_DIR"
+    warn "  $SUDO_CMD rm -rf /var/lib/ctrl-exec $SCRIPTS_DIR"
     if [[ "$PKG_MGR" == "apk" || "$PKG_MGR" == "openwrt" || "$PKG_MGR" == "openwrt-opkg" ]]; then
         warn "  $SUDO_CMD deluser $AGENT_USER"
-        warn "  $SUDO_CMD delgroup $DISPATCHER_GROUP"
+        warn "  $SUDO_CMD delgroup $EXEC_GROUP"
     else
         warn "  $SUDO_CMD userdel $AGENT_USER"
-        warn "  $SUDO_CMD groupdel $DISPATCHER_GROUP"
+        warn "  $SUDO_CMD groupdel $EXEC_GROUP"
     fi
 
     info "Uninstall complete."
@@ -699,16 +699,16 @@ print_next_steps_agent() {
        $SUDO_CMD systemctl start  $AGENT_SERVICE"
     elif [[ "$HAS_PROCD" == true ]]; then
         svc_note="  5. Enable and start:
-       /etc/init.d/dispatcher-agent enable
-       /etc/init.d/dispatcher-agent start"
+       /etc/init.d/ctrl-exec-agent enable
+       /etc/init.d/ctrl-exec-agent start"
     else
         svc_note="  5. Start the agent:
-       dispatcher-agent serve"
+       ctrl-exec-agent serve"
     fi
 
     echo ""
     echo "================================================================"
-    echo " dispatcher-agent installed"
+    echo " ctrl-exec-agent installed"
     echo "================================================================"
     echo ""
     if [[ "$PKG_MGR" == openwrt* ]]; then
@@ -728,52 +728,52 @@ print_next_steps_agent() {
     echo "       $SUDO_CMD chmod 750 $SCRIPTS_DIR/your-script.sh"
     echo "       $SUDO_CMD chown root:$AGENT_GROUP $SCRIPTS_DIR/your-script.sh"
     echo ""
-    echo "  3. Request pairing (while dispatcher host is in pairing-mode):"
-    echo "       $SUDO_CMD dispatcher-agent request-pairing --dispatcher <dispatcher-host>"
+    echo "  3. Request pairing (while ctrl-exec host is in pairing-mode):"
+    echo "       $SUDO_CMD ctrl-exec-agent request-pairing --ctrl-exec <ctrl-exec-host>"
     echo ""
     echo "  4. Once approved, verify:"
-    echo "       $SUDO_CMD dispatcher-agent pairing-status"
-    echo "       $SUDO_CMD dispatcher-agent ping-self"
+    echo "       $SUDO_CMD ctrl-exec-agent pairing-status"
+    echo "       $SUDO_CMD ctrl-exec-agent ping-self"
     echo ""
     echo -e "$svc_note"
     echo ""
     echo "================================================================"
 }
 
-print_next_steps_dispatcher() {
+print_next_steps_ctrl_exec() {
     echo ""
     echo "================================================================"
-    echo " dispatcher installed"
+    echo " ctrl-exec installed"
     echo "================================================================"
     echo ""
     echo "Next steps:"
     echo ""
     echo "  1. Initialise the CA (first time only):"
-    echo "       $SUDO_CMD dispatcher setup-ca"
+    echo "       $SUDO_CMD ctrl-exec setup-ca"
     echo ""
-    echo "  2. Generate the dispatcher's own certificate:"
-    echo "       $SUDO_CMD dispatcher setup-dispatcher"
+    echo "  2. Generate the ctrl-exec's own certificate:"
+    echo "       $SUDO_CMD ctrl-exec setup-ctrl-exec"
     echo ""
-    echo "  3. Add yourself to the dispatcher group for CLI access without sudo:"
+    echo "  3. Add yourself to the ctrl-exec group for CLI access without sudo:"
     if [[ "$PKG_MGR" == openwrt* ]]; then
-        echo "       # Edit /etc/group and add your username to the $DISPATCHER_GROUP entry"
+        echo "       # Edit /etc/group and add your username to the $EXEC_GROUP entry"
     else
-        echo "       $SUDO_CMD usermod -aG $DISPATCHER_GROUP \$USER"
+        echo "       $SUDO_CMD usermod -aG $EXEC_GROUP \$USER"
         echo "       # log out and back in for the group to take effect"
     fi
     echo ""
     echo "  4. Accept pairing requests from agents:"
-    echo "       $SUDO_CMD dispatcher pairing-mode"
+    echo "       $SUDO_CMD ctrl-exec pairing-mode"
     echo ""
     echo "  5. Run a script on a paired host:"
-    echo "       dispatcher run <host> <script>"
-    echo "       dispatcher ping <host>"
+    echo "       ctrl-exec run <host> <script>"
+    echo "       ctrl-exec ping <host>"
     echo ""
     echo "     Note: the agent must be running on the target host before"
     echo "     ping or run will succeed. On the agent host:"
-    echo "       $SUDO_CMD systemctl start dispatcher-agent   # systemd"
-    echo "       /etc/init.d/dispatcher-agent start      # procd (OpenWrt)"
-    echo "       $SUDO_CMD dispatcher-agent serve             # manual / no init"
+    echo "       $SUDO_CMD systemctl start ctrl-exec-agent   # systemd"
+    echo "       /etc/init.d/ctrl-exec-agent start      # procd (OpenWrt)"
+    echo "       $SUDO_CMD ctrl-exec-agent serve             # manual / no init"
     echo ""
     echo "================================================================"
 }
@@ -786,12 +786,12 @@ print_next_steps_api() {
        $SUDO_CMD systemctl start  $API_SERVICE"
     else
         svc_note="  1. Start the API server:
-       dispatcher-api"
+       ctrl-exec-api"
     fi
 
     echo ""
     echo "================================================================"
-    echo " dispatcher-api installed"
+    echo " ctrl-exec-api installed"
     echo "================================================================"
     echo ""
     echo "Next steps:"
@@ -808,7 +808,7 @@ print_next_steps_api() {
     echo ""
     echo "       curl -s http://localhost:7445/discovery | python3 -m json.tool"
     echo ""
-    echo "  Note: To enable TLS, set api_cert and api_key in dispatcher.conf"
+    echo "  Note: To enable TLS, set api_cert and api_key in ctrl-exec.conf"
     echo "        and restart the service."
     echo ""
     echo "================================================================"
@@ -823,16 +823,16 @@ DO_RUN_TESTS=false
 for arg in "$@"; do
     case "$arg" in
         --agent)      ROLE="agent" ;;
-        --dispatcher) ROLE="dispatcher" ;;
+        --ctrl-exec) ROLE="ctrl-exec" ;;
         --api)        ROLE="api" ;;
         --uninstall)  DO_UNINSTALL=true ;;
         --run-tests)  DO_RUN_TESTS=true ;;
         --help|-h)
-            echo "Usage: $0 --agent | --dispatcher | --api | --uninstall [--run-tests]"
+            echo "Usage: $0 --agent | --ctrl-exec | --api | --uninstall [--run-tests]"
             echo ""
             echo "  --agent        Install the agent service (on remote hosts)"
-            echo "  --dispatcher   Install the dispatcher CLI (on control host)"
-            echo "  --api          Install the API server (on control host, after --dispatcher)"
+            echo "  --ctrl-exec   Install the ctrl-exec CLI (on control host)"
+            echo "  --api          Install the API server (on control host, after --ctrl-exec)"
             echo "  --uninstall    Remove installed files (config, certs, and agent registry preserved)"
             echo "  --run-tests    Run test suite from source directory after installation"
             echo ""
@@ -869,7 +869,7 @@ if [[ "$DO_RUN_TESTS" == true && -z "$ROLE" ]]; then
     exit 0
 fi
 
-[[ -n "$ROLE" ]] || die "Role must be specified. Use --agent, --dispatcher, --api, --uninstall, or --run-tests. See --help."
+[[ -n "$ROLE" ]] || die "Role must be specified. Use --agent, --ctrl-exec, --api, --uninstall, or --run-tests. See --help."
 
 check_openssl
 check_perl_modules "$ROLE"
@@ -880,14 +880,14 @@ case "$ROLE" in
         install_agent
         print_next_steps_agent
         ;;
-    dispatcher)
-        install_dispatcher
-        print_next_steps_dispatcher
+    ctrl-exec)
+        install_ctrl_exec
+        print_next_steps_ctrl_exec
         ;;
     api)
-        # API requires the dispatcher role to already be installed
-        if [[ ! -f "$DISPATCHER_CONF_DIR/dispatcher.conf" ]]; then
-            die "--api requires --dispatcher to be installed first."
+        # API requires the ctrl-exec role to already be installed
+        if [[ ! -f "$EXEC_CONF_DIR/ctrl-exec.conf" ]]; then
+            die "--api requires --ctrl-exec to be installed first."
         fi
         install_api
         print_next_steps_api

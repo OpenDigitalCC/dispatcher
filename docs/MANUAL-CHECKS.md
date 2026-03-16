@@ -1,10 +1,10 @@
 ---
-title: Dispatcher - Manual Verification Checks
+title: ctrl-exec - Manual Verification Checks
 subtitle: Checks that cannot be automated and should be run after install or significant changes
 brand: odcc
 ---
 
-# Dispatcher - Manual Verification Checks
+# ctrl-exec - Manual Verification Checks
 
 Some behaviours cannot be verified by the automated test suite. These checks
 should be performed after initial installation, after upgrades, and after any

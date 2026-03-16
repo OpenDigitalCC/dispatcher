@@ -1,10 +1,10 @@
 ---
-title: Dispatcher - Project Background Notes
+title: ctrl-exec - Project Background Notes
 subtitle: Problem context, design decisions, and current state
 brand: odcc
 ---
 
-# Dispatcher - Project Background Notes
+# ctrl-exec - Project Background Notes
 
 
 ## The Problem
@@ -80,7 +80,7 @@ remote procedure call - a specific, named operation, with known arguments, on a
 known host, authorised by a known identity, logged completely.
 
 
-## What Dispatcher Is
+## What ctrl-exec Is
 
 A purpose-built mTLS-authenticated RPC system for script execution. Each agent
 exposes exactly the scripts the operator has allowed. Nothing else is reachable.
@@ -151,7 +151,7 @@ Fully functional for the primary use case. The system has:
 
 Designed for users who specialises in managed hosting of open source applications on
 European infrastructure. The ethos is: use open tools, keep things simple,
-maintain full control of the stack. Dispatcher reflects that - it is a small,
+maintain full control of the stack. ctrl-exec reflects that - it is a small,
 focused tool built from standard Perl and system packages, doing exactly one
 thing well, with no external dependencies and no unnecessary complexity.
 

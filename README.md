@@ -1,12 +1,12 @@
 ---
-title: Dispatcher
+title: ctrl-exec
 subtitle: Perl machine-to-machine remote script execution over mTLS
 brand: odcc
 ---
 
-# Dispatcher
+# ctrl-exec
 
-A Perl machine-to-machine remote script execution system. The dispatcher host
+A Perl machine-to-machine remote script execution system. The ctrl-exec host
 runs scripts on remote agent hosts via HTTPS with mutual certificate
 authentication. No SSH involved; agents expose only an explicit allowlist of
 permitted scripts.
@@ -18,28 +18,28 @@ guarantees and a minimal attack surface.
 
 ## How It Works
 
-dispatcher (control host)
+ctrl-exec (control host)
 : CLI tool and optional HTTP API. Connects to agents, sends signed requests,
   collects results. Manages the private CA, agent registry, and cert lifecycle.
   The API server exposes run, ping, discovery, and status endpoints with an
   OpenAPI spec (static and live-generated).
 
-dispatcher-agent (remote hosts)
+ctrl-exec-agent (remote hosts)
 : mTLS HTTPS server on port 7443. Executes only scripts named in a per-host
   allowlist. No shell - arguments are passed directly to the OS. Reloads
   config on SIGHUP without dropping connections.
 
 pairing
 : One-time certificate exchange. The agent generates a key and CSR, connects
-  to the dispatcher on port 7444, and waits for operator approval. The
-  dispatcher signs the CSR with its private CA and returns the cert. After
+  to the ctrl-exec on port 7444, and waits for operator approval. The
+  ctrl-exec signs the CSR with its private CA and returns the cert. After
   pairing, all traffic uses mTLS on port 7443.
 
 auth hook
 : An optional executable called before every `run` and `ping`. Receives full
   request context including token, username, script, args, and source IP.
   Tokens are forwarded through the pipeline so downstream components can
-  independently verify authority. The hook is the policy engine - dispatcher
+  independently verify authority. The hook is the policy engine - ctrl-exec
   has no built-in ACLs.
 
 automatic cert renewal
@@ -50,10 +50,10 @@ automatic cert renewal
 
 ## Ecosystem
 
-[dispatcher-plugins](https://github.com/OpenDigitalCC/dispatcher-plugins)
+[ctrl-exec-plugins](https://github.com/OpenDigitalCC/ctrl-exec-plugins)
 : A companion repository providing ready-built plugins across three
   categories: management interfaces for the HTTP API and CLI, agent scripts
-  covering common infrastructure tasks, and auth hooks integrating dispatcher
+  covering common infrastructure tasks, and auth hooks integrating ctrl-exec
   with external identity systems. Each plugin is self-contained.
 
 
@@ -68,7 +68,7 @@ automatic cert renewal
   codes, OpenAPI spec endpoints, and the run result status store.
 
 `DOCKER.md`
-: Deploying dispatcher and agents in Alpine Docker containers, including
+: Deploying ctrl-exec and agents in Alpine Docker containers, including
   entrypoint patterns, volume mounts, and the pairing workflow in Docker.
 
 `SECURITY.md`
@@ -82,36 +82,36 @@ automatic cert renewal
 
 ## Quick Start
 
-Full detail is in `INSTALL.md`. The sequence below gets dispatcher running
+Full detail is in `INSTALL.md`. The sequence below gets ctrl-exec running
 between two hosts in about ten minutes.
 
-### 1. Dispatcher host
+### 1. ctrl-exec host
 
-Install and initialise the CA and dispatcher identity:
+Install and initialise the CA and ctrl-exec identity:
 
 ```bash
-sudo ./install.sh --dispatcher
-sudo dispatcher setup-ca
-sudo dispatcher setup-dispatcher
-sudo usermod -aG dispatcher $USER
+sudo ./install.sh --ctrl-exec
+sudo ctrl-exec setup-ca
+sudo ctrl-exec setup-ctrl-exec
+sudo usermod -aG ctrl-exec $USER
 # Log out and back in for group membership to take effect
 ```
 
-Configure the auth hook. The dispatcher requires an auth hook to authorise
+Configure the auth hook. The ctrl-exec requires an auth hook to authorise
 `run` and `ping` requests. For an isolated network the simplest policy is
 allow-all - replace with real logic when deploying to production:
 
 ```bash
-sudo cp /usr/local/lib/dispatcher/auth-hook.example /etc/dispatcher/auth-hook
-sudo chmod 755 /etc/dispatcher/auth-hook
+sudo cp /usr/local/lib/ctrl-exec/auth-hook.example /etc/ctrl-exec/auth-hook
+sudo chmod 755 /etc/ctrl-exec/auth-hook
 ```
 
-Edit `/etc/dispatcher/auth-hook` and uncomment `exit 0` near the end of the
+Edit `/etc/ctrl-exec/auth-hook` and uncomment `exit 0` near the end of the
 file (the "Allow everything" example). The last executable line must be
 `exit 0`.
 
 If you prefer not to use a hook, remove or comment out the `auth_hook` line
-in `/etc/dispatcher/dispatcher.conf` and set:
+in `/etc/ctrl-exec/ctrl-exec.conf` and set:
 
 ```ini
 api_auth_default = allow
@@ -125,7 +125,7 @@ Install the agent:
 sudo ./install.sh --agent
 ```
 
-Edit `/etc/dispatcher-agent/scripts.conf` to add the scripts the agent is
+Edit `/etc/ctrl-exec-agent/scripts.conf` to add the scripts the agent is
 permitted to run. `logger` is available on every platform and requires no
 additional setup:
 
@@ -136,28 +136,28 @@ logger = /usr/bin/logger
 Start the agent:
 
 ```bash
-sudo systemctl enable dispatcher-agent
-sudo systemctl start dispatcher-agent
+sudo systemctl enable ctrl-exec-agent
+sudo systemctl start ctrl-exec-agent
 ```
 
 Verify the agent configuration is valid before pairing:
 
 ```bash
-sudo dispatcher-agent ping-self
+sudo ctrl-exec-agent ping-self
 ```
 
 ### 3. Pair the agent
 
-On the dispatcher host, start pairing mode:
+On the ctrl-exec host, start pairing mode:
 
 ```bash
-sudo dispatcher pairing-mode
+sudo ctrl-exec pairing-mode
 ```
 
 On the agent host, request pairing:
 
 ```bash
-sudo dispatcher-agent request-pairing --dispatcher <dispatcher-hostname>
+sudo ctrl-exec-agent request-pairing --ctrl-exec <ctrl-exec-hostname>
 ```
 
 A pairing code is displayed on both hosts. Confirm they match, then type `a`
@@ -167,19 +167,19 @@ and is ready.
 ### 4. Verify
 
 ```bash
-dispatcher ping <agent-hostname>
-dispatcher run <agent-hostname> --script logger -- -t test "hello from dispatcher"
+ctrl-exec ping <agent-hostname>
+ctrl-exec run <agent-hostname> --script logger -- -t test "hello from ctrl-exec"
 ```
 
 ### Optional: API server
 
-The API server exposes dispatcher over HTTP on `localhost:7445`. Install and
-start it on the dispatcher host:
+The API server exposes ctrl-exec over HTTP on `localhost:7445`. Install and
+start it on the ctrl-exec host:
 
 ```bash
 sudo ./install.sh --api
-sudo systemctl enable dispatcher-api
-sudo systemctl start dispatcher-api
+sudo systemctl enable ctrl-exec-api
+sudo systemctl start ctrl-exec-api
 curl -s http://localhost:7445/health
 ```
 
@@ -206,5 +206,5 @@ Released under the GNU Affero General Public License v3.0 (AGPL-3.0-only).
 See `LICENCE` for the full text.
 
 The AGPL extends the GPL copyleft requirement to cover network use: if you
-run a modified version of dispatcher as a service, you must make the modified
+run a modified version of ctrl-exec as a service, you must make the modified
 source available to users of that service.

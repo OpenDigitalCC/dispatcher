@@ -15,7 +15,7 @@ use Exec::Registry qw();
 
 my $RUNS_DIR     = '/var/lib/ctrl-exec/runs';
 my $RUNS_TTL     = 86400;    # seconds; results older than this are purged
-my $OPENAPI_PATH = '/usr/local/lib/ctrl-exec/Dispatcher/openapi.json';
+my $OPENAPI_PATH = '/usr/local/lib/ctrl-exec/Exec/openapi.json';
 my $VERSION_FILE = '/usr/local/lib/ctrl-exec/VERSION';
 
 my $VERSION = do {
@@ -54,7 +54,7 @@ sub run {
         TLS      => ($use_tls ? 'yes' : 'no'),
     });
 
-    print "Dispatcher API listening on $bind:$port"
+    print "ctrl-exec API listening on $bind:$port"
         . ($use_tls ? " (TLS)" : " (plain HTTP)") . "\n";
 
     $SIG{INT} = $SIG{TERM} = sub {

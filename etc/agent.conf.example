@@ -11,7 +11,7 @@ ca   = /etc/ctrl-exec-agent/ca.crt
 # and the port used by ctrl-exec pairing-mode on the ctrl-exec host.
 # pairing_port = 7444
 
-# Dispatcher certificate serial (written automatically at pairing time).
+# ctrl-exec certificate serial (written automatically at pairing time).
 # Path to a file containing the trusted ctrl-exec cert serial number (hex).
 # The /capabilities endpoint rejects any peer whose cert serial does not match.
 # This restricts allowlist enumeration to the genuine ctrl-exec only,
