@@ -7,8 +7,8 @@
 #       Build ctrl-exec-<version>.tar.gz from the current source tree.
 #       Bumps VERSION, creates git tag, generates sbom.json.
 #
-#   ./make-release.sh --brand xi [--from ctrl-exec-<version>.tar.gz]
-#       Repackage an existing ctrl-exec tarball as xi-exec-<version>.tar.gz.
+#   ./make-release.sh --brand <name> [--from ctrl-exec-<version>.tar.gz]
+#       Repackage an existing ctrl-exec tarball as <name>-exec-<version>.tar.gz.
 #       Does not touch git, does not bump VERSION, does not retag.
 #       If --from is omitted, the most recent ctrl-exec-*.tar.gz is used.
 #
@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
         --auto|--force)
             AUTO=1; shift ;;
         --brand)
-            [[ -n "${2:-}" ]] || die "--brand requires a value (e.g. --brand xi)"
+            [[ -n "${2:-}" ]] || die "--brand requires a value (e.g. --brand acme)"
             BRAND="$2"; shift 2 ;;
         --from)
             [[ -n "${2:-}" ]] || die "--from requires a tarball path"
@@ -258,7 +258,7 @@ PYEOF
     echo "  Checksum:  ${BRAND_TARBALL}.sha256"
     echo "  SBOM:      $BRAND_SBOM"
     echo ""
-    echo "  Deliver $BRAND_TARBALL and $BRAND_SBOM to Xi Software."
+    echo "  Deliver $BRAND_TARBALL and $BRAND_SBOM to the licensed distributor."
     echo "  Do not distribute the ctrl-exec source tarball."
     echo ""
     echo "================================================================"
@@ -471,9 +471,10 @@ cp sbom.json "$STAGE/sbom.json"
 info "Creating tarball: $TARBALL"
 
 while IFS= read -r old; do
-    [[ "$old" == "./$TARBALL" ]] && continue
-    rm -f "$old" "${old%.tar.gz}.sha256"
-    info "Removed previous tarball: $old"
+    old_base="${old#./}"
+    [[ "$old_base" == "$TARBALL" ]] && continue
+    rm -f "$old_base" "${old_base%.tar.gz}.tar.gz.sha256"
+    info "Removed previous tarball: $old_base"
 done < <(find . -maxdepth 1 -name 'ctrl-exec-*.tar.gz' | sort)
 
 tar -czf "$TARBALL" -C "$STAGE_DIR" "$RELEASE_NAME"
@@ -508,8 +509,8 @@ echo "  SBOM:      sbom.json"
 echo "  Tag:       $TAG  ($COMMIT)"
 echo "  Next ver:  $NEXT_VERSION"
 echo ""
-echo "  To build the xi-exec package from this release:"
-echo "    ./make-release.sh --brand xi --from $TARBALL"
+echo "  To build a branded package from this release:"
+echo "    ./make-release.sh --brand <name> --from $TARBALL"
 echo ""
 
 if [[ "$AUTO" -eq 1 ]]; then
