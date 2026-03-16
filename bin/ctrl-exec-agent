@@ -31,7 +31,7 @@ sub main {
     GetOptions(
         'config=s'      => \$CONFIG_PATH,
         'allowlist=s'   => \$ALLOWLIST_PATH,
-        'ctrl-exec=s'  => \$opts{'ctrl-exec'},
+        'dispatcher=s' => \$opts{dispatcher},
         'port=i'        => \$opts{port},
         'background'    => \$opts{background},
         'timeout=i'     => \$opts{timeout},
@@ -192,8 +192,8 @@ sub mode_serve {
 sub mode_request_pairing {
     my ($opts) = @_;
 
-    my $ctrl_exec_host  = $opts->{'ctrl-exec'}
-        or die "--ctrl-exec <host> required for request-pairing\n";
+    my $ctrl_exec_host  = $opts->{dispatcher}
+        or die "--dispatcher <host> required for request-pairing\n";
     my $background  = $opts->{background} // 0;
     my $timeout     = $opts->{timeout}    // 30;
 
@@ -806,8 +806,8 @@ Usage: ctrl-exec-agent <mode> [options]
 
 Modes:
   serve                          Start the agent server (default)
-  request-pairing --ctrl-exec <host>
-                                 Request pairing with a ctrl-exec host
+  request-pairing --dispatcher <host>
+                                 Request pairing with the ctrl-exec dispatcher host
   pairing-status                 Show pairing/cert status
   self-check                     Validate local config and certs
   self-ping                      Connect to self on port 7443, verify mTLS and pairing
