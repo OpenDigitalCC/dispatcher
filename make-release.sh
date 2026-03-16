@@ -473,7 +473,9 @@ info "Creating tarball: $TARBALL"
 while IFS= read -r old; do
     old_base="${old#./}"
     [[ "$old_base" == "$TARBALL" ]] && continue
-    rm -f "$old_base" "${old_base%.tar.gz}.tar.gz.sha256"
+    old_sha="${old_base%.tar.gz}.tar.gz.sha256"
+    rm -f "$old_base" "$old_sha"
+    git rm --cached --quiet --ignore-unmatch "$old_base" "$old_sha" 2>/dev/null || true
     info "Removed previous tarball: $old_base"
 done < <(find . -maxdepth 1 -name 'ctrl-exec-*.tar.gz' | sort)
 
@@ -515,6 +517,7 @@ echo ""
 
 if [[ "$AUTO" -eq 1 ]]; then
     info "Auto mode: committing and pushing..."
+    git add -u                             # stages any deletions from git rm above
     git add sbom.json VERSION
     git add -f "$TARBALL" "${TARBALL}.sha256"
     git commit -m "release: $VERSION"
@@ -525,6 +528,7 @@ else
     echo "Next steps:"
     echo ""
     echo "  1. Review sbom.json and commit everything for the release:"
+    echo "       git add -u"
     echo "       git add sbom.json VERSION"
     echo "       git add -f $TARBALL ${TARBALL}.sha256"
     echo "       git commit -m 'release: $VERSION'"
