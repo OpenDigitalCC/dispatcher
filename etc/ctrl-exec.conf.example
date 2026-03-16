@@ -1,0 +1,50 @@
+# ctrl-exec.conf - Dispatcher control host configuration
+
+# mTLS certificate material (required)
+cert = /etc/ctrl-exec/ctrl-exec.crt
+key  = /etc/ctrl-exec/ctrl-exec.key
+ca   = /etc/ctrl-exec/ca.crt
+
+# Auth hook - called before every run and ping request.
+# The default hook authorises everything. Replace with real logic for
+# production use. Comment out to disable auth entirely.
+auth_hook = /etc/ctrl-exec/auth-hook
+
+# Read timeout in seconds: maximum time to wait for a script to complete (default: 60).
+# Scripts that exceed this will be reported as a timeout failure.
+# read_timeout = 60
+
+# API server port (default: 7445).
+# api_port = 7445
+
+# API server TLS (optional - plain HTTP if not set).
+# api_cert = /etc/ctrl-exec/ctrl-exec.crt
+# api_key  = /etc/ctrl-exec/ctrl-exec.key
+
+# Dispatcher certificate rotation
+#
+# cert_days: lifetime in days for new and renewed certs - both agent certs signed
+#   at pairing/renewal and the ctrl-exec's own cert (default: 365).
+# cert_renewal_days: begin renewal this many days before expiry (default: 90).
+#   With cert_days = 365 and cert_renewal_days = 90, renewal begins at day 275.
+# cert_overlap_days: how long to keep broadcasting after rotation before marking
+#   unreachable agents as stale and requiring re-pair (default: 30).
+# cert_check_interval: seconds between internal expiry checks (default: 14400 = 4h).
+#   Reduce for testing. The check is lightweight - a cert read and date comparison.
+#
+# cert_days          = 365
+# cert_renewal_days  = 90
+# cert_overlap_days  = 30
+# cert_check_interval = 14400
+
+# API bind address (default: 127.0.0.1 - localhost only).
+# Set to 0.0.0.0 to accept connections on all interfaces, or specify a
+# particular interface address. Only change this if external clients need
+# direct access; prefer a reverse proxy for internet-facing deployments.
+# api_bind = 127.0.0.1
+
+# Default auth behaviour when no auth_hook is configured.
+# 'deny'  - all requests are rejected unless a hook is configured (default, recommended).
+# 'allow' - all requests are authorised without a hook (suitable for isolated networks).
+# When a hook is configured this setting has no effect.
+api_auth_default = deny

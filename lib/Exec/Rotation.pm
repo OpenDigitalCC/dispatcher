@@ -1,0 +1,434 @@
+package Exec::Rotation;
+
+use strict;
+use warnings;
+use JSON        qw(encode_json decode_json);
+use File::Path  qw(make_path);
+use File::Temp  qw(tempfile);
+use File::Basename qw(dirname);
+use POSIX       qw(strftime);
+use Carp        qw(croak);
+
+use Exec::CA       qw();
+use Exec::Registry qw();
+use Exec::Engine   qw();
+use Exec::Log      qw();
+
+
+my $ROTATION_FILE  = '/var/lib/ctrl-exec/rotation.json';
+my $CA_DIR         = '/etc/ctrl-exec';
+
+# Default configuration values - overridden by ctrl-exec.conf
+my $DEFAULT_CERT_DAYS       = 825;   # ctrl-exec cert lifetime (matches CA.pm default)
+my $DEFAULT_RENEWAL_DAYS    = 90;    # renew when this many days remain
+my $DEFAULT_OVERLAP_DAYS    = 30;    # keep old serial trusted this long after rotation
+my $DEFAULT_CHECK_INTERVAL  = 14400; # seconds between internal expiry checks (4 hours)
+
+
+# Check whether the ctrl-exec cert needs renewal and rotate if so.
+# Called on startup and periodically by the internal check loop.
+#
+# Required opts:
+#   config => \%config
+#
+# Returns:
+#   { rotated => 0 }                         - no action needed
+#   { rotated => 1, serial => $hex, ... }    - rotation performed
+#   { rotated => 0, error => $str }          - check failed non-fatally
+sub check_and_rotate {
+    my (%opts) = @_;
+    my $config = $opts{config} or croak "config required";
+
+    my $renewal_days = $config->{cert_renewal_days} // $DEFAULT_RENEWAL_DAYS;
+    my $ca_dir       = $config->{ca_dir}            // $CA_DIR;
+    my $disp_crt     = "$ca_dir/ctrl-exec.crt";
+
+    unless (-f $disp_crt) {
+        return { rotated => 0, error => "ctrl-exec cert not found at $disp_crt" };
+    }
+
+    my $days_left = _cert_days_remaining($disp_crt);
+    unless (defined $days_left) {
+        return { rotated => 0, error => "cannot read cert expiry from $disp_crt" };
+    }
+
+    Exec::Log::log_action('INFO', {
+        ACTION    => 'cert-check',
+        DAYS_LEFT => $days_left,
+        THRESHOLD => $renewal_days,
+    });
+
+    if ($days_left > $renewal_days) {
+        return { rotated => 0, days_left => $days_left };
+    }
+
+    # Within renewal window - rotate
+    Exec::Log::log_action('INFO', {
+        ACTION    => 'cert-renewal-start',
+        DAYS_LEFT => $days_left,
+    });
+
+    return _do_rotation(config => $config);
+}
+
+# Perform rotation unconditionally - called by 'ctrl-exec rotate-cert'
+# and by check_and_rotate when the threshold is reached.
+#
+# Required opts:
+#   config => \%config
+sub rotate {
+    my (%opts) = @_;
+    my $config = $opts{config} or croak "config required";
+    return _do_rotation(config => $config);
+}
+
+# Return the current rotation state, or undef if no rotation has occurred.
+sub load_state {
+    my (%opts) = @_;
+    my $path = $opts{path} // $ROTATION_FILE;
+    return undef unless -f $path;
+    my $data = eval { decode_json(_slurp($path)) };
+    if ($@) {
+        Exec::Log::log_action('ERR', {
+            ACTION => 'rotation-state-corrupt',
+            PATH   => $path,
+            ERROR  => $@,
+            REASON => 'JSON parse failed - rotation state unreadable',
+        });
+        return undef;
+    }
+    return $data;
+}
+
+# Mark any pending agents whose overlap window has expired as stale.
+# Called on startup and after each broadcast attempt.
+sub expire_stale_agents {
+    my (%opts) = @_;
+    my $config = $opts{config} or croak "config required";
+
+    my $state = load_state(path => $config->{rotation_file});
+    return unless $state && $state->{overlap_expires};
+
+    my $now     = time();
+    my $expires = _parse_iso8601($state->{overlap_expires});
+    return unless defined $expires && $now > $expires;
+
+    my $agents = Exec::Registry::list_agents(
+        registry_dir => $config->{registry_dir},
+    );
+    for my $agent (@$agents) {
+        next unless ($agent->{serial_status} // '') eq 'pending';
+        Exec::Registry::update_agent_serial_status(
+            hostname     => $agent->{hostname},
+            status       => 'stale',
+            registry_dir => $config->{registry_dir},
+        );
+        Exec::Log::log_action('WARNING', {
+            ACTION   => 'serial-stale',
+            AGENT    => $agent->{hostname},
+            REASON   => 'overlap window expired without confirmation',
+        });
+    }
+}
+
+# Broadcast the current ctrl-exec serial to all pending agents.
+# Attempts a run of 'update-ctrl-exec-serial' on each pending agent.
+# Updates registry on success. Reports results.
+#
+# Required opts:
+#   config => \%config
+#
+# Returns arrayref of { hostname, status => 'ok'|'failed', error? }
+sub broadcast_serial {
+    my (%opts) = @_;
+    my $config = $opts{config} or croak "config required";
+
+    my $state = load_state(path => $config->{rotation_file});
+    unless ($state && $state->{current_serial}) {
+        return [];
+    }
+
+    my $serial  = $state->{current_serial};
+    my $agents  = Exec::Registry::list_agents(
+        registry_dir => $config->{registry_dir},
+    );
+    my @pending = grep {
+        my $s = $_->{serial_status} // 'unknown';
+        $s eq 'pending' || $s eq 'unknown'
+    } @$agents;
+
+    return [] unless @pending;
+
+    my @hostnames = map { $_->{hostname} } @pending;
+
+    Exec::Log::log_action('INFO', {
+        ACTION  => 'serial-broadcast',
+        HOSTS   => join(',', @hostnames),
+        SERIAL  => $serial,
+    });
+
+    # Run update-ctrl-exec-serial on all pending agents in parallel
+    my $results = eval {
+        Exec::Engine::dispatch_all(
+            hosts  => \@hostnames,
+            script => 'update-ctrl-exec-serial',
+            args   => [$serial],
+            config => $config,
+            reqid  => Exec::Engine::gen_reqid(),
+        );
+    };
+    if ($@) {
+        Exec::Log::log_action('ERR', {
+            ACTION => 'serial-broadcast-error',
+            ERROR  => $@,
+        });
+        return [];
+    }
+
+    my @report;
+    for my $r (@$results) {
+        my $host = $r->{host};
+        if (($r->{exit} // -1) == 0) {
+            Exec::Registry::update_agent_serial_status(
+                hostname         => $host,
+                status           => 'current',
+                serial           => $serial,
+                serial_confirmed => _now_iso8601(),
+                registry_dir     => $config->{registry_dir},
+            );
+            push @report, { hostname => $host, status => 'ok' };
+            Exec::Log::log_action('INFO', {
+                ACTION => 'serial-confirmed',
+                AGENT  => $host,
+            });
+        }
+        else {
+            my $err = $r->{error} // "exit ${\($r->{exit} // -1)}";
+            push @report, { hostname => $host, status => 'failed', error => $err };
+            Exec::Log::log_action('WARNING', {
+                ACTION => 'serial-broadcast-fail',
+                AGENT  => $host,
+                ERROR  => $err,
+            });
+        }
+    }
+
+    return \@report;
+}
+
+# Run the internal renewal check loop. Blocks indefinitely.
+# Called from the ctrl-exec serve loop in a separate process or thread.
+# In practice called via a forked child in bin/ctrl-exec.
+#
+# Required opts:
+#   config => \%config
+sub run_check_loop {
+    my (%opts) = @_;
+    my $config   = $opts{config} or croak "config required";
+    my $interval = $config->{cert_check_interval} // $DEFAULT_CHECK_INTERVAL;
+
+    while (1) {
+        sleep $interval;
+
+        eval { expire_stale_agents(config => $config) };
+        Exec::Log::log_action('WARNING', { ACTION => 'expire-stale-error', ERROR => $@ })
+            if $@;
+
+        my $result = eval { check_and_rotate(config => $config) };
+        if ($@) {
+            Exec::Log::log_action('WARNING', {
+                ACTION => 'cert-check-error',
+                ERROR  => $@,
+            });
+            next;
+        }
+
+        if ($result->{rotated}) {
+            # Broadcast immediately after rotation
+            eval { broadcast_serial(config => $config) };
+            Exec::Log::log_action('WARNING', { ACTION => 'broadcast-error', ERROR => $@ })
+                if $@;
+        }
+        elsif ($result->{error}) {
+            Exec::Log::log_action('WARNING', {
+                ACTION => 'cert-check-warn',
+                ERROR  => $result->{error},
+            });
+        }
+        else {
+            # No rotation needed - retry any pending agents on each check
+            my $agents   = Exec::Registry::list_agents(
+                registry_dir => $config->{registry_dir},
+            );
+            my @pending  = grep { ($_->{serial_status} // '') eq 'pending' } @$agents;
+            if (@pending) {
+                eval { broadcast_serial(config => $config) };
+                Exec::Log::log_action('WARNING', { ACTION => 'broadcast-retry-error', ERROR => $@ })
+                    if $@;
+            }
+        }
+    }
+}
+
+# --- private ---
+
+sub _do_rotation {
+    my (%opts) = @_;
+    my $config      = $opts{config};
+    my $ca_dir      = $config->{ca_dir}         // $CA_DIR;
+    my $cert_days   = $config->{cert_days}       // $DEFAULT_CERT_DAYS;
+    my $overlap_days = $config->{cert_overlap_days} // $DEFAULT_OVERLAP_DAYS;
+    my $disp_crt    = "$ca_dir/ctrl-exec.crt";
+
+    # Read old serial before overwriting
+    my $old_serial = '';
+    if (-f $disp_crt) {
+        $old_serial = _read_cert_serial($disp_crt) // '';
+    }
+
+    # Generate new cert - force overwrites existing key and cert files.
+    # Note: the running ctrl-exec process holds the old key/cert in memory
+    # for active mTLS connections. It will use the new files on next restart.
+    # In normal operation this is acceptable - the ctrl-exec binary is
+    # typically short-lived (CLI invocations). For long-running pairing-mode
+    # processes, schedule a restart after the broadcast confirms all agents
+    # have received the new serial.
+    eval {
+        Exec::CA::generate_dispatcher_cert(
+            ca_dir => $ca_dir,
+            days   => $cert_days,
+            force  => 1,
+        );
+    };
+    if ($@) {
+        Exec::Log::log_action('ERR', {
+            ACTION => 'cert-rotation-fail',
+            ERROR  => $@,
+        });
+        return { rotated => 0, error => "cert generation failed: $@" };
+    }
+
+    my $new_serial = _read_cert_serial($disp_crt);
+    unless (defined $new_serial) {
+        return { rotated => 0, error => "cannot read new cert serial after rotation" };
+    }
+
+    my $now          = _now_iso8601();
+    my $overlap_secs = $overlap_days * 86400;
+    my $overlap_exp  = strftime('%Y-%m-%dT%H:%M:%SZ',
+                          gmtime(time() + $overlap_secs));
+
+    # Persist rotation state
+    my $rotation_file = $config->{rotation_file} // $ROTATION_FILE;
+    _write_atomic($rotation_file, encode_json({
+        current_serial   => $new_serial,
+        previous_serial  => $old_serial,
+        rotated_at       => $now,
+        overlap_expires  => $overlap_exp,
+        overlap_days     => $overlap_days,
+    }));
+
+    # Mark all agents as pending - they need to receive the new serial.
+    # Note on the overlap window: it governs how long the ctrl-exec keeps
+    # attempting to broadcast the new serial before declaring an agent stale.
+    # It does NOT provide a grace period for capabilities: once the ctrl-exec
+    # starts using the new cert, agents that still hold the old serial will
+    # reject /capabilities from it (serial mismatch). Run and ping are
+    # unaffected - those endpoints do not check the ctrl-exec serial.
+    # The expected rotation sequence is: rotate cert → broadcast serial →
+    # agents reload → capabilities restored. The overlap window only matters
+    # for agents that were offline during the broadcast.
+    my $agents = Exec::Registry::list_agents(
+        registry_dir => $config->{registry_dir},
+    );
+    for my $agent (@$agents) {
+        Exec::Registry::update_agent_serial_status(
+            hostname         => $agent->{hostname},
+            status           => 'pending',
+            serial_broadcast => $now,
+            registry_dir     => $config->{registry_dir},
+        );
+    }
+
+    Exec::Log::log_action('INFO', {
+        ACTION          => 'cert-rotated',
+        OLD_SERIAL      => $old_serial,
+        NEW_SERIAL      => $new_serial,
+        OVERLAP_EXPIRES => $overlap_exp,
+        AGENTS          => scalar @$agents,
+    });
+
+    return {
+        rotated          => 1,
+        serial           => $new_serial,
+        old_serial       => $old_serial,
+        overlap_expires  => $overlap_exp,
+        agents_pending   => scalar @$agents,
+    };
+}
+
+sub _read_cert_serial {
+    my ($cert_path) = @_;
+    my $out = `openssl x509 -noout -serial -in \Q$cert_path\E 2>/dev/null`;
+    return unless defined $out && $out =~ /serial=([0-9A-Fa-f]+)/;
+    return lc $1;
+}
+
+sub _cert_days_remaining {
+    my ($cert_path) = @_;
+    my $out = `openssl x509 -noout -enddate -in \Q$cert_path\E 2>/dev/null`;
+    return unless defined $out && $out =~ /notAfter=(.+)/;
+    my $date_str = $1;
+    chomp $date_str;
+
+    # Parse openssl date: "Mon DD HH:MM:SS YYYY GMT"
+    my %months = qw(Jan 0 Feb 1 Mar 2 Apr 3 May 4 Jun 5
+                    Jul 6 Aug 7 Sep 8 Oct 9 Nov 10 Dec 11);
+    if ($date_str =~ /(\w+)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d{4})\s+GMT/) {
+        my ($mon, $day, $h, $m, $s, $yr) = ($1, $2, $3, $4, $5, $6);
+        return unless exists $months{$mon};
+        # Use timegm (not mktime) - the cert date is UTC/GMT and mktime
+        # interprets its arguments as local time, producing a wrong result
+        # on hosts not running in UTC.
+        require Time::Local;
+        my $expiry = Time::Local::timegm($s, $m, $h, $day, $months{$mon}, $yr - 1900);
+        my $days   = int(($expiry - time()) / 86400);
+        return $days;
+    }
+    return;
+}
+
+sub _parse_iso8601 {
+    my ($str) = @_;
+    return unless defined $str;
+    if ($str =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/) {
+        require Time::Local;
+        return Time::Local::timegm($6, $5, $4, $3, $2 - 1, $1 - 1900);
+    }
+    return;
+}
+
+sub _now_iso8601 {
+    return strftime('%Y-%m-%dT%H:%M:%SZ', gmtime);
+}
+
+sub _slurp {
+    my ($path) = @_;
+    open my $fh, '<', $path or croak "Cannot read '$path': $!";
+    local $/;
+    return scalar <$fh>;
+}
+
+sub _write_atomic {
+    my ($path, $content) = @_;
+    my $dir = dirname($path);
+    make_path($dir) unless -d $dir;
+    my ($tmp_fh, $tmp_path) = tempfile(DIR => $dir, UNLINK => 0);
+    print $tmp_fh $content;
+    close $tmp_fh;
+    chmod 0640, $tmp_path;
+    rename $tmp_path, $path
+        or do { unlink $tmp_path; croak "Cannot write '$path': $!" };
+}
+
+1;

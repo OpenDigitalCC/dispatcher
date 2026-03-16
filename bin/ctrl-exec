@@ -1,0 +1,577 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+
+use Exec::Log     qw();
+use Exec::Engine  qw();
+use Exec::Auth    qw();
+use Exec::Lock    qw();
+use Exec::Pairing qw();
+use Exec::CA        qw();
+use Exec::Registry  qw();
+use Exec::Rotation  qw();
+use JSON                qw(encode_json decode_json);
+use Getopt::Long        qw(GetOptions :config pass_through);
+use Sys::Hostname       qw(hostname);
+
+our $VERSION = 'UNINSTALLED';
+
+my $CONFIG_PATH = '/etc/ctrl-exec/ctrl-exec.conf';
+my $PAIR_PORT   = 7444;
+
+main() unless caller;
+
+sub main {
+    my %opts;
+
+    GetOptions(
+        'config=s'   => \$CONFIG_PATH,
+        'json'       => \$opts{json},
+        'port=i'     => \$opts{port},
+        'username=s' => \$opts{username},
+        'token=s'    => \$opts{token},
+    ) or die usage();
+
+    my $mode = shift @ARGV // die usage();
+
+    Exec::Log::init('ctrl-exec');
+
+    my %dispatch = (
+        'run'               => \&mode_run,
+        'ping'              => \&mode_ping,
+        'pairing-mode'      => \&mode_pairing,
+        'list-requests'     => \&mode_list_requests,
+        'approve'           => \&mode_approve,
+        'deny'              => \&mode_deny,
+        'setup-ca'          => \&mode_setup_ca,
+        'setup-ctrl-exec'  => \&mode_setup_dispatcher,
+        'list-agents'       => \&mode_list_agents,
+        'list-locks'        => \&mode_list_locks,
+        'rotate-cert'       => \&mode_rotate_cert,
+        'serial-status'     => \&mode_serial_status,
+        'unpair'            => \&mode_unpair,
+    );
+
+    my $handler = $dispatch{$mode}
+        or die "Unknown mode '$mode'\n" . usage();
+
+    $handler->(\%opts, @ARGV);
+}
+
+sub mode_run {
+    my ($opts, @args) = @_;
+    die "Usage: ctrl-exec run <host>[:<port>] [<host>...] <script> [-- <arg>...]\n"
+        unless @args >= 2;
+
+    my ($hosts, $script, $script_args) = _parse_run_args(@args);
+    my $config   = _load_config();
+    my $username = $opts->{username} // $ENV{USER} // '';
+    my $token    = $opts->{token}    // $ENV{ENVEXEC_TOKEN} // '';
+
+    my $auth = Exec::Auth::check(
+        action    => 'run',
+        script    => $script,
+        hosts     => $hosts,
+        args      => $script_args,
+        username  => $username,
+        token     => $token,
+        source_ip => '127.0.0.1',
+        config    => $config,
+        caller    => 'cli',
+    );
+    unless ($auth->{ok}) {
+        _auth_error($auth, $opts->{json});
+        exit 1;
+    }
+
+    my $lock = Exec::Lock::check_available(
+        hosts  => $hosts,
+        script => $script,
+    );
+    unless ($lock->{ok}) {
+        _lock_error($lock, $opts->{json});
+        exit 1;
+    }
+
+    my $results = Exec::Engine::dispatch_all(
+        hosts    => $hosts,
+        script   => $script,
+        args     => $script_args,
+        config   => $config,
+        port     => $opts->{port},
+        username => $username,
+        token    => $token,
+    );
+
+    if ($opts->{json}) {
+        print encode_json({ ok => 1, results => $results }), "\n";
+    }
+    else {
+        _format_run_results($results);
+    }
+
+    my $any_fail = grep { ($_->{exit} // -1) != 0 } @$results;
+    exit($any_fail ? 1 : 0);
+}
+
+sub mode_ping {
+    my ($opts, @hosts) = @_;
+    die "Usage: ctrl-exec ping <host>[:<port>] [<host>...]\n" unless @hosts;
+
+    my $config   = _load_config();
+    my $username = $opts->{username} // $ENV{USER} // '';
+    my $token    = $opts->{token}    // $ENV{ENVEXEC_TOKEN} // '';
+
+    my $auth = Exec::Auth::check(
+        action    => 'ping',
+        hosts     => \@hosts,
+        username  => $username,
+        token     => $token,
+        source_ip => '127.0.0.1',
+        config    => $config,
+        caller    => 'cli',
+    );
+    unless ($auth->{ok}) {
+        _auth_error($auth, $opts->{json});
+        exit 1;
+    }
+
+    my $results = Exec::Engine::ping_all(
+        hosts  => \@hosts,
+        config => $config,
+        port   => $opts->{port},
+    );
+
+    if ($opts->{json}) {
+        print encode_json({ ok => 1, results => $results }), "\n";
+    }
+    else {
+        _format_ping_results($results);
+    }
+}
+
+sub mode_list_agents {
+    my ($opts) = @_;
+    my $agents = eval { Exec::Registry::list_agents() };
+    if ($@) {
+        my $err = $@;
+        if ($err =~ /Permission denied/i) {
+            die "Cannot access agent registry: permission denied.\nTry: sudo ctrl-exec list-agents\n";
+        }
+        die $err;
+    }
+
+    if (!@$agents) {
+        print "No registered agents.\n";
+        return;
+    }
+
+    if ($opts->{json}) {
+        require JSON;
+        print JSON::encode_json($agents), "\n";
+        return;
+    }
+
+    printf "%-30s  %-16s  %-22s  %s\n",
+        'HOSTNAME', 'IP', 'PAIRED', 'CERT EXPIRY';
+    printf "%s\n", '-' x 85;
+    for my $a (@$agents) {
+        printf "%-30s  %-16s  %-22s  %s\n",
+            $a->{hostname} // '?',
+            $a->{ip}       // '?',
+            $a->{paired}   // '?',
+            $a->{expiry}   // '?';
+    }
+}
+
+sub mode_pairing {
+    my ($opts) = @_;
+    my $config = _load_config();
+
+    # Fork a child to run the cert renewal check loop.
+    # The child runs independently - if it exits, pairing mode continues.
+    # The parent reaps it on exit via END block.
+    my $check_pid = fork();
+    if (!defined $check_pid) {
+        warn "Warning: could not fork renewal check loop: $!\n";
+    }
+    elsif ($check_pid == 0) {
+        # Child: run renewal loop indefinitely
+        # Small startup delay so pairing mode is listening first
+        sleep 5;
+        eval {
+            Exec::Rotation::check_and_rotate(config => $config);
+            Exec::Rotation::broadcast_serial(config => $config);
+            Exec::Rotation::expire_stale_agents(config => $config);
+            Exec::Rotation::run_check_loop(config => $config);
+        };
+        exit 0;
+    }
+
+    # Parent: register cleanup
+    $SIG{INT} = $SIG{TERM} = sub {
+        kill 'TERM', $check_pid if $check_pid;
+        Exec::Log::log_action('INFO', { ACTION => 'pairing-mode-stop' });
+        print "\nPairing mode stopped.\n";
+        exit 0;
+    };
+
+    Exec::Pairing::run_pairing_mode(
+        port      => $opts->{port} // $PAIR_PORT,
+        ca_dir    => '/etc/ctrl-exec',
+        cert      => $config->{cert},
+        key       => $config->{key},
+        max_queue => $config->{pairing_max_queue} // 10,
+        log_fn    => sub { Exec::Log::log_action('INFO', $_[0]) },
+    );
+}
+
+sub mode_list_requests {
+    my $requests = Exec::Pairing::list_requests();
+    if (!@$requests) {
+        print "No pending pairing requests.\n";
+        return;
+    }
+    printf "%-10s  %-30s  %-16s  %-8s  %s\n", 'ID', 'HOSTNAME', 'IP', 'CODE', 'RECEIVED';
+    printf "%s\n", '-' x 85;
+    for my $r (@$requests) {
+        printf "%-10s  %-30s  %-16s  %-8s  %s\n",
+            $r->{id}       // '?',
+            $r->{hostname} // '?',
+            $r->{ip}       // '?',
+            $r->{code}     // '??????',
+            $r->{received} // '?';
+    }
+}
+
+sub mode_approve {
+    my ($opts, $reqid) = @_;
+    die "Usage: ctrl-exec approve <reqid>\n" unless $reqid;
+    Exec::Pairing::approve_request(
+        reqid  => $reqid,
+        ca_dir => '/etc/ctrl-exec',
+        log_fn => sub { Exec::Log::log_action('INFO', $_[0]) },
+    );
+}
+
+sub mode_deny {
+    my ($opts, $reqid) = @_;
+    die "Usage: ctrl-exec deny <reqid>\n" unless $reqid;
+    Exec::Pairing::deny_request(
+        reqid  => $reqid,
+        log_fn => sub { Exec::Log::log_action('INFO', $_[0]) },
+    );
+}
+
+sub mode_setup_ca {
+    print "Setting up Dispatcher CA...\n";
+    my $result = Exec::CA::generate_ca(ca_dir => '/etc/ctrl-exec');
+    print "CA created:\n";
+    print "  Key:  $result->{ca_key}\n";
+    print "  Cert: $result->{ca_cert}\n";
+    print "Keep ca.key secure - it never leaves this host.\n";
+}
+
+sub mode_setup_dispatcher {
+    my $ca_dir   = '/etc/ctrl-exec';
+    my $disp_crt = "$ca_dir/ctrl-exec.crt";
+
+    if (-f $disp_crt) {
+        # Replacing the ctrl-exec cert changes its serial. Every paired agent
+        # stores the ctrl-exec serial at pairing time and uses it to restrict
+        # /capabilities. After re-keying, agents will reject /capabilities
+        # from the new ctrl-exec cert until re-paired.
+        my $agents = eval { Exec::Registry::list_agents() } // [];
+        my $count  = scalar @$agents;
+        if ($count > 0) {
+            print "WARNING: Existing ctrl-exec cert found.\n";
+            printf "  %d registered agent%s will require re-pairing after this operation.\n",
+                $count, ($count == 1 ? '' : 's');
+            print "  Operations (run/ping) continue to work until agent certs expire.\n";
+            print "  /capabilities will be rejected by agents until re-paired.\n";
+            print "\nProceed? [y/N]: ";
+            my $answer = <STDIN>;
+            chomp $answer;
+            unless (lc($answer) eq 'y') {
+                print "Aborted.\n";
+                exit 0;
+            }
+        }
+        else {
+            print "Existing ctrl-exec cert found. No registered agents - replacing.\n";
+        }
+    }
+
+    print "Generating ctrl-exec certificate...\n";
+    my $result = Exec::CA::generate_dispatcher_cert(
+        ca_dir => $ca_dir,
+        force  => 1,
+    );
+    print "Dispatcher cert created:\n";
+    print "  Key:  $result->{key}\n";
+    print "  Cert: $result->{cert}\n";
+    print "Run 'ctrl-exec pairing-mode' to re-pair agents as needed.\n"
+        if -f "$ca_dir/ctrl-exec.crt";
+}
+
+sub mode_rotate_cert {
+    my ($opts) = @_;
+    my $config = _load_config();
+
+    print "Rotating ctrl-exec certificate...\n";
+
+    my $result = Exec::Rotation::rotate(config => $config);
+
+    unless ($result->{rotated}) {
+        die "Rotation failed: " . ($result->{error} // 'unknown error') . "\n";
+    }
+
+    printf "New serial:      %s\n", $result->{serial};
+    printf "Old serial:      %s\n", $result->{old_serial} || '(none)';
+    printf "Overlap expires: %s\n", $result->{overlap_expires};
+    printf "Agents pending:  %d\n", $result->{agents_pending};
+
+    if ($result->{agents_pending} > 0) {
+        print "\nBroadcasting new serial to agents...\n";
+        my $report = Exec::Rotation::broadcast_serial(config => $config);
+
+        my @ok     = grep { $_->{status} eq 'ok'     } @$report;
+        my @failed = grep { $_->{status} eq 'failed' } @$report;
+
+        printf "  Updated: %d\n", scalar @ok;
+        printf "  Failed:  %d\n", scalar @failed;
+
+        if (@failed) {
+            print "\nAgents requiring attention:\n";
+            for my $r (@failed) {
+                printf "  %-30s  %s\n", $r->{hostname}, $r->{error} // 'failed';
+            }
+            print "\nFailed agents will be retried automatically by the check loop.\n";
+            print "Agents offline longer than the overlap window will require re-pairing.\n";
+        }
+    }
+}
+
+sub mode_serial_status {
+    my ($opts) = @_;
+
+    my $state  = Exec::Rotation::load_state();
+    my $agents = Exec::Registry::list_agents();
+
+    if ($state) {
+        printf "Current serial:  %s\n",  $state->{current_serial}  // '?';
+        printf "Previous serial: %s\n",  $state->{previous_serial} // '(none)';
+        printf "Rotated at:      %s\n",  $state->{rotated_at}      // '?';
+        printf "Overlap expires: %s\n",  $state->{overlap_expires} // '?';
+        print "\n";
+    }
+    else {
+        print "No rotation has been performed.\n\n";
+    }
+
+    if (!@$agents) {
+        print "No registered agents.\n";
+        return;
+    }
+
+    if ($opts->{json}) {
+        print encode_json({
+            state  => $state,
+            agents => $agents,
+        }), "\n";
+        return;
+    }
+
+    printf "%-30s  %-10s  %-24s  %s\n",
+        'HOSTNAME', 'STATUS', 'CONFIRMED', 'SERIAL';
+    printf "%s\n", '-' x 85;
+    for my $a (@$agents) {
+        printf "%-30s  %-10s  %-24s  %s\n",
+            $a->{hostname}         // '?',
+            $a->{serial_status}    // 'unknown',
+            $a->{serial_confirmed} // '-',
+            substr($a->{dispatcher_serial} // '-', 0, 16)
+                . (length($a->{dispatcher_serial} // '') > 16 ? '...' : '');
+    }
+}
+
+sub _format_run_results {
+    my ($results) = @_;
+    for my $r (@$results) {
+        my $host   = $r->{host}  // '?';
+        my $exit   = $r->{exit}  // -1;
+        my $rtt    = $r->{rtt}   // '';
+        my $reqid  = $r->{reqid} // '';
+        my $status = $exit == 0 ? 'OK' : 'FAIL';
+
+        printf "==> %s  [%s  exit:%d  %s  req:%s]\n", $host, $status, $exit, $rtt, $reqid;
+
+        if ($r->{error}) {
+            print "    ERROR: $r->{error}\n";
+        }
+        if ($r->{stdout} && $r->{stdout} =~ /\S/) {
+            print $r->{stdout};
+            print "\n" unless $r->{stdout} =~ /\n$/;
+        }
+        if ($r->{stderr} && $r->{stderr} =~ /\S/) {
+            print "    STDERR: $r->{stderr}\n";
+        }
+    }
+}
+
+sub _format_ping_results {
+    my ($results) = @_;
+    printf "%-30s  %-8s  %-8s  %-28s  %s\n",
+        'HOST', 'STATUS', 'RTT', 'CERT EXPIRY', 'VERSION';
+    printf "%s\n", '-' x 85;
+    for my $r (@$results) {
+        printf "%-30s  %-8s  %-8s  %-28s  %s\n",
+            $r->{host}    // '?',
+            $r->{status}  // 'error',
+            $r->{rtt}     // '?',
+            $r->{expiry}  // '?',
+            $r->{version} // '?';
+    }
+}
+
+sub _auth_error {
+    my ($auth, $json) = @_;
+    if ($json) {
+        print encode_json({ ok => 0, error => $auth->{reason}, code => $auth->{code} }), "\n";
+    }
+    else {
+        print STDERR "Denied: $auth->{reason}\n";
+    }
+}
+
+sub _lock_error {
+    my ($lock, $json) = @_;
+    if ($json) {
+        print encode_json({
+            ok        => 0,
+            error     => 'locked',
+            code      => 4,
+            conflicts => $lock->{conflicts},
+        }), "\n";
+    }
+    else {
+        print STDERR "Locked: already running: "
+            . join(', ', @{ $lock->{conflicts} }) . "\n";
+    }
+}
+
+sub _load_config {
+    open my $fh, '<', $CONFIG_PATH
+        or die "Cannot open config '$CONFIG_PATH': $!\n";
+    my %config;
+    while (my $line = <$fh>) {
+        chomp $line;
+        next if $line =~ /^\s*[#\s]/;
+        $config{$1} = $2 if $line =~ /^\s*(\w+)\s*=\s*(.+?)\s*$/;
+    }
+    close $fh;
+    for my $k (qw(cert key ca)) {
+        die "Missing '$k' in $CONFIG_PATH\n" unless $config{$k};
+    }
+    return \%config;
+}
+
+sub _parse_run_args {
+    my @args = @_;
+
+    my @script_args;
+    for my $i (0 .. $#args) {
+        if ($args[$i] eq '--') {
+            @script_args = @args[$i+1 .. $#args];
+            @args = @args[0 .. $i-1];
+            last;
+        }
+    }
+
+    die "Need at least one host and a script name\n" unless @args >= 2;
+
+    my $script = pop @args;
+    my @hosts  = @args;
+
+    return (\@hosts, $script, \@script_args);
+}
+
+sub mode_list_locks {
+    my ($opts) = @_;
+    my $locks = Exec::Lock::list_held();
+
+    if (!@$locks) {
+        print "No locks currently held.\n";
+        return;
+    }
+
+    if ($opts->{json}) {
+        print encode_json({ ok => 1, locks => $locks }), "\n";
+        return;
+    }
+
+    printf "%-30s  %s\n", 'HOST', 'SCRIPT';
+    printf "%s\n", '-' x 50;
+    for my $l (@$locks) {
+        printf "%-30s  %s\n", $l->{host}, $l->{script};
+    }
+}
+
+sub mode_unpair {
+    my ($opts, $hostname) = @_;
+    die "Usage: ctrl-exec unpair <hostname>\n" unless $hostname;
+
+    my $record = eval {
+        Exec::Registry::remove_agent(hostname => $hostname)
+    };
+    if ($@) {
+        chomp(my $err = $@);
+        die "Unpair failed: $err\n";
+    }
+
+    my $expiry = $record->{expiry} // 'unknown';
+
+    Exec::Log::log_action('INFO', {
+        ACTION => 'unpair',
+        AGENT  => $hostname,
+        EXPIRY => $expiry,
+    });
+
+    print "Unregistered '$hostname'.\n";
+    print "WARNING: Agent certificate remains valid until: $expiry\n";
+    print "Decommission the agent promptly or add its serial to the revocation list.\n";
+}
+
+sub usage {
+    return <<'END';
+Usage: ctrl-exec <mode> [options] [args]
+
+Modes:
+  run <host>[:<port>] [<host>...] <script> [-- <arg>...]
+                             Run a script on one or more hosts
+  ping <host>[:<port>] [<host>...]
+                             Test mTLS connectivity to hosts
+  pairing-mode               Accept agent pairing requests
+  list-requests              Show pending pairing requests
+  approve <reqid>            Approve a pairing request
+  deny <reqid>               Deny a pairing request
+  setup-ca                   One-time CA initialisation
+  setup-ctrl-exec           Generate ctrl-exec key and certificate
+  list-agents                List all registered (paired) agents
+  list-locks                 Show currently held script locks
+  rotate-cert                Rotate ctrl-exec certificate and broadcast new serial
+  serial-status              Show ctrl-exec serial and per-agent serial state
+  unpair <hostname>          Remove a paired agent from the registry
+
+Options:
+  --config <path>            Path to ctrl-exec.conf
+  --json                     Output results as JSON
+  --port <n>                 Override default port (7443)
+  --username <name>          Username for auth hook (default: $USER)
+  --token <token>            Auth token (default: $ENVEXEC_TOKEN env var)
+
+END
+}

@@ -1,0 +1,752 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+
+use Exec::Agent::Config    qw();
+use Exec::Agent::Runner    qw();
+use Exec::Agent::AgentPairing   qw();
+use Exec::Agent::RateLimit qw();
+use Exec::Auth           qw();
+use Exec::Log            qw();
+use JSON                       qw(encode_json decode_json);
+use POSIX                      qw(SIGTERM WNOHANG strftime);
+use Sys::Hostname              qw(hostname);
+use Getopt::Long               qw(GetOptions);
+
+our $VERSION = 'UNINSTALLED';
+
+my $CONFIG_PATH    = '/etc/ctrl-exec-agent/agent.conf';
+my $ALLOWLIST_PATH = '/etc/ctrl-exec-agent/scripts.conf';
+
+# --- entry point ---
+
+main();
+
+sub main {
+    my ($mode, %opts);
+
+    GetOptions(
+        'config=s'      => \$CONFIG_PATH,
+        'allowlist=s'   => \$ALLOWLIST_PATH,
+        'ctrl-exec=s'  => \$opts{ctrl-exec},
+        'port=i'        => \$opts{port},
+        'background'    => \$opts{background},
+        'timeout=i'     => \$opts{timeout},
+    ) or die usage();
+
+    $mode = shift @ARGV // 'serve';
+
+    Exec::Log::init('ctrl-exec-agent');
+
+    my %dispatch = (
+        serve             => \&mode_serve,
+        'request-pairing' => \&mode_request_pairing,
+        'pairing-status'  => \&mode_pairing_status,
+        'ping-self'       => \&mode_ping_self,
+    );
+
+    my $handler = $dispatch{$mode}
+        or die "Unknown mode '$mode'\n" . usage();
+
+    $handler->(\%opts);
+}
+
+# --- modes ---
+
+sub mode_serve {
+    my ($opts) = @_;
+
+    my $config    = Exec::Agent::Config::load_config($CONFIG_PATH);
+    my $allowlist = Exec::Agent::Config::load_allowlist($ALLOWLIST_PATH);
+
+    my $revoked_path = $config->{revoked_serials}
+                    // '/etc/ctrl-exec-agent/revoked-serials';
+    my $revoked = Exec::Agent::AgentPairing::load_revoked_serials(
+        path => $revoked_path,
+    );
+
+    my $disp_serial_path = $config->{dispatcher_serial_path}
+                        // '/etc/ctrl-exec-agent/ctrl-exec-serial';
+    my $disp_serial = Exec::Agent::AgentPairing::load_dispatcher_serial(
+        path => $disp_serial_path,
+    );
+
+    my %rate_state;
+    my $rate_config = $config->{rate_limit} // {};
+
+    $SIG{HUP} = sub {
+        warn "Reloading allowlist, revocation list, and ctrl-exec serial...\n";
+        $allowlist = eval { Exec::Agent::Config::load_allowlist($ALLOWLIST_PATH) };
+        warn "Allowlist reload failed: $@\n" if $@;
+        $revoked = eval {
+            Exec::Agent::AgentPairing::load_revoked_serials(path => $revoked_path)
+        };
+        warn "Revocation list reload failed: $@\n" if $@;
+        $disp_serial = eval {
+            Exec::Agent::AgentPairing::load_dispatcher_serial(path => $disp_serial_path)
+        };
+        warn "Dispatcher serial reload failed: $@\n" if $@;
+        %rate_state = ();
+    };
+
+    require IO::Socket::SSL;
+
+    my $server = IO::Socket::SSL->new(
+        LocalPort        => $config->{port},
+        Listen           => 10,
+        ReuseAddr        => 1,
+        SSL_cert_file    => $config->{cert},
+        SSL_key_file     => $config->{key},
+        SSL_ca_file      => $config->{ca},
+        SSL_verify_mode  => IO::Socket::SSL::SSL_VERIFY_PEER(),
+        SSL_cipher_list  => 'ECDHE-RSA-AES256-GCM-SHA384:'
+                          . 'ECDHE-ECDSA-AES256-GCM-SHA384:'
+                          . 'ECDHE-RSA-AES128-GCM-SHA256:'
+                          . 'ECDHE-ECDSA-AES128-GCM-SHA256',
+        SSL_ciphersuites => 'TLS_AES_256_GCM_SHA384:'
+                          . 'TLS_CHACHA20_POLY1305_SHA256:'
+                          . 'TLS_AES_128_GCM_SHA256',
+    ) or die "Cannot start server: $IO::Socket::SSL::SSL_ERROR\n";
+
+    Exec::Log::log_action('INFO', {
+        ACTION => 'start',
+        PORT   => $config->{port},
+    });
+
+    while (1) {
+        my $conn = $server->accept;
+
+        unless (defined $conn) {
+            my $err  = $IO::Socket::SSL::SSL_ERROR // '';
+            my $peer = $server->peerhost // 'unknown';
+
+            # Distinguish TLS handshake failure from a fatal socket error.
+            # A handshake failure leaves $! at 0 (or EAGAIN/EINTR); the SSL
+            # error string describes the cert/protocol problem. A fatal error
+            # (server socket closed, accept(2) syscall failed) sets $! to a
+            # real errno value. Exit the loop only on fatal errors.
+            if ($!) {
+                Exec::Log::log_action('ERR', {
+                    ACTION => 'accept-fatal',
+                    PEER   => $peer,
+                    REASON => "$!",
+                });
+                last;
+            }
+
+            Exec::Agent::RateLimit::record_failure($peer, \%rate_state, $rate_config);
+            Exec::Log::log_action('WARNING', {
+                ACTION => 'tls-failure',
+                PEER   => $peer,
+                REASON => $err,
+            });
+            Exec::Agent::RateLimit::check($peer, \%rate_state, $rate_config);
+            next;
+        }
+
+        my $peer        = $conn->peerhost // 'unknown';
+
+        # IP allowlist check: before rate check, before fork, before peer serial
+        if ($config->{allowed_ips} &&
+            !Exec::Agent::Config::ip_allowed($peer, $config->{allowed_ips})) {
+            $conn->close(SSL_no_shutdown => 1);
+            Exec::Log::log_action('WARNING', {
+                ACTION => 'ip-block',
+                PEER   => $peer,
+            });
+            next;
+        }
+
+        if (Exec::Agent::RateLimit::check($peer, \%rate_state, $rate_config)) {
+            $conn->close(SSL_no_shutdown => 1);
+            next;
+        }
+        Exec::Agent::RateLimit::record_connection($peer, \%rate_state, $rate_config);
+
+        # Read peer cert serial before forking - after the parent closes its
+        # copy of $conn the SSL object becomes invalid in the child.
+        my $peer_serial = _peer_serial($conn);
+        my $pid  = fork();
+        if (!defined $pid) {
+            warn "fork failed: $!\n";
+            $conn->close(SSL_no_shutdown => 1);
+            next;
+        }
+        if ($pid == 0) {
+            # Child: close server socket, handle connection, exit
+            $server->close(SSL_no_shutdown => 1);
+            handle_connection($conn, $peer, $allowlist, $config, $revoked, $disp_serial, $peer_serial);
+            $conn->close;
+            exit 0;
+        }
+        # Parent: release fd without SSL shutdown so child owns it
+        $conn->close(SSL_no_shutdown => 1);
+        waitpid -1, WNOHANG();
+    }
+}
+
+sub mode_request_pairing {
+    my ($opts) = @_;
+
+    my $ctrl-exec  = $opts->{ctrl-exec}
+        or die "--ctrl-exec <host> required for request-pairing\n";
+    my $background  = $opts->{background} // 0;
+    my $timeout     = $opts->{timeout}    // 30;
+
+    if ($background && $timeout > 600) {
+        die "Error: --timeout cannot exceed 600 seconds in background mode.\n"
+          . "The agent connection window is 660 seconds; values above 600 risk\n"
+          . "the connection expiring before approval is received.\n";
+    }
+
+    # Pre-flight: verify the cert directory exists and is writable before
+    # generating the key or connecting to the ctrl-exec. Without this check,
+    # a non-root run fails with a cryptic rename error inside store_certs after
+    # the full pairing connection has already completed.
+    my $cert_dir = '/etc/ctrl-exec-agent';
+    die "Cert directory '$cert_dir' does not exist - has the agent been installed?\n"
+        unless -d $cert_dir;
+    die "Cannot write to '$cert_dir' - re-run as root or with sudo\n"
+        unless -w $cert_dir;
+
+    my $host = hostname();
+
+    print "Generating key and CSR for '$host'...\n" unless $background;
+    my $pair = Exec::Agent::AgentPairing::generate_key_and_csr(
+        hostname => $host,
+    );
+
+    unless ($background) {
+        my $pairing_code = _pairing_code($pair->{csr_pem});
+        print "Pairing code: $pairing_code\n";
+        print "  Verify this code matches the ctrl-exec display before approving.\n\n";
+        print "Connecting to ctrl-exec at $ctrl-exec for pairing...\n";
+    }
+
+    # Submit the CSR. The ctrl-exec queues it and returns a reqid immediately.
+    my $submitted = Exec::Agent::AgentPairing::submit_pairing_request(
+        ctrl-exec => $ctrl-exec,
+        port       => $opts->{port} // 7444,
+        csr_pem    => $pair->{csr_pem},
+        hostname   => $host,
+    );
+
+    unless ($submitted->{ok}) {
+        my $err = $submitted->{error} // 'unknown error';
+        if ($err =~ /IO::Socket::IP configuration failed|Name or service not known|Temporary failure in name resolution/i) {
+            die "Pairing failed: could not resolve ctrl-exec hostname '$ctrl-exec'.\n"
+              . "Check the hostname is correct or use an IP address instead.\n";
+        }
+        if ($err =~ /connect failed|connection refused|No route to host/i) {
+            die "Pairing failed: could not connect to ctrl-exec at $ctrl-exec.\n"
+              . "Check the ctrl-exec address is correct and pairing mode is active:\n"
+              . "  sudo ctrl-exec pairing-mode\n";
+        }
+        die "Pairing failed: $err\n";
+    }
+
+    my $reqid = $submitted->{reqid};
+
+    if ($background) {
+        # Print reqid to stdout for the orchestrator, then fork.
+        # Parent exits 0 immediately. Child waits for approval subject to timeout.
+        print "$reqid\n";
+        STDOUT->flush;
+
+        my $pid = fork();
+        die "fork failed: $!\n" unless defined $pid;
+
+        if ($pid != 0) {
+            # Parent: exit cleanly. Socket fd is inherited by child.
+            exit 0;
+        }
+
+        # Child: detach from terminal, wait for approval with timeout.
+        # $submitted->{sock} is inherited across the fork.
+        local $SIG{ALRM} = sub {
+            Exec::Log::log_action('WARNING', {
+                ACTION => 'pair-timeout',
+                REQID  => $reqid,
+            });
+            exit 2;
+        };
+        alarm $timeout;
+
+        my $result = Exec::Agent::AgentPairing::await_pairing_result(
+            sock  => $submitted->{sock},
+            nonce => $submitted->{nonce},
+            reqid => $reqid,
+        );
+        alarm 0;
+
+        unless ($result->{ok}) {
+            Exec::Log::log_action('WARNING', {
+                ACTION => 'pair-denied',
+                REQID  => $reqid,
+                REASON => $result->{error} // 'denied',
+            });
+            exit 3;
+        }
+
+        _store_pairing_result($result, $pair->{key_pem}, $ctrl-exec);
+        return;
+    }
+
+    # Interactive (non-background) mode: await inline.
+    my $result = Exec::Agent::AgentPairing::await_pairing_result(
+        sock  => $submitted->{sock},
+        nonce => $submitted->{nonce},
+        reqid => $reqid,
+    );
+
+    unless ($result->{ok}) {
+        my $err = $result->{error} // 'unknown error';
+        die "Pairing failed: $err\n";
+    }
+
+    _store_pairing_result($result, $pair->{key_pem}, $ctrl-exec);
+    print "Pairing complete. Certificates stored.\n";
+}
+
+sub _store_pairing_result {
+    my ($result, $key_pem, $ctrl-exec) = @_;
+
+    Exec::Agent::AgentPairing::store_certs(
+        cert_pem          => $result->{cert_pem},
+        ca_pem            => $result->{ca_pem},
+        key_pem           => $key_pem,
+        dispatcher_serial => $result->{dispatcher_serial} // '',
+    );
+
+    Exec::Log::log_action('INFO', {
+        ACTION     => 'pair-complete',
+        STATUS     => 'approved',
+        DISPATCHER => $ctrl-exec,
+    });
+}
+
+sub mode_pairing_status {
+    my $status = Exec::Agent::AgentPairing::pairing_status();
+    if ($status->{paired}) {
+        print "Paired. Certificate expires: $status->{expiry}\n";
+    }
+    else {
+        print "Not paired. Reason: $status->{reason}\n";
+        exit 1;
+    }
+}
+
+sub mode_ping_self {
+    print "Checking config...\n";
+    my $config = eval { Exec::Agent::Config::load_config($CONFIG_PATH) };
+    if ($@) { print "Config error: $@\n"; exit 1; }
+    print "  Config OK (port $config->{port})\n";
+
+    my $allowlist = eval { Exec::Agent::Config::load_allowlist($ALLOWLIST_PATH) };
+    if ($@) { print "Allowlist error: $@\n"; exit 1; }
+    printf "  Allowlist OK (%d scripts)\n", scalar keys %$allowlist;
+
+    my $status = Exec::Agent::AgentPairing::pairing_status();
+    if ($status->{paired}) {
+        print "  Certs OK (expires $status->{expiry})\n";
+    }
+    else {
+        print "  Certs: NOT paired - $status->{reason}\n";
+    }
+
+    for my $name (sort keys %$allowlist) {
+        my $path = $allowlist->{$name};
+        my $ok   = -x $path ? 'ok' : 'NOT EXECUTABLE';
+        print "  Script '$name': $path [$ok]\n";
+    }
+
+    print "Self-check complete.\n";
+}
+
+# --- connection handler (runs in forked child) ---
+# Reads raw HTTP/1.0 request from IO::Socket::SSL, dispatches, sends response.
+
+sub handle_connection {
+    my ($conn, $peer, $allowlist, $config, $revoked, $disp_serial, $peer_serial) = @_;
+
+    # $peer_serial is extracted before fork() in the accept loop - after the
+    # parent closes its copy of $conn the SSL object is invalid in the child.
+    $peer_serial //= '';
+
+    if (length $peer_serial &&
+        Exec::Agent::AgentPairing::serial_revoked($peer_serial, $revoked)) {
+        Exec::Log::log_action('WARNING', {
+            ACTION => 'revoked-cert',
+            PEER   => $peer,
+            SERIAL => $peer_serial,
+        });
+        _send_raw($conn, 403, encode_json({ error => 'certificate revoked' }));
+        return;
+    }
+
+    # Read request line
+    my $request_line = <$conn>;
+    unless ($request_line) {
+        _send_raw($conn, 400, encode_json({ error => 'empty request' }));
+        return;
+    }
+    chomp $request_line;
+    $request_line =~ s/\r//;
+
+    my ($method, $path) = split ' ', $request_line;
+
+    my %headers;
+    my $header_count = 0;
+    while (my $line = <$conn>) {
+        $line =~ s/\r\n$//;
+        $line =~ s/\n$//;
+        last if $line eq '';
+        if (++$header_count > 32) {
+            _send_raw($conn, 431, encode_json({ error => 'too many headers' }));
+            return;
+        }
+        if ($line =~ /^([^:]+):\s*(.*)$/) {
+            $headers{ lc $1 } = $2;
+        }
+    }
+
+    # Read body
+    my $body = '';
+    if (my $len = $headers{'content-length'}) {
+        if ($len > 1_048_576) {
+            _send_raw($conn, 413, encode_json({ error => 'request too large' }));
+            return;
+        }
+        read $conn, $body, $len;
+    }
+
+    if ($method eq 'POST' && $path eq '/run') {
+        handle_run($conn, $body, $peer, $allowlist, $config, $disp_serial, $peer_serial);
+    }
+    elsif ($method eq 'POST' && $path eq '/ping') {
+        handle_ping($conn, $body, $peer, $disp_serial, $peer_serial);
+    }
+    elsif ($method eq 'GET' && $path eq '/capabilities') {
+        handle_capabilities($conn, $peer, $allowlist, $config, $disp_serial, $peer_serial);
+    }
+    else {
+        _send_raw($conn, 404, encode_json({ error => 'not found' }));
+    }
+}
+
+sub handle_run {
+    my ($conn, $body, $peer, $allowlist, $config, $disp_serial, $peer_serial) = @_;
+
+    unless (_check_dispatcher_serial($peer_serial, $disp_serial)) {
+        _send_raw($conn, 403, encode_json({ error => 'serial mismatch', status => 'forbidden' }));
+        Exec::Log::log_action('WARNING', {
+            ACTION => 'serial-reject',
+            PEER   => $peer,
+            REQID  => '(none)',
+        });
+        return;
+    }
+
+    my $data = eval { decode_json($body) };
+    if ($@) {
+        _send_json($conn, { exit => -1, error => 'invalid JSON' });
+        return;
+    }
+
+    my $name     = $data->{script}   // '';
+    my $args     = $data->{args}     // [];
+    my $reqid    = $data->{reqid}    // '';
+    my $username = $data->{username} // '';
+    my $token    = $data->{token}    // '';
+
+    unless (ref $args eq 'ARRAY') {
+        _send_json($conn, { exit => -1, error => 'args must be an array', reqid => $reqid });
+        return;
+    }
+
+    my $script_path = Exec::Agent::Config::validate_script(
+        $name, $allowlist, $config->{script_dirs}
+    );
+
+    unless ($script_path) {
+        Exec::Log::log_action('WARNING', {
+            ACTION => 'deny',
+            SCRIPT => $name,
+            PEER   => $peer,
+            REQID  => $reqid,
+        });
+        _send_json($conn, {
+            script => $name,
+            exit   => -1,
+            error  => 'script not permitted',
+            reqid  => $reqid,
+        });
+        return;
+    }
+
+    # Agent auth hook - called after allowlist validation
+    if ($config->{auth_hook}) {
+        my $auth = Exec::Auth::check(
+            action    => 'run',
+            config    => $config,
+            script    => $name,
+            args      => $args,
+            username  => $username,
+            token     => $token,
+            source_ip => $peer,
+        );
+        unless ($auth->{ok}) {
+            Exec::Log::log_action('WARNING', {
+                ACTION => 'deny',
+                REASON => $auth->{reason},
+                SCRIPT => $name,
+                PEER   => $peer,
+                REQID  => $reqid,
+            });
+            _send_json($conn, {
+                script => $name,
+                exit   => -1,
+                error  => 'not authorised: ' . $auth->{reason},
+                reqid  => $reqid,
+            });
+            return;
+        }
+    }
+
+    my $context = {
+        script    => $name,
+        args      => $args,
+        reqid     => $reqid,
+        peer_ip   => $peer,
+        username  => $username,
+        token     => $token,
+        timestamp => POSIX::strftime('%Y-%m-%dT%H:%M:%SZ', gmtime),
+    };
+
+    my $result = Exec::Agent::Runner::run_script(
+        $script_path, $args, $context,
+        $config->{stdin_timeout} // 10,
+    );
+
+    Exec::Log::log_action('INFO', {
+        ACTION => 'run',
+        SCRIPT => $name,
+        EXIT   => $result->{exit},
+        PEER   => $peer,
+        REQID  => $reqid,
+    });
+
+    _send_json($conn, {
+        script => $name,
+        exit   => $result->{exit},
+        stdout => $result->{stdout},
+        stderr => $result->{stderr},
+        reqid  => $reqid,
+    });
+}
+
+sub handle_ping {
+    my ($conn, $body, $peer, $disp_serial, $peer_serial) = @_;
+
+    unless (_check_dispatcher_serial($peer_serial, $disp_serial)) {
+        _send_raw($conn, 403, encode_json({ error => 'serial mismatch', status => 'forbidden' }));
+        Exec::Log::log_action('WARNING', {
+            ACTION => 'serial-reject',
+            PEER   => $peer,
+            REQID  => '(none)',
+        });
+        return;
+    }
+
+    my $data  = eval { decode_json($body) } // {};
+    my $reqid = $data->{reqid} // '';
+
+    my $status = Exec::Agent::AgentPairing::pairing_status();
+
+    Exec::Log::log_action('INFO', {
+        ACTION => 'ping',
+        PEER   => $peer,
+        REQID  => $reqid,
+    });
+
+    _send_json($conn, {
+        status  => 'ok',
+        host    => hostname(),
+        version => $VERSION,
+        expiry  => $status->{expiry} // 'unknown',
+        reqid   => $reqid,
+    });
+}
+
+sub handle_capabilities {
+    my ($conn, $peer, $allowlist, $config, $disp_serial, $peer_serial) = @_;
+
+    $peer_serial //= '';
+
+    # Restrict /capabilities to the genuine ctrl-exec cert.
+    # The stored serial was recorded at pairing time from the ctrl-exec's
+    # own cert. Any CA-signed peer whose serial does not match is rejected -
+    # this closes lateral reconnaissance from a compromised agent peer.
+    #
+    # If no serial is stored (agent not yet paired, or pre-serial-tracking
+    # pairing), the check is skipped with a warning. Re-pair to enable it.
+    if (length $disp_serial) {
+        unless (_check_dispatcher_serial($peer_serial, $disp_serial)) {
+            Exec::Log::log_action('WARNING', {
+                ACTION      => 'capabilities-deny',
+                PEER        => $peer,
+                PEER_SERIAL => $peer_serial,
+                REASON      => 'serial-mismatch',
+            });
+            _send_raw($conn, 403, encode_json({ error => 'forbidden' }));
+            return;
+        }
+    }
+    else {
+        Exec::Log::log_action('WARNING', {
+            ACTION => 'capabilities-no-serial',
+            PEER   => $peer,
+            REASON => 'no ctrl-exec serial stored - re-pair to enable restriction',
+        });
+    }
+
+    # Auth hook - called after serial check, before building scripts list.
+    # username and token are not present on /capabilities requests (no body);
+    # hooks that require a token will correctly deny unauthenticated callers.
+    if ($config->{auth_hook}) {
+        my $auth = Exec::Auth::check(
+            action    => 'discovery',
+            config    => $config,
+            script    => '',
+            args      => [],
+            username  => '',
+            token     => '',
+            source_ip => $peer,
+        );
+        unless ($auth->{ok}) {
+            Exec::Log::log_action('WARNING', {
+                ACTION => 'capabilities-deny',
+                PEER   => $peer,
+                REASON => $auth->{reason},
+            });
+            _send_raw($conn, 403, encode_json({ error => 'not authorised' }));
+            return;
+        }
+    }
+
+    my @scripts;
+    for my $name (sort keys %$allowlist) {
+        my $path = $allowlist->{$name};
+        push @scripts, {
+            name       => $name,
+            path       => $path,
+            executable => (-x $path ? JSON::true : JSON::false),
+        };
+    }
+
+    Exec::Log::log_action('INFO', {
+        ACTION  => 'capabilities',
+        PEER    => $peer,
+        SCRIPTS => scalar @scripts,
+    });
+
+    _send_json($conn, {
+        status  => 'ok',
+        host    => hostname(),
+        version => $VERSION,
+        scripts => \@scripts,
+        tags    => $config->{tags} // {},
+    });
+}
+
+# Verify that the peer cert serial matches the stored ctrl-exec serial.
+# Returns 1 if matched, 0 if not. Does not log - caller logs on failure.
+# Both arguments must be non-empty lowercase hex strings to return 1.
+sub _check_dispatcher_serial {
+    my ($peer_serial, $disp_serial) = @_;
+    return 0 unless length($disp_serial  // '');
+    return 0 unless length($peer_serial  // '');
+    return $peer_serial eq $disp_serial ? 1 : 0;
+}
+
+# Extract the peer certificate serial number from an IO::Socket::SSL
+# connection as a lowercase hex string.
+# IO::Socket::SSL's peer_certificate('serialNumber') is not supported in
+# all versions - use Net::SSLeay directly to read the ASN1 integer.
+# Returns '' if no peer cert or serial cannot be read.
+sub _peer_serial {
+    my ($conn) = @_;
+    my $ssl  = eval { $conn->_get_ssl_object } or return '';
+    my $cert = eval { Net::SSLeay::get_peer_certificate($ssl) } or return '';
+    my $asn1 = eval { Net::SSLeay::X509_get_serialNumber($cert) } or return '';
+    my $hex  = eval { Net::SSLeay::P_ASN1_INTEGER_get_hex($asn1) } // '';
+    return lc $hex;
+}
+
+sub _send_json {
+    my ($conn, $data) = @_;
+    _send_raw($conn, 200, encode_json($data));
+}
+
+sub _send_raw {
+    my ($conn, $code, $body) = @_;
+    my %status_text = (
+        200 => 'OK',
+        400 => 'Bad Request',
+        404 => 'Not Found',
+        413 => 'Content Too Large',
+        431 => 'Request Header Fields Too Large',
+    );
+    my $text = $status_text{$code} // 'Error';
+    print $conn
+        "HTTP/1.0 $code $text\r\n",
+        "Content-Type: application/json\r\n",
+        "Content-Length: ", length($body), "\r\n",
+        "\r\n",
+        $body;
+}
+
+# Compute a 6-digit confirmation code from a CSR PEM string.
+# The same computation on the ctrl-exec side produces an identical code,
+# allowing the operator to verify the request visually without any
+# out-of-band channel.
+sub _pairing_code {
+    my ($csr_pem) = @_;
+    # Use openssl for SHA256 - avoids Digest::SHA dependency on minimal
+    # Perl installations (OpenWrt, embedded systems).
+    # Write CSR to a temp file and pipe through openssl dgst -binary.
+    require File::Temp;
+    my ($tmp_fh, $tmp_path) = File::Temp::tempfile(UNLINK => 1);
+    print $tmp_fh $csr_pem;
+    close $tmp_fh;
+    my $digest = `openssl dgst -sha256 -binary \Q$tmp_path\E 2>/dev/null`;
+    die "openssl dgst failed\n" unless length($digest) == 32;
+    # Take first 4 bytes as a 32-bit unsigned int, modulo 1,000,000
+    my $n = unpack('N', substr($digest, 0, 4)) % 1_000_000;
+    return sprintf '%06d', $n;
+}
+
+sub usage {
+    return <<'END';
+Usage: ctrl-exec-agent <mode> [options]
+
+Modes:
+  serve                          Start the agent server (default)
+  request-pairing --ctrl-exec <host>
+                                 Request pairing with a ctrl-exec host
+  pairing-status                 Show pairing/cert status
+  ping-self                      Validate local config and certs
+
+Options:
+  --config <path>                Path to agent.conf
+  --allowlist <path>             Path to scripts.conf
+  --port <n>                     Override pairing port (default 7444)
+  --background                   Non-interactive pairing: print reqid and wait
+                                 for approval (for orchestrated installations)
+  --timeout <n>                  Seconds to wait for approval in background
+                                 mode (default 30, max 600)
+END
+}

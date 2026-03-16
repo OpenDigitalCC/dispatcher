@@ -1,0 +1,409 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Dispatcher API",
+    "description": "REST gateway for the Dispatcher mTLS remote script execution system. Provides programmatic access to the run, ping, discovery, and health endpoints. Authentication is delegated to the configured auth hook on the ctrl-exec host; pass credentials in the request body.",
+    "version": "0.2.8",
+    "license": {
+      "name": "AGPL-3.0-only"
+    },
+    "contact": {
+      "url": "https://github.com/OpenDigitalCC/ctrl-exec"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://{host}:{port}",
+      "description": "Plain HTTP (no api_cert/api_key configured)",
+      "variables": {
+        "host": { "default": "localhost" },
+        "port": { "default": "7445" }
+      }
+    },
+    {
+      "url": "https://{host}:{port}",
+      "description": "TLS (api_cert and api_key configured)",
+      "variables": {
+        "host": { "default": "localhost" },
+        "port": { "default": "7445" }
+      }
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "description": "Returns the API server version and confirms the process is alive. No authentication required.",
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" },
+                "example": {
+                  "ok": true,
+                  "version": "0.2.8"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ping": {
+      "post": {
+        "summary": "Ping agents",
+        "description": "Test mTLS connectivity to one or more agents. Returns cert expiry and agent version for each host. Runs against all specified hosts in parallel.",
+        "operationId": "pingAgents",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PingRequest" },
+              "example": {
+                "hosts": ["web-01", "web-02"],
+                "username": "alice",
+                "token": "mytoken"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ping results for all hosts (individual host failures are reported inline, not as HTTP errors)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PingResponse" },
+                "example": {
+                  "ok": true,
+                  "results": [
+                    {
+                      "host": "web-01",
+                      "status": "ok",
+                      "rtt": "12ms",
+                      "expiry": "Jan 15 12:00:00 2026 GMT",
+                      "version": "0.2.8"
+                    },
+                    {
+                      "host": "web-02",
+                      "status": "error",
+                      "error": "read timeout after 60s",
+                      "rtt": "60012ms"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/run": {
+      "post": {
+        "summary": "Run a script on agents",
+        "description": "Execute an allowlisted script on one or more agents in parallel. The script name must match an entry in each agent's scripts.conf allowlist. Arguments are passed as positional values to the script. The ctrl-exec waits up to read_timeout seconds (default 60) per host.",
+        "operationId": "runScript",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RunRequest" },
+              "example": {
+                "hosts": ["db-01", "db-02"],
+                "script": "pg-backup",
+                "args": ["--database", "myapp"],
+                "username": "alice",
+                "token": "mytoken"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Execution results for all hosts. Individual host failures are reported inline via exit code and error fields, not as HTTP errors.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RunResponse" },
+                "example": {
+                  "ok": true,
+                  "results": [
+                    {
+                      "host": "db-01",
+                      "exit": 0,
+                      "stdout": "Backup complete: myapp_20250115.sql.gz\n",
+                      "stderr": "",
+                      "rtt": "4210ms",
+                      "reqid": "a1b2c3d4"
+                    },
+                    {
+                      "host": "db-02",
+                      "exit": -1,
+                      "error": "read timeout after 60s",
+                      "stdout": "",
+                      "stderr": "",
+                      "rtt": "60001ms",
+                      "reqid": "a1b2c3d5"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/discovery": {
+      "get": {
+        "summary": "Discover agents and capabilities",
+        "description": "Returns all registered agents and their allowlisted scripts. Defaults to all agents in the registry when no hosts are specified. Uses ping privilege level for auth. Equivalent to the POST form with an empty body.",
+        "operationId": "discoverAgentsGet",
+        "responses": {
+          "200": { "$ref": "#/components/responses/DiscoverySuccess" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      },
+      "post": {
+        "summary": "Discover agents and capabilities (filtered)",
+        "description": "Returns agents and their allowlisted scripts. Optionally filter to a specific set of hosts. If no hosts are specified, all registered agents are queried.",
+        "operationId": "discoverAgentsPost",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DiscoveryRequest" },
+              "example": {
+                "hosts": ["web-01", "db-01"],
+                "username": "alice",
+                "token": "mytoken"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/DiscoverySuccess" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": ["ok", "version"],
+        "properties": {
+          "ok":      { "type": "boolean", "enum": [true] },
+          "version": { "type": "string", "description": "Dispatcher version string", "example": "0.2.8" }
+        }
+      },
+      "PingRequest": {
+        "type": "object",
+        "required": ["hosts"],
+        "properties": {
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Hostname or hostname:port. Port defaults to 7443."
+            },
+            "minItems": 1,
+            "example": ["web-01", "web-02:7450"]
+          },
+          "username": {
+            "type": "string",
+            "description": "Operator username passed to the auth hook. Defaults to empty string.",
+            "example": "alice"
+          },
+          "token": {
+            "type": "string",
+            "description": "Auth token passed to the auth hook.",
+            "example": "mytoken"
+          }
+        }
+      },
+      "PingResult": {
+        "type": "object",
+        "required": ["host", "status"],
+        "properties": {
+          "host":    { "type": "string", "description": "Agent hostname as supplied in the request." },
+          "status":  { "type": "string", "enum": ["ok", "error"] },
+          "rtt":     { "type": "string", "description": "Round-trip time, e.g. 12ms.", "example": "12ms" },
+          "expiry":  { "type": "string", "description": "Agent certificate expiry (openssl notAfter format). Present when status is ok.", "example": "Jan 15 12:00:00 2026 GMT" },
+          "version": { "type": "string", "description": "Agent version string. Present when status is ok.", "example": "0.2.8" },
+          "error":   { "type": "string", "description": "Error message. Present when status is error.", "example": "read timeout after 60s" }
+        }
+      },
+      "PingResponse": {
+        "type": "object",
+        "required": ["ok", "results"],
+        "properties": {
+          "ok":      { "type": "boolean", "enum": [true] },
+          "results": { "type": "array", "items": { "$ref": "#/components/schemas/PingResult" } }
+        }
+      },
+      "RunRequest": {
+        "type": "object",
+        "required": ["hosts", "script"],
+        "properties": {
+          "hosts": {
+            "type": "array",
+            "items": { "type": "string", "description": "Hostname or hostname:port." },
+            "minItems": 1,
+            "example": ["db-01", "db-02"]
+          },
+          "script": {
+            "type": "string",
+            "pattern": "^[\\w-]+$",
+            "description": "Allowlisted script name (alphanumeric and hyphens only). Must match an entry in the agent's scripts.conf.",
+            "example": "pg-backup"
+          },
+          "args": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Positional arguments passed to the script. Evaluated on the ctrl-exec host before dispatch.",
+            "example": ["--database", "myapp"]
+          },
+          "username": { "type": "string", "example": "alice" },
+          "token":    { "type": "string", "example": "mytoken" }
+        }
+      },
+      "RunResult": {
+        "type": "object",
+        "required": ["host", "exit"],
+        "properties": {
+          "host":   { "type": "string" },
+          "exit": {
+            "type": "integer",
+            "description": "Script exit code. 0 indicates success. -1 indicates a ctrl-exec-side failure (connection error, timeout). 126 indicates the script was killed by a signal or exec failed."
+          },
+          "stdout": { "type": "string", "description": "Script standard output." },
+          "stderr": { "type": "string", "description": "Script standard error." },
+          "rtt":    { "type": "string", "description": "Round-trip time including script execution.", "example": "4210ms" },
+          "reqid":  { "type": "string", "description": "Request ID. Matches the REQID field in syslog on both ctrl-exec and agent. Use to correlate results with log entries.", "example": "a1b2c3d4" },
+          "error":  { "type": "string", "description": "Dispatcher-side error message. Present when exit is -1.", "example": "read timeout after 60s" },
+          "script": { "type": "string", "description": "Script name as dispatched." }
+        }
+      },
+      "RunResponse": {
+        "type": "object",
+        "required": ["ok", "results"],
+        "properties": {
+          "ok":      { "type": "boolean", "enum": [true] },
+          "results": { "type": "array", "items": { "$ref": "#/components/schemas/RunResult" } }
+        }
+      },
+      "DiscoveryRequest": {
+        "type": "object",
+        "properties": {
+          "hosts":    { "type": "array", "items": { "type": "string" }, "description": "Hosts to query. Defaults to all registered agents if omitted." },
+          "username": { "type": "string" },
+          "token":    { "type": "string" }
+        }
+      },
+      "ScriptEntry": {
+        "type": "object",
+        "properties": {
+          "name":       { "type": "string", "description": "Script name as it appears in scripts.conf.", "example": "pg-backup" },
+          "path":       { "type": "string", "description": "Absolute path on the agent host.", "example": "/opt/ctrl-exec-scripts/pg-backup.sh" },
+          "executable": { "type": "boolean", "description": "Whether the script file is executable by the ctrl-exec-agent process." }
+        }
+      },
+      "HostCapabilities": {
+        "type": "object",
+        "properties": {
+          "host":    { "type": "string" },
+          "status":  { "type": "string", "enum": ["ok", "error"] },
+          "version": { "type": "string" },
+          "scripts": { "type": "array", "items": { "$ref": "#/components/schemas/ScriptEntry" } },
+          "error":   { "type": "string" }
+        }
+      },
+      "DiscoveryResponse": {
+        "type": "object",
+        "required": ["ok", "hosts"],
+        "properties": {
+          "ok": { "type": "boolean", "enum": [true] },
+          "hosts": {
+            "type": "object",
+            "description": "Map of hostname to capabilities. Keys are the agent hostnames as registered.",
+            "additionalProperties": { "$ref": "#/components/schemas/HostCapabilities" },
+            "example": {
+              "web-01": {
+                "host": "web-01",
+                "status": "ok",
+                "version": "0.2.8",
+                "scripts": [
+                  { "name": "deploy", "path": "/opt/ctrl-exec-scripts/deploy.sh", "executable": true },
+                  { "name": "status", "path": "/opt/ctrl-exec-scripts/status.sh", "executable": true }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["ok", "error"],
+        "properties": {
+          "ok":     { "type": "boolean", "enum": [false] },
+          "error":  { "type": "string", "description": "Short error class.", "example": "bad request" },
+          "detail": { "type": "string", "description": "Additional context. Present on 400 responses.", "example": "hosts must be a non-empty array" },
+          "code": {
+            "type": "integer",
+            "description": "Auth/lock error code. 1=denied, 2=bad credentials, 3=insufficient privilege, 4=lock conflict.",
+            "enum": [1, 2, 3, 4]
+          },
+          "conflicts": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Hosts with active locks. Present on 409 responses."
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed request body or missing required fields.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "ok": false, "error": "bad request", "detail": "hosts must be a non-empty array" }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Auth hook denied the request. The code field indicates the denial reason: 1=denied, 2=bad credentials, 3=insufficient privilege.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "ok": false, "error": "bad credentials", "code": 2 }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "One or more target hosts are locked by a concurrent operation.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "ok": false, "error": "locked", "code": 4, "conflicts": ["db-01"] }
+          }
+        }
+      },
+      "DiscoverySuccess": {
+        "description": "Agent capabilities keyed by hostname.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/DiscoveryResponse" }
+          }
+        }
+      }
+    }
+  }
+}

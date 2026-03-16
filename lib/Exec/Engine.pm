@@ -1,0 +1,608 @@
+package Exec::Engine;
+
+use strict;
+use warnings;
+use JSON  qw(encode_json decode_json);
+use Carp  qw(croak);
+use POSIX qw(WNOHANG);
+
+use Exec::Log qw();
+
+
+my $DEFAULT_PORT = 7443;
+
+# Run a script on one or more hosts in parallel.
+# Each host gets a forked child; results are collected via pipes.
+#
+# Required opts:
+#   hosts   => \@host_strings   (may include host:port)
+#   script  => $name
+#   config  => \%config         (cert, key, ca, optional timeout)
+#
+# Optional opts:
+#   args     => \@script_args   (default [])
+#   reqid    => $id             (generated if absent)
+#   port     => $default_port   (default 7443)
+#   username => $str            (forwarded to agent for downstream use)
+#   token    => $str            (forwarded to agent for downstream use)
+#
+# Returns arrayref of result hashrefs:
+#   { host, script, exit, stdout, stderr, reqid, rtt }
+#   { host, script, exit => -1, error, reqid, rtt }
+sub dispatch_all {
+    my (%opts) = @_;
+    my $hosts    = $opts{hosts}    or croak "hosts required";
+    my $script   = $opts{script}   or croak "script required";
+    my $config   = $opts{config}   or croak "config required";
+    my $args     = $opts{args}     // [];
+    my $reqid    = $opts{reqid}    // gen_reqid();
+    my $port     = $opts{port}     // $DEFAULT_PORT;
+    my $username = $opts{username} // '';
+    my $token    = $opts{token}    // '';
+
+    croak "hosts must be an arrayref" unless ref $hosts eq 'ARRAY';
+    croak "args must be an arrayref"  unless ref $args  eq 'ARRAY';
+
+    my $max_hosts = $opts{max_hosts} // 500;
+    croak "too many hosts (max $max_hosts)" if @$hosts > $max_hosts;
+
+    Exec::Log::log_action('INFO', {
+        ACTION => 'dispatch',
+        SCRIPT => $script,
+        HOSTS  => join(',', @$hosts),
+        REQID  => $reqid,
+    });
+
+    my @results;
+    my %pipes;
+
+    for my $host_str (@$hosts) {
+        my ($host, $hport) = parse_host($host_str, $port);
+        pipe my $r, my $w or die "pipe: $!";
+
+        my $pid = fork();
+        die "fork: $!" unless defined $pid;
+
+        if ($pid == 0) {
+            close $r;
+            my $result = _dispatch_one(
+                host     => $host,
+                port     => $hport,
+                script   => $script,
+                args     => $args,
+                reqid    => $reqid,
+                config   => $config,
+                username => $username,
+                token    => $token,
+            );
+            print $w encode_json($result);
+            close $w;
+            exit 0;
+        }
+
+        close $w;
+        $pipes{$pid} = { fh => $r, host => $host_str };
+    }
+
+    while (%pipes) {
+        my $pid = waitpid -1, 0;
+        last if $pid <= 0;
+        next unless exists $pipes{$pid};
+
+        my $fh   = $pipes{$pid}{fh};
+        my $host = $pipes{$pid}{host};
+        my $raw  = do { local $/; <$fh> };
+        close $fh;
+
+        my $result = eval { decode_json($raw) }
+            // { host => $host, script => $script, exit => -1,
+                 error => 'no response from child', reqid => $reqid };
+        push @results, $result;
+        delete $pipes{$pid};
+    }
+
+    return \@results;
+}
+
+# Ping one or more hosts in parallel.
+#
+# Required opts:
+#   hosts   => \@host_strings
+#   config  => \%config
+#
+# Optional opts:
+#   reqid   => $id
+#   port    => $default_port
+#
+# Returns arrayref of result hashrefs:
+#   { host, status => 'ok', version, expiry, rtt, reqid }
+#   { host, status => 'error', error, rtt }
+sub ping_all {
+    my (%opts) = @_;
+    my $hosts  = $opts{hosts}  or croak "hosts required";
+    my $config = $opts{config} or croak "config required";
+    my $reqid  = $opts{reqid}  // gen_reqid();
+    my $port   = $opts{port}   // $DEFAULT_PORT;
+
+    croak "hosts must be an arrayref" unless ref $hosts eq 'ARRAY';
+
+    my $max_hosts = $opts{max_hosts} // 500;
+    croak "too many hosts (max $max_hosts)" if @$hosts > $max_hosts;
+
+    my @results;
+    my %pipes;
+
+    for my $host_str (@$hosts) {
+        my ($host, $hport) = parse_host($host_str, $port);
+        pipe my $r, my $w or die "pipe: $!";
+
+        my $pid = fork();
+        die "fork: $!" unless defined $pid;
+
+        if ($pid == 0) {
+            close $r;
+            my $result = _ping_one(
+                host   => $host,
+                port   => $hport,
+                reqid  => $reqid,
+                config => $config,
+            );
+            print $w encode_json($result);
+            close $w;
+            exit 0;
+        }
+
+        close $w;
+        $pipes{$pid} = { fh => $r, host => $host_str };
+    }
+
+    while (%pipes) {
+        my $pid = waitpid -1, 0;
+        last if $pid <= 0;
+        next unless exists $pipes{$pid};
+
+        my $fh  = $pipes{$pid}{fh};
+        my $raw = do { local $/; <$fh> };
+        close $fh;
+
+        my $result = eval { decode_json($raw) }
+            // { host => $pipes{$pid}{host}, status => 'error',
+                 error => 'no response from child' };
+
+        # Trigger cert renewal if cert is past half-life
+        if (($result->{status} // '') eq 'ok' && $result->{expiry}) {
+            my $cert_days = $config->{cert_days} // 365;
+            if (_renewal_due($result->{expiry}, $cert_days)) {
+                my ($rhost, $rport) = parse_host($pipes{$pid}{host}, $port);
+                eval {
+                    _renew_one(
+                        host   => $rhost,
+                        port   => $rport,
+                        config => $config,
+                        reqid  => gen_reqid(),
+                    );
+                };
+                if ($@) {
+                    Exec::Log::log_action('ERR', {
+                        ACTION => 'renew',
+                        TARGET => "$rhost:$rport",
+                        ERROR  => $@,
+                    });
+                }
+            }
+        }
+
+        push @results, $result;
+        delete $pipes{$pid};
+    }
+
+    return \@results;
+}
+
+# Query one or more hosts for their capabilities (allowlisted scripts) in parallel.
+#
+# Required opts:
+#   hosts   => \@host_strings
+#   config  => \%config
+#
+# Optional opts:
+#   port    => $default_port
+#
+# Returns arrayref of result hashrefs:
+#   { host, status => 'ok', version, scripts => [{name, path, executable},...] }
+#   { host, status => 'error', error }
+sub capabilities_all {
+    my (%opts) = @_;
+    my $hosts  = $opts{hosts}  or croak "hosts required";
+    my $config = $opts{config} or croak "config required";
+    my $port   = $opts{port}   // $DEFAULT_PORT;
+
+    croak "hosts must be an arrayref" unless ref $hosts eq 'ARRAY';
+
+    my $max_hosts = $opts{max_hosts} // 500;
+    croak "too many hosts (max $max_hosts)" if @$hosts > $max_hosts;
+
+    my @results;
+    my %pipes;
+
+    for my $host_str (@$hosts) {
+        my ($host, $hport) = parse_host($host_str, $port);
+        pipe my $r, my $w or die "pipe: $!";
+
+        my $pid = fork();
+        die "fork: $!" unless defined $pid;
+
+        if ($pid == 0) {
+            close $r;
+            my $result = _capabilities_one(
+                host   => $host,
+                port   => $hport,
+                config => $config,
+            );
+            print $w encode_json($result);
+            close $w;
+            exit 0;
+        }
+
+        close $w;
+        $pipes{$pid} = { fh => $r, host => $host_str };
+    }
+
+    while (%pipes) {
+        my $pid = waitpid -1, 0;
+        last if $pid <= 0;
+        next unless exists $pipes{$pid};
+
+        my $fh  = $pipes{$pid}{fh};
+        my $raw = do { local $/; <$fh> };
+        close $fh;
+
+        my $result = eval { decode_json($raw) }
+            // { host => $pipes{$pid}{host}, status => 'error',
+                 error => 'no response from child' };
+        push @results, $result;
+        delete $pipes{$pid};
+    }
+
+    return \@results;
+}
+
+# Parse a host string into (host, port).
+# Accepts "hostname" or "hostname:port".
+sub parse_host {
+    my ($host_str, $default_port) = @_;
+    if ($host_str =~ /^(.+):(\d+)$/) {
+        return ($1, $2);
+    }
+    return ($host_str, $default_port // $DEFAULT_PORT);
+}
+
+# Generate a cryptographically random 16-hex-character request ID.
+sub gen_reqid {
+    open my $fh, '<:raw', '/dev/urandom'
+        or return sprintf '%08x%08x', int(rand(0xffffffff)), int(rand(0xffffffff));
+    my $buf;
+    sysread $fh, $buf, 8;
+    close $fh;
+    return unpack 'H*', $buf;
+}
+
+# --- private ---
+
+sub _dispatch_one {
+    my (%opts) = @_;
+    my $host   = $opts{host};
+    my $port   = $opts{port};
+    my $config = $opts{config};
+    my $reqid  = $opts{reqid};
+
+    require Time::HiRes;
+    my $t0 = Time::HiRes::time();
+    my $ua = _build_ua($config);
+
+    my $payload = encode_json({
+        script   => $opts{script},
+        args     => $opts{args} // [],
+        reqid    => $reqid,
+        username => $opts{username} // '',
+        token    => $opts{token}    // '',
+    });
+
+    my $resp = eval {
+        $ua->post(
+            "https://$host:$port/run",
+            'Content-Type' => 'application/json',
+            Content        => $payload,
+        );
+    };
+
+    my $rtt = sprintf '%.0fms', (Time::HiRes::time() - $t0) * 1000;
+
+    if ($@ || !$resp || !$resp->is_success) {
+        my $err;
+        if ($resp && $resp->code == 403) {
+            my $body = eval { decode_json($resp->content) } // {};
+            $err = 'forbidden: ' . ($body->{error} // $resp->status_line);
+        }
+        elsif ($resp && $resp->code == 413) {
+            $err = 'request too large';
+        }
+        else {
+            my $raw_err = $@ || ($resp ? $resp->status_line : 'no response');
+            my $timeout = $config->{read_timeout} // $config->{timeout} // 60;
+            $err = ($raw_err =~ /timeout|read timeout/i)
+                ? "read timeout after ${timeout}s"
+                : $raw_err;
+        }
+        Exec::Log::log_action('ERR', {
+            ACTION => 'run',
+            SCRIPT => $opts{script},
+            TARGET => "$host:$port",
+            ERROR  => $err,
+            RTT    => $rtt,
+            REQID  => $reqid,
+        });
+        return {
+            host   => $host,
+            script => $opts{script},
+            exit   => -1,
+            error  => $err,
+            rtt    => $rtt,
+            reqid  => $reqid,
+        };
+    }
+
+    my $result = eval { decode_json($resp->content) }
+        // { host => $host, exit => -1, error => 'invalid JSON response' };
+
+    $result->{host}  //= $host;
+    $result->{rtt}     = $rtt;
+    $result->{reqid} //= $reqid;
+
+    Exec::Log::log_action('INFO', {
+        ACTION => 'run',
+        SCRIPT => $opts{script},
+        TARGET => "$host:$port",
+        EXIT   => $result->{exit},
+        RTT    => $rtt,
+        REQID  => $reqid,
+    });
+
+    return $result;
+}
+
+sub _ping_one {
+    my (%opts) = @_;
+    my $host   = $opts{host};
+    my $port   = $opts{port};
+    my $config = $opts{config};
+    my $reqid  = $opts{reqid};
+
+    require Time::HiRes;
+    my $t0 = Time::HiRes::time();
+    my $ua = _build_ua($config);
+
+    my $resp = eval {
+        $ua->post(
+            "https://$host:$port/ping",
+            'Content-Type' => 'application/json',
+            Content        => encode_json({ reqid => $reqid }),
+        );
+    };
+
+    my $rtt = sprintf '%.0fms', (Time::HiRes::time() - $t0) * 1000;
+
+    if ($@ || !$resp || !$resp->is_success) {
+        my $err;
+        if ($resp && $resp->code == 403) {
+            my $body = eval { decode_json($resp->content) } // {};
+            $err = 'forbidden: ' . ($body->{error} // $resp->status_line);
+        }
+        elsif ($resp && $resp->code == 413) {
+            $err = 'request too large';
+        }
+        else {
+            $err = $@ || ($resp ? $resp->status_line : 'no response');
+        }
+        Exec::Log::log_action('ERR', {
+            ACTION => 'ping',
+            TARGET => "$host:$port",
+            ERROR  => $err,
+            RTT    => $rtt,
+            REQID  => $reqid,
+        });
+        return { host => $host, status => 'error', error => $err, rtt => $rtt };
+    }
+
+    my $result = eval { decode_json($resp->content) }
+        // { host => $host, status => 'error', error => 'invalid JSON' };
+
+    $result->{rtt}  = $rtt;
+    $result->{host} //= $host;
+
+    Exec::Log::log_action('INFO', {
+        ACTION => 'ping',
+        TARGET => "$host:$port",
+        RESULT => 'ok',
+        RTT    => $rtt,
+        REQID  => $reqid,
+    });
+
+    return $result;
+}
+
+sub _capabilities_one {
+    my (%opts) = @_;
+    my $host   = $opts{host};
+    my $port   = $opts{port};
+    my $config = $opts{config};
+
+    require Time::HiRes;
+    my $t0 = Time::HiRes::time();
+    my $ua = _build_ua($config);
+
+    my $resp = eval {
+        $ua->get("https://$host:$port/capabilities");
+    };
+
+    my $rtt = sprintf '%.0fms', (Time::HiRes::time() - $t0) * 1000;
+
+    if ($@ || !$resp || !$resp->is_success) {
+        my $err = $@ || ($resp ? $resp->status_line : 'no response');
+        Exec::Log::log_action('ERR', {
+            ACTION => 'capabilities',
+            TARGET => "$host:$port",
+            ERROR  => $err,
+            RTT    => $rtt,
+        });
+        return { host => $host, status => 'error', error => $err, rtt => $rtt };
+    }
+
+    my $result = eval { decode_json($resp->content) }
+        // { host => $host, status => 'error', error => 'invalid JSON' };
+
+    $result->{rtt}  = $rtt;
+    $result->{host} //= $host;
+
+    Exec::Log::log_action('INFO', {
+        ACTION  => 'capabilities',
+        TARGET  => "$host:$port",
+        SCRIPTS => scalar @{ $result->{scripts} // [] },
+        RTT     => $rtt,
+    });
+
+    return $result;
+}
+
+sub _build_ua {
+    my ($config) = @_;
+    require LWP::UserAgent;
+    require IO::Socket::SSL;
+
+    # LWP's ssl_opts hash does not pass SSL_cert_file/SSL_key_file through
+    # to IO::Socket::SSL for client cert presentation. Set them as global
+    # SSL defaults so every outbound connection uses the ctrl-exec cert.
+    IO::Socket::SSL::set_defaults(
+        SSL_cert_file    => $config->{cert},
+        SSL_key_file     => $config->{key},
+        SSL_ca_file      => $config->{ca},
+        SSL_verify_mode  => 0x01,
+        SSL_cipher_list  => 'ECDHE-RSA-AES256-GCM-SHA384:'
+                          . 'ECDHE-ECDSA-AES256-GCM-SHA384:'
+                          . 'ECDHE-RSA-AES128-GCM-SHA256:'
+                          . 'ECDHE-ECDSA-AES128-GCM-SHA256',
+        SSL_ciphersuites => 'TLS_AES_256_GCM_SHA384:'
+                          . 'TLS_CHACHA20_POLY1305_SHA256:'
+                          . 'TLS_AES_128_GCM_SHA256',
+    );
+
+    my $ua = LWP::UserAgent->new(
+        ssl_opts => {
+            SSL_ca_file     => $config->{ca},
+            SSL_verify_mode => 0x01,
+            verify_hostname => 0,   # verified by CA, not hostname
+        },
+        timeout => $config->{read_timeout} // $config->{timeout} // 60,
+    );
+    return $ua;
+}
+
+# Returns true if the cert should be renewed.
+# Renewal is due when remaining validity is less than half of cert_days.
+# Returns false (safe default) if the expiry string cannot be parsed.
+sub _renewal_due {
+    my ($expiry_str, $cert_days) = @_;
+    return 0 unless $expiry_str;
+
+    require Time::Piece;
+    my $expiry_epoch = eval {
+        Time::Piece->strptime($expiry_str, '%b %d %H:%M:%S %Y %Z')->epoch;
+    };
+    return 0 unless $expiry_epoch;
+
+    my $remaining  = $expiry_epoch - time();
+    my $half_life  = ($cert_days / 2) * 86400;
+    return $remaining < $half_life ? 1 : 0;
+}
+
+# Perform cert renewal for a single agent over the existing mTLS connection.
+# POSTs /renew to get a CSR, signs it, POSTs /renew-complete to deliver.
+# Updates the registry expiry on success. Dies on any failure.
+sub _renew_one {
+    my (%opts) = @_;
+    my $host   = $opts{host};
+    my $port   = $opts{port};
+    my $config = $opts{config};
+    my $reqid  = $opts{reqid};
+
+    require Exec::CA;
+    require Exec::Registry;
+
+    Exec::Log::log_action('INFO', {
+        ACTION => 'renew',
+        TARGET => "$host:$port",
+        REQID  => $reqid,
+        STATUS => 'starting',
+    });
+
+    my $ua = _build_ua($config);
+
+    # Request CSR from agent
+    my $resp = $ua->post(
+        "https://$host:$port/renew",
+        'Content-Type' => 'application/json',
+        Content        => encode_json({ reqid => $reqid }),
+    );
+    die "renew request failed: " . $resp->status_line unless $resp->is_success;
+
+    my $data = eval { decode_json($resp->content) }
+        or die "invalid JSON in renew response";
+    my $csr_pem = $data->{csr} or die "no CSR in renew response";
+
+    # Sign the CSR
+    my $cert_pem = Exec::CA::sign_csr(
+        csr_pem => $csr_pem,
+        ca_dir  => $config->{ca_dir} // '/etc/ctrl-exec',
+        days    => $config->{cert_days} // 365,
+    );
+    my $ca_pem = Exec::CA::read_ca_cert(
+        ca_dir => $config->{ca_dir} // '/etc/ctrl-exec',
+    );
+
+    # Deliver new cert
+    my $resp2 = $ua->post(
+        "https://$host:$port/renew-complete",
+        'Content-Type' => 'application/json',
+        Content        => encode_json({
+            cert  => $cert_pem,
+            ca    => $ca_pem,
+            reqid => $reqid,
+        }),
+    );
+    die "renew-complete failed: " . $resp2->status_line unless $resp2->is_success;
+
+    # Extract new expiry and update registry
+    my $expiry = _extract_expiry($cert_pem) // 'unknown';
+    Exec::Registry::update_expiry(hostname => $host, expiry => $expiry);
+
+    Exec::Log::log_action('INFO', {
+        ACTION => 'renew-complete',
+        TARGET => "$host:$port",
+        REQID  => $reqid,
+        EXPIRY => $expiry,
+    });
+}
+
+# Extract notAfter date string from a PEM cert via openssl subprocess.
+sub _extract_expiry {
+    my ($cert_pem) = @_;
+    require File::Temp;
+    my ($fh, $path) = File::Temp::tempfile(UNLINK => 1);
+    print $fh $cert_pem;
+    close $fh;
+    my $out = `openssl x509 -noout -enddate -in "$path" 2>/dev/null`;
+    chomp $out;
+    return $out =~ /^notAfter=(.+)$/ ? $1 : undef;
+}
+
+1;
