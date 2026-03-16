@@ -3,11 +3,9 @@
 *.pdf
 
 # dont automatically send packages
-dispatcher-*.tar.gz
-dispatcher-*.tar.gz.sha256
+ctrl-exec-*.tar.gz
+ctrl-exec-*.tar.gz.sha256
 
 # Keep local for now
 TODO.md
 
-# hardlink
-lib/Dispatcher/Agent/Agent_Pairing.pm
