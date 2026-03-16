@@ -9,7 +9,7 @@ use FindBin qw($Bin);
 {
     no warnings 'redefine';
     local *main::main = sub {};   # suppress main() execution
-    do "$Bin/../bin/ctrl-exec";
+    do "$Bin/../bin/ctrl-exec-dispatcher";
     die "Could not load ctrl-exec: $@" if $@;
 }
 

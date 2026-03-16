@@ -40,9 +40,9 @@ sub run_script {
     my (%opts) = @_;
     # opts: serial, serial_file, pid_file, env
     my @env_pairs;
-    push @env_pairs, "DISPATCHER_SERIAL_FILE=$opts{serial_file}"
+    push @env_pairs, "ENVEXEC_SERIAL_FILE=$opts{serial_file}"
         if defined $opts{serial_file};
-    push @env_pairs, "DISPATCHER_AGENT_PIDFILE=$opts{pid_file}"
+    push @env_pairs, "ENVEXEC_AGENT_PIDFILE=$opts{pid_file}"
         if defined $opts{pid_file};
 
     my $env_prefix = @env_pairs ? join(' ', @env_pairs) . ' ' : '';
@@ -215,7 +215,7 @@ subtest 'accepts valid uppercase hex serial (normalised to lowercase)' => sub {
 # File write
 # ---------------------------------------------------------------------------
 
-subtest 'writes serial to DISPATCHER_SERIAL_FILE' => sub {
+subtest 'writes serial to ENVEXEC_SERIAL_FILE' => sub {
     my $dir    = tempdir(CLEANUP => 1);
     my $sfile  = "$dir/ctrl-exec-serial";
     my $pfile  = "$dir/ctrl-exec-agent.pid";
