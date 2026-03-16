@@ -262,6 +262,21 @@ ctrl-exec-agent serve
 
 ### 6. Verify from the ctrl-exec
 
+On the agent host, confirm the agent is listening and enforcing policy
+correctly with a loopback test:
+
+```bash
+sudo ctrl-exec-agent self-ping
+```
+
+`self-ping` connects to `127.0.0.1:7443`, completes the mTLS handshake,
+and sends a ping. The agent responds with 403 serial mismatch — the
+correct behaviour, since the agent's own cert is not a ctrl-exec cert.
+A successful `self-ping` confirms the port is listening, TLS is working,
+and the agent is enforcing serial policy.
+
+Then verify from the ctrl-exec host:
+
 ```bash
 ctrl-exec ping <agent-hostname>
 ```

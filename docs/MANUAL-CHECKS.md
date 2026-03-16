@@ -47,7 +47,40 @@ Fail
   the unit file. Restart after any change: `systemctl restart ctrl-exec-agent`.
 
 
-## 2. Systemd Unit Hardening — AF_UNIX Present
+## 2. Agent Self-Ping — Live Network Verification
+
+Confirms the agent is listening on port 7443, the TLS stack is functional,
+and the agent is actively enforcing serial policy. Requires the agent to be
+running and paired. Run this check on the agent host directly — no ctrl-exec
+access is needed.
+
+```bash
+sudo ctrl-exec-agent self-ping
+```
+
+Pass
+: Output shows port listening, mTLS handshake OK, and `403 serial mismatch
+  (expected)`. The 403 is the correct result — the agent's own cert is not
+  a ctrl-exec cert, and the agent correctly rejects it.
+
+Fail — port not listening
+: The agent service is not running or is bound to a different port. Check
+  `systemctl status ctrl-exec-agent` and the `port` setting in `agent.conf`.
+
+Fail — mTLS handshake error
+: TLS configuration is broken. Check cert and CA paths in `agent.conf` and
+  confirm the cert files are readable by the agent process.
+
+Fail — unexpected response or no response
+: The agent accepted the connection but did not respond as expected. Check
+  the agent syslog for errors. Also run `self-check` to confirm the
+  configuration is valid.
+
+Run this check after initial installation and after any change to the agent
+service, port configuration, or cert files.
+
+
+## 3. Systemd Unit Hardening — AF_UNIX Present
 
 Confirms `RestrictAddressFamilies` includes `AF_UNIX`. Omitting it silently
 blocks all syslog output because `Sys::Syslog` uses a Unix domain socket to
@@ -65,7 +98,7 @@ Fail
   agent. Verify syslog output (check 1) after correcting.
 
 
-## 3. Auth Hook Invocation
+## 4. Auth Hook Invocation
 
 Confirms the auth hook is called for every `run` and `ping` request, and that
 its exit code is respected.
@@ -110,7 +143,7 @@ Fail
   executable.
 
 
-## 4. Allowlist SIGHUP Reload
+## 5. Allowlist SIGHUP Reload
 
 Confirms the agent reloads `scripts.conf` on SIGHUP without restarting, and
 that newly added entries take effect immediately.
@@ -136,7 +169,7 @@ Fail
   entry is syntactically correct in `scripts.conf`.
 
 
-## 5. Rate Limit Block and Recovery
+## 6. Rate Limit Block and Recovery
 
 Confirms the volume rate limiter blocks a source IP after exceeding the
 threshold and that the block expires correctly. The unit test (`t/rate-limit.t`)
@@ -168,7 +201,7 @@ Note
   test suite, and remove it when done.
 
 
-## 6. Pairing Flow — Fresh Agent
+## 7. Pairing Flow — Fresh Agent
 
 Confirms the full pairing sequence works end-to-end: agent submits CSR,
 ctrl-exec displays the pairing code, operator approves, agent stores certs.
@@ -199,7 +232,7 @@ Fail
   `/etc/ctrl-exec-agent` permissions.
 
 
-## 7. Cert Rotation Broadcast
+## 8. Cert Rotation Broadcast
 
 Confirms that `ctrl-exec rotate-cert` reaches all registered agents and that
 each agent updates its stored ctrl-exec serial.
@@ -219,7 +252,7 @@ Fail
   window expires, the agent requires re-pairing.
 
 
-## 8. Revocation Takes Effect
+## 9. Revocation Takes Effect
 
 Confirms that adding a serial to `revoked-serials` on an agent causes
 subsequent connections from that cert to be rejected, without restarting the
@@ -249,7 +282,7 @@ Restore
   normal operation.
 
 
-## 9. Agent Restart Recovery
+## 10. Agent Restart Recovery
 
 Confirms the agent restarts cleanly after a crash and that `Restart=on-failure`
 in the unit file is functioning.
@@ -273,7 +306,7 @@ Fail
   parse error introduced since last start.
 
 
-## 10. OpenWrt — procd Restart and logread
+## 11. OpenWrt — procd Restart and logread
 
 OpenWrt-specific. Confirms the agent runs under procd, survives a restart, and
 logs to the ring buffer readable via `logread`.
@@ -304,16 +337,16 @@ Fail
 ## When to Run These Checks
 
 After initial installation
-: Checks 1, 2, 6, 9 (and 10 if OpenWrt agents are present).
+: Checks 1, 2, 3, 7, 10 (and 11 if OpenWrt agents are present).
 
 After a unit file or agent.conf change
-: Checks 1, 2, 4, 5 as applicable to what changed.
+: Checks 1, 2, 3, 5, 6 as applicable to what changed.
 
 After a cert rotation or renewal
-: Checks 7, 8.
+: Checks 8, 9.
 
 Before a production release
 : All checks on at least one Debian agent and one OpenWrt agent.
 
 After any security incident or suspected compromise
-: Checks 6, 7, 8 as a minimum. Consider full re-pairing of affected agents.
+: Checks 7, 8, 9 as a minimum. Consider full re-pairing of affected agents.

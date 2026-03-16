@@ -867,6 +867,46 @@ configuration changes to confirm the agent will start cleanly.
 
 ---
 
+### self-ping
+
+Perform a live mTLS loopback test against the running agent. Connects to
+`127.0.0.1:7443` using the agent's own certificate, verifies the port is
+listening, completes the mTLS handshake, and sends a `/ping` request.
+
+```bash
+ctrl-exec-agent self-ping
+```
+
+The agent will reject the connection with a 403 serial mismatch — the
+agent's cert is not a ctrl-exec cert and does not match the stored
+ctrl-exec serial. This is the expected and correct result. `self-ping`
+treats a 403 response as a pass: it confirms that the port is listening,
+the TLS stack is functioning, and the agent is correctly enforcing serial
+policy.
+
+Typical output:
+
+```
+Checking config...
+  Config OK (port 7443)
+  Paired: yes (cert expires Jun 18 11:09:58 2028 GMT)
+Connecting to 127.0.0.1:7443...
+  Port 7443: listening
+  mTLS handshake: OK
+  Ping response: 403 serial mismatch (expected - agent is running and enforcing policy)
+Self-ping complete.
+```
+
+Contrast with `self-check`: that mode validates configuration, allowlist,
+and cert files locally with no network connection. `self-ping` requires
+the agent to be running and paired and exercises the live network path.
+
+Use `self-ping` after installation to confirm the agent is reachable and
+policy enforcement is active before the ctrl-exec attempts its first
+connection.
+
+---
+
 ## ctrl-exec-api
 
 The `ctrl-exec-api` binary exposes the ctrl-exec's run, ping, and
