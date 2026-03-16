@@ -1,11 +1,11 @@
 #!/bin/bash
-# install.sh - Install ctrl-exec agent, ctrl-exec CLI, or API server
+# install.sh - Install ctrl-exec-agent, ctrl-exec-dispatcher, or ctrl-exec-api
 # Must be run as root. Role must be specified explicitly.
 #
 # Usage:
 #   ./install.sh --agent        Install the agent (on remote hosts)
-#   ./install.sh --ctrl-exec   Install the ctrl-exec CLI (on control host)
-#   ./install.sh --api          Install the API server (on control host, after --ctrl-exec)
+#   ./install.sh --dispatcher   Install ctrl-exec-dispatcher (on control host)
+#   ./install.sh --api          Install ctrl-exec-api (on control host, after --dispatcher)
 #   ./install.sh --uninstall    Remove installed files (preserves config/certs)
 #   ./install.sh --run-tests    Run test suite from the source directory
 #
@@ -540,9 +540,9 @@ install_ctrl_exec_dispatcher() {
 
     safe_install 755 "$SOURCE_DIR/bin/ctrl-exec-dispatcher" "$BIN_DIR/ctrl-exec-dispatcher"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
-        "$BIN_DIR/ctrl-exec"
+        "$BIN_DIR/ctrl-exec-dispatcher"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
-        "$BIN_DIR/ctrl-exec"
+        "$BIN_DIR/ctrl-exec-dispatcher"
 
     # Config directory
     mkdir -p "$EXEC_CONF_DIR"
@@ -585,7 +585,11 @@ install_ctrl_exec_dispatcher() {
         info "Auth hook already exists, not overwriting."
     fi
 
-    info "ctrl-exec installed at $BIN_DIR/ctrl-exec"
+    info "ctrl-exec-dispatcher installed at $BIN_DIR/ctrl-exec-dispatcher"
+
+    # Shortcut symlink
+    ln -sf "$BIN_DIR/ctrl-exec-dispatcher" "$BIN_DIR/ced"
+    info "Shortcut: ced -> ctrl-exec-dispatcher"
 }
 
 # --- api installation ---
@@ -594,16 +598,10 @@ install_api() {
     info "Installing ctrl-exec-api..."
 
     safe_install 755 "$SOURCE_DIR/bin/ctrl-exec-api" "$BIN_DIR/ctrl-exec-api"
-        "$BIN_DIR/ced"
-        "$BIN_DIR/cea"
     sed -i "s|use lib \"\$Bin/../lib\";|use lib \"$LIB_DIR\";|" \
         "$BIN_DIR/ctrl-exec-api"
-        "$BIN_DIR/ced"
-        "$BIN_DIR/cea"
     sed -i "s|our \$VERSION = .*;|our \$VERSION = '$RELEASE_VERSION';|" \
         "$BIN_DIR/ctrl-exec-api"
-        "$BIN_DIR/ced"
-        "$BIN_DIR/cea"
 
     install_service_unit "$API_SERVICE"
 
@@ -635,7 +633,7 @@ uninstall() {
 
     local files=(
         "$BIN_DIR/ctrl-exec-agent"
-        "$BIN_DIR/ctrl-exec"
+        "$BIN_DIR/ctrl-exec-dispatcher"
         "$BIN_DIR/ctrl-exec-api"
         "$BIN_DIR/ced"
         "$BIN_DIR/cea"
@@ -834,16 +832,16 @@ DO_RUN_TESTS=false
 for arg in "$@"; do
     case "$arg" in
         --agent)      ROLE="agent" ;;
-        --ctrl-exec) ROLE="ctrl-exec-dispatcher" ;;
+        --dispatcher) ROLE="ctrl-exec-dispatcher" ;;
         --api)        ROLE="api" ;;
         --uninstall)  DO_UNINSTALL=true ;;
         --run-tests)  DO_RUN_TESTS=true ;;
         --help|-h)
-            echo "Usage: $0 --agent | --ctrl-exec | --api | --uninstall [--run-tests]"
+            echo "Usage: $0 --agent | --dispatcher | --api | --uninstall [--run-tests]"
             echo ""
             echo "  --agent        Install the agent service (on remote hosts)"
-            echo "  --ctrl-exec   Install the ctrl-exec CLI (on control host)"
-            echo "  --api          Install the API server (on control host, after --ctrl-exec)"
+            echo "  --dispatcher   Install ctrl-exec-dispatcher (on control host)"
+            echo "  --api          Install ctrl-exec-api (on control host, after --dispatcher)"
             echo "  --uninstall    Remove installed files (config, certs, and agent registry preserved)"
             echo "  --run-tests    Run test suite from source directory after installation"
             echo ""
@@ -880,7 +878,7 @@ if [[ "$DO_RUN_TESTS" == true && -z "$ROLE" ]]; then
     exit 0
 fi
 
-[[ -n "$ROLE" ]] || die "Role must be specified. Use --agent, --ctrl-exec, --api, --uninstall, or --run-tests. See --help."
+[[ -n "$ROLE" ]] || die "Role must be specified. Use --agent, --dispatcher, --api, --uninstall, or --run-tests. See --help."
 
 check_openssl
 check_perl_modules "$ROLE"
@@ -898,7 +896,7 @@ case "$ROLE" in
     api)
         # API requires the ctrl-exec role to already be installed
         if [[ ! -f "$EXEC_CONF_DIR/ctrl-exec.conf" ]]; then
-            die "--api requires --ctrl-exec to be installed first."
+            die "--api requires --dispatcher to be installed first."
         fi
         install_api
         print_next_steps_api
