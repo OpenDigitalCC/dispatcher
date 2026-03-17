@@ -1,0 +1,669 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 960 540"
+   width="960"
+   height="540"
+   font-family="Georgia, 'Times New Roman', serif"
+   version="1.1"
+   id="svg143"
+   sodipodi:docname="ctrl-exec-overview.svg"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview145"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showgrid="false"
+     inkscape:zoom="1.2361274"
+     inkscape:cx="569.92507"
+     inkscape:cy="495.0946"
+     inkscape:window-width="2854"
+     inkscape:window-height="1704"
+     inkscape:window-x="0"
+     inkscape:window-y="27"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg143" />
+  <defs
+     id="defs11">
+    <!-- Arrow marker - slate -->
+    <marker
+       id="arrow-slate"
+       markerWidth="8"
+       markerHeight="6"
+       refX="7"
+       refY="3"
+       orient="auto">
+      <polygon
+         points="0 0, 8 3, 0 6"
+         fill="#4a5568"
+         id="polygon2" />
+    </marker>
+    <!-- Arrow marker - accent -->
+    <marker
+       id="arrow-accent"
+       markerWidth="8"
+       markerHeight="6"
+       refX="7"
+       refY="3"
+       orient="auto">
+      <polygon
+         points="0 0, 8 3, 0 6"
+         fill="#2b6cb0"
+         id="polygon5" />
+    </marker>
+    <!-- Arrow marker - muted return -->
+    <marker
+       id="arrow-muted"
+       markerWidth="8"
+       markerHeight="6"
+       refX="7"
+       refY="3"
+       orient="auto">
+      <polygon
+         points="0 0, 8 3, 0 6"
+         fill="#a0aec0"
+         id="polygon8" />
+    </marker>
+  </defs>
+  <!-- Background -->
+  <rect
+     width="960"
+     height="540"
+     fill="#f7f8fa"
+     id="rect13" />
+  <!-- Title block -->
+  <text
+     x="48"
+     y="52"
+     font-size="22"
+     font-weight="bold"
+     fill="#1a202c"
+     letter-spacing="0.5"
+     id="text15">ctrl-exec</text>
+  <text
+     x="48"
+     y="74"
+     font-size="13"
+     fill="#718096"
+     letter-spacing="0.3"
+     id="text17">Remote script execution with centralised access control</text>
+  <!-- ═══════════════════════════════════════════════════
+       TRUST BOUNDARY — shaded region for ctrl-exec host
+  ════════════════════════════════════════════════════ -->
+  <rect
+     x="330"
+     y="100"
+     width="300"
+     height="360"
+     rx="4"
+     fill="#ebf4ff"
+     stroke="#bee3f8"
+     stroke-width="1.5"
+     id="rect19" />
+  <text
+     x="480"
+     y="122"
+     font-size="10"
+     fill="#2b6cb0"
+     text-anchor="middle"
+     letter-spacing="1"
+     font-family="'Courier New', monospace"
+     font-weight="bold"
+     id="text21">YOUR INFRASTRUCTURE</text>
+  <!-- ═══════════════════════════════════════════════
+       LEFT COLUMN — Operators
+  ════════════════════════════════════════════════ -->
+  <!-- Admin box -->
+  <rect
+     x="48"
+     y="148"
+     width="180"
+     height="64"
+     rx="3"
+     fill="white"
+     stroke="#cbd5e0"
+     stroke-width="1.5"
+     id="rect23" />
+  <text
+     x="138"
+     y="172"
+     font-size="13"
+     fill="#2d3748"
+     text-anchor="middle"
+     font-weight="bold"
+     id="text25">System Administrator</text>
+  <text
+     x="138"
+     y="191"
+     font-size="11"
+     fill="#718096"
+     text-anchor="middle"
+     id="text27">defines permitted commands</text>
+  <!-- Web user box -->
+  <rect
+     x="48"
+     y="248"
+     width="180"
+     height="64"
+     rx="3"
+     fill="white"
+     stroke="#cbd5e0"
+     stroke-width="1.5"
+     id="rect29" />
+  <text
+     x="138"
+     y="272"
+     font-size="13"
+     fill="#2d3748"
+     text-anchor="middle"
+     font-weight="bold"
+     id="text31">Operator / User</text>
+  <text
+     x="138"
+     y="291"
+     font-size="11"
+     fill="#718096"
+     text-anchor="middle"
+     id="text33">issues commands via web UI</text>
+  <!-- API client box -->
+  <rect
+     x="48"
+     y="348"
+     width="180"
+     height="64"
+     rx="3"
+     fill="white"
+     stroke="#cbd5e0"
+     stroke-width="1.5"
+     id="rect35" />
+  <text
+     x="138"
+     y="372"
+     font-size="13"
+     fill="#2d3748"
+     text-anchor="middle"
+     font-weight="bold"
+     id="text37">Automated System</text>
+  <text
+     x="138"
+     y="391"
+     font-size="11"
+     fill="#718096"
+     text-anchor="middle"
+     id="text39">calls ctrl-exec API directly</text>
+  <!-- ═══════════════════════════════════════════════
+       CENTRE — ctrl-exec Host
+  ════════════════════════════════════════════════ -->
+  <!-- ctrl-exec core box -->
+  <rect
+     x="355"
+     y="140"
+     width="250"
+     height="100"
+     rx="3"
+     fill="white"
+     stroke="#2b6cb0"
+     stroke-width="2"
+     id="rect41" />
+  <text
+     x="480"
+     y="166"
+     font-size="15"
+     font-weight="bold"
+     fill="#1a365d"
+     text-anchor="middle"
+     id="text43">ctrl-exec Host</text>
+  <!-- Inner components -->
+  <rect
+     x="370"
+     y="178"
+     width="100"
+     height="44"
+     rx="2"
+     fill="#ebf4ff"
+     stroke="#90cdf4"
+     stroke-width="1"
+     id="rect45" />
+  <text
+     x="420"
+     y="196"
+     font-size="10"
+     fill="#2b6cb0"
+     text-anchor="middle"
+     font-weight="bold"
+     id="text47">Web Interface</text>
+  <text
+     x="420"
+     y="212"
+     font-size="9"
+     fill="#4a90d9"
+     text-anchor="middle"
+     id="text49">browser access</text>
+  <rect
+     x="485"
+     y="178"
+     width="100"
+     height="44"
+     rx="2"
+     fill="#ebf4ff"
+     stroke="#90cdf4"
+     stroke-width="1"
+     id="rect51" />
+  <text
+     x="535"
+     y="196"
+     font-size="10"
+     fill="#2b6cb0"
+     text-anchor="middle"
+     font-weight="bold"
+     id="text53">API</text>
+  <text
+     x="535"
+     y="212"
+     font-size="9"
+     fill="#4a90d9"
+     text-anchor="middle"
+     id="text55">programmatic access</text>
+  <!-- Auth / policy box -->
+  <rect
+     x="355"
+     y="262"
+     width="250"
+     height="80"
+     rx="3"
+     fill="#fffbeb"
+     stroke="#f6ad55"
+     stroke-width="1.5"
+     id="rect57" />
+  <text
+     x="480"
+     y="286"
+     font-size="12"
+     font-weight="bold"
+     fill="#744210"
+     text-anchor="middle"
+     id="text59">Auth Hook</text>
+  <text
+     x="480"
+     y="304"
+     font-size="10"
+     fill="#975a16"
+     text-anchor="middle"
+     id="text61">credential validation ·</text>
+  <text
+     x="480"
+     y="320"
+     font-size="10"
+     fill="#975a16"
+     text-anchor="middle"
+     id="text63">access control · audit log</text>
+  <!-- Integrates-with label -->
+  <text
+     x="480"
+     y="358"
+     font-size="9"
+     fill="#718096"
+     text-anchor="middle"
+     font-style="italic"
+     id="text65">integrates with existing IAM / LDAP / SSO</text>
+  <!-- Script store box -->
+  <rect
+     x="355"
+     y="370"
+     width="250"
+     height="60"
+     rx="3"
+     fill="white"
+     stroke="#cbd5e0"
+     stroke-width="1.5"
+     id="rect67" />
+  <text
+     x="480"
+     y="394"
+     font-size="12"
+     font-weight="bold"
+     fill="#2d3748"
+     text-anchor="middle"
+     id="text69">Permitted Script Library</text>
+  <text
+     x="480"
+     y="412"
+     font-size="10"
+     fill="#718096"
+     text-anchor="middle"
+     id="text71">only pre-approved scripts can execute</text>
+  <!-- ═══════════════════════════════════════════════
+       RIGHT COLUMN — Remote hosts
+  ════════════════════════════════════════════════ -->
+  <!-- Remote host 1 -->
+  <rect
+     x="732"
+     y="148"
+     width="180"
+     height="80"
+     rx="3"
+     fill="white"
+     stroke="#cbd5e0"
+     stroke-width="1.5"
+     id="rect73" />
+  <text
+     x="822"
+     y="172"
+     font-size="13"
+     fill="#2d3748"
+     text-anchor="middle"
+     font-weight="bold"
+     id="text75">Remote Host</text>
+  <text
+     x="822"
+     y="191"
+     font-size="10"
+     fill="#718096"
+     text-anchor="middle"
+     id="text77">ctrl-exec Agent installed</text>
+  <text
+     x="822"
+     y="207"
+     font-size="10"
+     fill="#718096"
+     text-anchor="middle"
+     id="text79">executes approved scripts only</text>
+  <!-- Remote host 2 -->
+  <rect
+     x="732"
+     y="260"
+     width="180"
+     height="80"
+     rx="3"
+     fill="white"
+     stroke="#cbd5e0"
+     stroke-width="1.5"
+     id="rect81" />
+  <text
+     x="822"
+     y="284"
+     font-size="13"
+     fill="#2d3748"
+     text-anchor="middle"
+     font-weight="bold"
+     id="text83">Remote Host</text>
+  <text
+     x="822"
+     y="303"
+     font-size="10"
+     fill="#718096"
+     text-anchor="middle"
+     id="text85">ctrl-exec Agent installed</text>
+  <text
+     x="822"
+     y="319"
+     font-size="10"
+     fill="#718096"
+     text-anchor="middle"
+     id="text87">executes approved scripts only</text>
+  <!-- Remote host 3 (faded - implies many) -->
+  <rect
+     x="732"
+     y="372"
+     width="180"
+     height="64"
+     rx="3"
+     fill="white"
+     stroke="#e2e8f0"
+     stroke-width="1"
+     stroke-dasharray="4,3"
+     id="rect89" />
+  <text
+     x="822"
+     y="400"
+     font-size="13"
+     fill="#a0aec0"
+     text-anchor="middle"
+     font-weight="bold"
+     id="text91">Remote Host</text>
+  <text
+     x="822"
+     y="419"
+     font-size="10"
+     fill="#cbd5e0"
+     text-anchor="middle"
+     id="text93">· · · scales to fleet · · ·</text>
+  <!-- ═══════════════════════════════════════════════
+       ARROWS — left to centre
+  ════════════════════════════════════════════════ -->
+  <!-- Admin → Web Interface -->
+  <line
+     x1="228"
+     y1="174"
+     x2="355"
+     y2="200"
+     stroke="#4a5568"
+     stroke-width="1.5"
+     marker-end="url(#arrow-slate)"
+     id="line95" />
+  <!-- User → Web Interface -->
+  <line
+     x1="228"
+     y1="278"
+     x2="355"
+     y2="210"
+     stroke="#4a5568"
+     stroke-width="1.5"
+     marker-end="url(#arrow-slate)"
+     id="line97" />
+  <!-- Automated → API -->
+  <line
+     x1="228"
+     y1="378"
+     x2="480"
+     y2="242"
+     stroke="#4a5568"
+     stroke-width="1.5"
+     stroke-dasharray="5,3"
+     marker-end="url(#arrow-slate)"
+     id="line99" />
+  <!-- Auth Hook internal connection -->
+  <line
+     x1="480"
+     y1="240"
+     x2="480"
+     y2="262"
+     stroke="#f6ad55"
+     stroke-width="1.5"
+     marker-end="url(#arrow-accent)"
+     id="line101" />
+  <!-- ═══════════════════════════════════════════════
+       ARROWS — centre to right (command dispatch)
+  ════════════════════════════════════════════════ -->
+  <!-- ctrl-exec → Remote host 1 -->
+  <line
+     x1="605"
+     y1="185"
+     x2="732"
+     y2="185"
+     stroke="#2b6cb0"
+     stroke-width="2"
+     marker-end="url(#arrow-accent)"
+     id="line103" />
+  <text
+     x="668"
+     y="178"
+     font-size="9"
+     fill="#2b6cb0"
+     text-anchor="middle"
+     id="text105">command</text>
+  <!-- ctrl-exec → Remote host 2 -->
+  <line
+     x1="605"
+     y1="296"
+     x2="732"
+     y2="296"
+     stroke="#2b6cb0"
+     stroke-width="2"
+     marker-end="url(#arrow-accent)"
+     id="line107" />
+  <text
+     x="668"
+     y="289"
+     font-size="9"
+     fill="#2b6cb0"
+     text-anchor="middle"
+     id="text109">command</text>
+  <!-- ctrl-exec → Remote host 3 (dashed) -->
+  <line
+     x1="605"
+     y1="400"
+     x2="732"
+     y2="400"
+     stroke="#a0aec0"
+     stroke-width="1.5"
+     stroke-dasharray="4,3"
+     marker-end="url(#arrow-muted)"
+     id="line111" />
+  <!-- Return result arrows (muted) -->
+  <line
+     x1="732"
+     y1="198"
+     x2="605"
+     y2="198"
+     stroke="#a0aec0"
+     stroke-width="1"
+     stroke-dasharray="3,3"
+     marker-end="url(#arrow-muted)"
+     id="line113" />
+  <text
+     x="668"
+     y="212"
+     font-size="9"
+     fill="#a0aec0"
+     text-anchor="middle"
+     id="text115">result</text>
+  <line
+     x1="732"
+     y1="308"
+     x2="605"
+     y2="308"
+     stroke="#a0aec0"
+     stroke-width="1"
+     stroke-dasharray="3,3"
+     marker-end="url(#arrow-muted)"
+     id="line117" />
+  <!-- ═══════════════════════════════════════════════
+       LEGEND / KEY
+  ════════════════════════════════════════════════ -->
+  <rect
+     x="48"
+     y="460"
+     width="580"
+     height="56"
+     rx="3"
+     fill="white"
+     stroke="#e2e8f0"
+     stroke-width="1"
+     id="rect119" />
+  <!-- Legend items -->
+  <line
+     x1="68"
+     y1="484"
+     x2="100"
+     y2="484"
+     stroke="#4a5568"
+     stroke-width="1.5"
+     marker-end="url(#arrow-slate)"
+     id="line121" />
+  <text
+     x="108"
+     y="488"
+     font-size="10"
+     fill="#4a5568"
+     id="text123">authenticated request</text>
+  <line
+     x1="68"
+     y1="504"
+     x2="100"
+     y2="504"
+     stroke="#4a5568"
+     stroke-width="1.5"
+     stroke-dasharray="5,3"
+     marker-end="url(#arrow-slate)"
+     id="line125" />
+  <text
+     x="108"
+     y="508"
+     font-size="10"
+     fill="#4a5568"
+     id="text127">API call (programmatic)</text>
+  <line
+     x1="240"
+     y1="484"
+     x2="272"
+     y2="484"
+     stroke="#2b6cb0"
+     stroke-width="2"
+     marker-end="url(#arrow-accent)"
+     id="line129" />
+  <text
+     x="280"
+     y="488"
+     font-size="10"
+     fill="#2b6cb0"
+     id="text131">approved command dispatched</text>
+  <line
+     x1="240"
+     y1="504"
+     x2="272"
+     y2="504"
+     stroke="#a0aec0"
+     stroke-width="1"
+     stroke-dasharray="3,3"
+     marker-end="url(#arrow-muted)"
+     id="line133" />
+  <text
+     x="280"
+     y="508"
+     font-size="10"
+     fill="#a0aec0"
+     id="text135">result returned</text>
+  <rect
+     x="440"
+     y="474"
+     width="12"
+     height="12"
+     rx="1"
+     fill="#fffbeb"
+     stroke="#f6ad55"
+     stroke-width="1.5"
+     id="rect137" />
+  <text
+     x="460"
+     y="484"
+     font-size="10px"
+     fill="#975a16"
+     id="text139"><tspan
+       sodipodi:role="line"
+       id="tspan566"
+       x="460"
+       y="484">policy enforcement point — no</tspan><tspan
+       sodipodi:role="line"
+       id="tspan568"
+       x="460"
+       y="496.5">unapproved script can execute</tspan></text>
+  <!-- ═══════════════════════════════════════════════
+       VERSION / CAPTION
+  ════════════════════════════════════════════════ -->
+  <text
+     x="912"
+     y="528"
+     font-size="9"
+     fill="#cbd5e0"
+     text-anchor="end"
+     id="text141">ctrl-exec.run</text>
+</svg>

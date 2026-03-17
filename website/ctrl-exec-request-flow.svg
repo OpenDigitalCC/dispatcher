@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" width="1100" height="620"
+     font-family="'Open Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif">
+
+  <defs>
+    <marker id="arr-purple" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#3F264F"/>
+    </marker>
+    <marker id="arr-teal" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#32707E"/>
+    </marker>
+    <marker id="arr-ochre" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#D1A75C"/>
+    </marker>
+    <marker id="arr-forest" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#43634A"/>
+    </marker>
+    <marker id="arr-muted" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#C6C6C5"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1100" height="620" fill="#FAFAFA"/>
+
+  <!-- Title -->
+  <text x="48" y="46" font-size="17" font-weight="700" fill="#3F264F" letter-spacing="0.3">ctrl-exec — The Request Flow</text>
+  <text x="48" y="66" font-size="11" fill="#777777">From initiator to structured result: authentication, policy, execution, retrieval</text>
+
+  <!-- ═══════════════════════════════════════════════
+       REQUEST ID SPINE — vertical thread
+  ════════════════════════════════════════════════ -->
+  <!-- Spine line -->
+  <line x1="440" y1="90" x2="440" y2="530" stroke="#3F264F" stroke-width="1" stroke-dasharray="3,4" opacity="0.3"/>
+  <text x="440" y="84" font-size="8" fill="#3F264F" text-anchor="middle" letter-spacing="1" font-weight="700">REQUEST ID CORRELATION THREAD</text>
+
+  <!-- ═══════════════════════════════════════════════
+       STEP 0 — Initiators (left column)
+  ════════════════════════════════════════════════ -->
+
+  <text x="48" y="100" font-size="9" fill="#777777" font-weight="700" letter-spacing="1">INITIATOR</text>
+
+  <!-- Four initiator types -->
+  <rect x="48" y="108" width="130" height="36" rx="3" fill="white" stroke="#C6C6C5" stroke-width="1.5"/>
+  <text x="113" y="122" font-size="10" font-weight="700" fill="#3C3C3B" text-anchor="middle">Human Operator</text>
+  <text x="113" y="136" font-size="9" fill="#777777" text-anchor="middle">web UI · browser</text>
+
+  <rect x="48" y="154" width="130" height="36" rx="3" fill="white" stroke="#C6C6C5" stroke-width="1.5"/>
+  <text x="113" y="168" font-size="10" font-weight="700" fill="#3C3C3B" text-anchor="middle">API Client</text>
+  <text x="113" y="182" font-size="9" fill="#777777" text-anchor="middle">token auth · REST</text>
+
+  <rect x="48" y="200" width="130" height="36" rx="3" fill="white" stroke="#C6C6C5" stroke-width="1.5"/>
+  <text x="113" y="214" font-size="10" font-weight="700" fill="#3C3C3B" text-anchor="middle">Scheduled Job</text>
+  <text x="113" y="228" font-size="9" fill="#777777" text-anchor="middle">cron · pipeline trigger</text>
+
+  <rect x="48" y="246" width="130" height="36" rx="3" fill="white" stroke="#C6C6C5" stroke-width="1.5"/>
+  <text x="113" y="260" font-size="10" font-weight="700" fill="#3C3C3B" text-anchor="middle">Upstream System</text>
+  <text x="113" y="274" font-size="9" fill="#777777" text-anchor="middle">webhook · orchestrator</text>
+
+  <!-- Arrows from all initiators converging -->
+  <line x1="178" y1="126" x2="240" y2="190" stroke="#3C3C3B" stroke-width="1.5" marker-end="url(#arr-purple)"/>
+  <line x1="178" y1="172" x2="240" y2="194" stroke="#3C3C3B" stroke-width="1.5" marker-end="url(#arr-purple)"/>
+  <line x1="178" y1="218" x2="240" y2="198" stroke="#3C3C3B" stroke-width="1.5" marker-end="url(#arr-purple)"/>
+  <line x1="178" y1="264" x2="240" y2="202" stroke="#3C3C3B" stroke-width="1.5" marker-end="url(#arr-purple)"/>
+
+  <!-- ═══════════════════════════════════════════════
+       STEP 1 — ctrl-exec API
+  ════════════════════════════════════════════════ -->
+
+  <rect x="240" y="160" width="160" height="70" rx="3" fill="white" stroke="#3F264F" stroke-width="2"/>
+  <rect x="240" y="160" width="160" height="22" rx="3" fill="#3F264F"/>
+  <rect x="240" y="174" width="160" height="8" fill="#3F264F"/>
+  <text x="320" y="175" font-size="9" font-weight="700" fill="white" text-anchor="middle" letter-spacing="0.5">DISPATCHER API</text>
+  <text x="320" y="196" font-size="9" fill="#3C3C3B" text-anchor="middle">receive request</text>
+  <text x="320" y="210" font-size="9" fill="#3C3C3B" text-anchor="middle">assign request ID</text>
+  <text x="320" y="222" font-size="9" fill="#3C3C3B" text-anchor="middle">enqueue job</text>
+
+  <!-- Request ID badge -->
+  <rect x="272" y="236" width="96" height="18" rx="9" fill="#3F264F"/>
+  <text x="320" y="249" font-size="8" fill="white" text-anchor="middle" font-weight="700" letter-spacing="0.5">req_7f3a9c · assigned</text>
+
+  <!-- Step arrow -->
+  <line x1="400" y1="195" x2="456" y2="195" stroke="#3F264F" stroke-width="2" marker-end="url(#arr-purple)"/>
+
+  <!-- ═══════════════════════════════════════════════
+       STEP 2 — Auth Hook
+  ════════════════════════════════════════════════ -->
+
+  <rect x="456" y="148" width="170" height="120" rx="3" fill="#FEF9EE" stroke="#D1A75C" stroke-width="2"/>
+  <rect x="456" y="148" width="170" height="22" rx="3" fill="#D1A75C"/>
+  <rect x="456" y="162" width="170" height="8" fill="#D1A75C"/>
+  <text x="541" y="163" font-size="9" font-weight="700" fill="white" text-anchor="middle" letter-spacing="0.5">AUTH HOOK</text>
+  <text x="541" y="184" font-size="9" fill="#3C3C3B" text-anchor="middle">validate token / credential</text>
+  <text x="541" y="198" font-size="9" fill="#3C3C3B" text-anchor="middle">check script against policy</text>
+  <text x="541" y="212" font-size="9" fill="#3C3C3B" text-anchor="middle">validate arguments</text>
+  <text x="541" y="226" font-size="9" fill="#3C3C3B" text-anchor="middle">write audit entry</text>
+  <text x="541" y="244" font-size="9" font-weight="700" fill="#43634A" text-anchor="middle">→ AUTHORISE or REJECT</text>
+
+  <!-- Step arrow authorised -->
+  <line x1="626" y1="195" x2="682" y2="195" stroke="#43634A" stroke-width="2" marker-end="url(#arr-forest)"/>
+  <text x="654" y="188" font-size="8" fill="#43634A" text-anchor="middle">authorised</text>
+
+  <!-- Rejection path -->
+  <line x1="541" y1="268" x2="541" y2="310" stroke="#B35440" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-muted)"/>
+  <rect x="476" y="310" width="130" height="36" rx="3" fill="#FDF6F4" stroke="#B35440" stroke-width="1.5"/>
+  <text x="541" y="325" font-size="9" font-weight="700" fill="#B35440" text-anchor="middle">Rejected</text>
+  <text x="541" y="339" font-size="9" fill="#777777" text-anchor="middle">403 · audit entry written</text>
+
+  <!-- ═══════════════════════════════════════════════
+       STEP 3 — Script Execution
+  ════════════════════════════════════════════════ -->
+
+  <rect x="682" y="148" width="170" height="120" rx="3" fill="white" stroke="#32707E" stroke-width="2"/>
+  <rect x="682" y="148" width="170" height="22" rx="3" fill="#32707E"/>
+  <rect x="682" y="162" width="170" height="8" fill="#32707E"/>
+  <text x="767" y="163" font-size="9" font-weight="700" fill="white" text-anchor="middle" letter-spacing="0.5">SCRIPT EXECUTION</text>
+  <text x="767" y="184" font-size="9" fill="#3C3C3B" text-anchor="middle">fetch approved script</text>
+  <text x="767" y="198" font-size="9" fill="#3C3C3B" text-anchor="middle">verify hash</text>
+  <text x="767" y="212" font-size="9" fill="#3C3C3B" text-anchor="middle">dispatch to agent</text>
+  <text x="767" y="226" font-size="9" fill="#3C3C3B" text-anchor="middle">agent executes on host</text>
+  <text x="767" y="244" font-size="9" fill="#777777" text-anchor="middle">stdout · stderr · exit code captured</text>
+
+  <!-- Step arrow to result store -->
+  <line x1="767" y1="268" x2="767" y2="320" stroke="#32707E" stroke-width="2" marker-end="url(#arr-teal)"/>
+
+  <!-- ═══════════════════════════════════════════════
+       STEP 4 — Result Store
+  ════════════════════════════════════════════════ -->
+
+  <rect x="672" y="320" width="190" height="110" rx="3" fill="white" stroke="#4E6A92" stroke-width="2"/>
+  <rect x="672" y="320" width="190" height="22" rx="3" fill="#4E6A92"/>
+  <rect x="672" y="334" width="190" height="8" fill="#4E6A92"/>
+  <text x="767" y="335" font-size="9" font-weight="700" fill="white" text-anchor="middle" letter-spacing="0.5">STATUS STORE — 24 hr</text>
+  <text x="767" y="356" font-size="9" fill="#3C3C3B" text-anchor="middle">result keyed to request ID</text>
+  <text x="767" y="370" font-size="9" fill="#3C3C3B" text-anchor="middle">stdout · stderr · exit code</text>
+  <text x="767" y="384" font-size="9" fill="#3C3C3B" text-anchor="middle">execution timestamp</text>
+  <text x="767" y="398" font-size="9" fill="#3C3C3B" text-anchor="middle">agent identity</text>
+  <text x="767" y="414" font-size="9" fill="#777777" text-anchor="middle">retained 24 hours · then pruned</text>
+
+  <!-- Request ID badge in store -->
+  <rect x="703" y="422" width="128" height="18" rx="9" fill="#4E6A92"/>
+  <text x="767" y="435" font-size="8" fill="white" text-anchor="middle" font-weight="700" letter-spacing="0.5">req_7f3a9c · stored</text>
+
+  <!-- ═══════════════════════════════════════════════
+       STEP 5 — Result retrieval
+  ════════════════════════════════════════════════ -->
+
+  <!-- Poll / retrieve arrow back to initiator -->
+  <path d="M 672,400 C 560,400 480,430 430,460" fill="none" stroke="#32707E" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-teal)"/>
+
+  <rect x="290" y="450" width="240" height="56" rx="3" fill="white" stroke="#32707E" stroke-width="1.5"/>
+  <text x="410" y="470" font-size="10" font-weight="700" fill="#32707E" text-anchor="middle">Result Retrieved</text>
+  <text x="410" y="485" font-size="9" fill="#3C3C3B" text-anchor="middle">GET /api/result/req_7f3a9c</text>
+  <text x="410" y="499" font-size="9" fill="#777777" text-anchor="middle">poll or webhook notification</text>
+
+  <!-- Request ID final badge -->
+  <rect x="342" y="510" width="136" height="18" rx="9" fill="#32707E"/>
+  <text x="410" y="523" font-size="8" fill="white" text-anchor="middle" font-weight="700" letter-spacing="0.5">req_7f3a9c · correlated</text>
+
+  <!-- ═══════════════════════════════════════════════
+       RIGHT COLUMN — Audit Log
+  ════════════════════════════════════════════════ -->
+
+  <rect x="910" y="108" width="160" height="420" rx="3" fill="#F5F5F5" stroke="#C6C6C5" stroke-width="1.5"/>
+  <rect x="910" y="108" width="160" height="22" rx="3" fill="#3C3C3B"/>
+  <rect x="910" y="122" width="160" height="8" fill="#3C3C3B"/>
+  <text x="990" y="123" font-size="9" font-weight="700" fill="white" text-anchor="middle" letter-spacing="0.5">AUDIT LOG</text>
+
+  <text x="926" y="148" font-size="8" fill="#777777">Every invocation records:</text>
+  <text x="926" y="166" font-size="8" fill="#3C3C3B">· request ID</text>
+  <text x="926" y="182" font-size="8" fill="#3C3C3B">· initiator identity</text>
+  <text x="926" y="198" font-size="8" fill="#3C3C3B">· script name</text>
+  <text x="926" y="214" font-size="8" fill="#3C3C3B">· arguments supplied</text>
+  <text x="926" y="230" font-size="8" fill="#3C3C3B">· auth decision</text>
+  <text x="926" y="246" font-size="8" fill="#3C3C3B">· target host</text>
+  <text x="926" y="262" font-size="8" fill="#3C3C3B">· timestamp</text>
+  <text x="926" y="278" font-size="8" fill="#3C3C3B">· exit code</text>
+
+  <line x1="926" y1="292" x2="1054" y2="292" stroke="#C6C6C5" stroke-width="1"/>
+
+  <text x="926" y="310" font-size="8" fill="#777777">Rejections also logged:</text>
+  <text x="926" y="328" font-size="8" fill="#B35440">· reason for rejection</text>
+  <text x="926" y="344" font-size="8" fill="#B35440">· policy rule matched</text>
+  <text x="926" y="360" font-size="8" fill="#B35440">· identity attempted</text>
+
+  <line x1="926" y1="374" x2="1054" y2="374" stroke="#C6C6C5" stroke-width="1"/>
+
+  <text x="926" y="392" font-size="8" fill="#777777">Suitable for:</text>
+  <text x="926" y="408" font-size="8" fill="#3C3C3B">· SOC / SIEM ingestion</text>
+  <text x="926" y="424" font-size="8" fill="#3C3C3B">· compliance reporting</text>
+  <text x="926" y="440" font-size="8" fill="#3C3C3B">· incident correlation</text>
+  <text x="926" y="456" font-size="8" fill="#3C3C3B">· change management</text>
+  <text x="926" y="472" font-size="8" fill="#3C3C3B">  evidence</text>
+
+  <!-- Audit log feed arrows from API and auth hook -->
+  <line x1="856" y1="180" x2="910" y2="200" stroke="#C6C6C5" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#arr-muted)"/>
+  <line x1="856" y1="220" x2="910" y2="230" stroke="#C6C6C5" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#arr-muted)"/>
+
+  <!-- ═══════════════════════════════════════════════
+       STEP NUMBERS
+  ════════════════════════════════════════════════ -->
+  <circle cx="210" cy="90" r="12" fill="#3F264F"/>
+  <text x="210" y="95" font-size="10" font-weight="700" fill="white" text-anchor="middle">1</text>
+  <text x="226" y="95" font-size="9" fill="#3F264F">Initiate</text>
+
+  <circle cx="320" cy="138" r="12" fill="#3F264F"/>
+  <text x="320" y="143" font-size="10" font-weight="700" fill="white" text-anchor="middle">2</text>
+  <text x="336" y="143" font-size="9" fill="#3F264F">API receives · ID assigned</text>
+
+  <circle cx="541" cy="126" r="12" fill="#D1A75C"/>
+  <text x="541" y="131" font-size="10" font-weight="700" fill="white" text-anchor="middle">3</text>
+  <text x="557" y="131" font-size="9" fill="#D1A75C">Auth hook intercepts</text>
+
+  <circle cx="767" cy="126" r="12" fill="#32707E"/>
+  <text x="767" y="131" font-size="10" font-weight="700" fill="white" text-anchor="middle">4</text>
+  <text x="783" y="131" font-size="9" fill="#32707E">Execute · capture result</text>
+
+  <circle cx="767" cy="298" r="12" fill="#4E6A92"/>
+  <text x="767" y="303" font-size="10" font-weight="700" fill="white" text-anchor="middle">5</text>
+  <text x="783" y="303" font-size="9" fill="#4E6A92">Store 24 hr</text>
+
+  <circle cx="410" cy="432" r="12" fill="#32707E"/>
+  <text x="410" y="437" font-size="10" font-weight="700" fill="white" text-anchor="middle">6</text>
+  <text x="426" y="437" font-size="9" fill="#32707E">Retrieve by request ID</text>
+
+  <!-- caption -->
+  <text x="1055" y="616" font-size="9" fill="#C6C6C5" text-anchor="end">ctrl-exec.run</text>
+
+</svg>

@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" width="1100" height="620"
+     font-family="'Open Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif">
+
+  <defs>
+    <marker id="arr-purple" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#3F264F"/>
+    </marker>
+    <marker id="arr-teal" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#32707E"/>
+    </marker>
+    <marker id="arr-forest" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#43634A"/>
+    </marker>
+    <marker id="arr-muted" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#C6C6C5"/>
+    </marker>
+    <marker id="arr-ochre" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#D1A75C"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1100" height="620" fill="#FAFAFA"/>
+
+  <!-- Title -->
+  <text x="48" y="46" font-size="17" font-weight="700" fill="#3F264F" letter-spacing="0.3">ctrl-exec — The Fleet Model</text>
+  <text x="48" y="66" font-size="11" fill="#777777">One control point. Many remote agents. No field visit required.</text>
+
+  <!-- ═══════════════════════════════════════════════
+       CONTROL POINT — left
+  ════════════════════════════════════════════════ -->
+
+  <rect x="40" y="90" width="240" height="420" rx="4" fill="#F4F0F7" stroke="#3F264F" stroke-width="2"/>
+  <rect x="40" y="90" width="240" height="32" rx="4" fill="#3F264F"/>
+  <rect x="40" y="110" width="240" height="12" fill="#3F264F"/>
+  <text x="160" y="112" font-size="10" font-weight="700" fill="white" text-anchor="middle" letter-spacing="1">CONTROL POINT</text>
+
+  <!-- Operations team -->
+  <rect x="60" y="136" width="200" height="52" rx="3" fill="white" stroke="#C6C6C5" stroke-width="1.5"/>
+  <text x="160" y="157" font-size="11" font-weight="700" fill="#3C3C3B" text-anchor="middle">Operations Team</text>
+  <text x="160" y="172" font-size="9" fill="#777777" text-anchor="middle">web UI · API · scheduled jobs</text>
+  <text x="160" y="184" font-size="9" fill="#777777" text-anchor="middle">one team, one interface</text>
+
+  <!-- ctrl-exec host box -->
+  <rect x="60" y="206" width="200" height="90" rx="3" fill="white" stroke="#3F264F" stroke-width="1.5"/>
+  <text x="160" y="226" font-size="11" font-weight="700" fill="#3F264F" text-anchor="middle">ctrl-exec Host</text>
+  <line x1="60" y1="234" x2="260" y2="234" stroke="#C6C6C5" stroke-width="1"/>
+  <text x="160" y="250" font-size="9" fill="#3C3C3B" text-anchor="middle">single API endpoint</text>
+  <text x="160" y="264" font-size="9" fill="#3C3C3B" text-anchor="middle">script library + policy</text>
+  <text x="160" y="278" font-size="9" fill="#3C3C3B" text-anchor="middle">agent registry + tags</text>
+  <text x="160" y="292" font-size="9" fill="#3C3C3B" text-anchor="middle">status store + audit log</text>
+
+  <!-- Tag grouping concept -->
+  <rect x="60" y="314" width="200" height="88" rx="3" fill="#EBF4FF" stroke="#4E6A92" stroke-width="1.5"/>
+  <text x="160" y="332" font-size="10" font-weight="700" fill="#4E6A92" text-anchor="middle">Agent Tags — targeting</text>
+  <line x1="60" y1="340" x2="260" y2="340" stroke="#4E6A92" stroke-width="1" opacity="0.4"/>
+  <text x="160" y="356" font-size="9" fill="#3C3C3B" text-anchor="middle">tag: region=north</text>
+  <text x="160" y="370" font-size="9" fill="#3C3C3B" text-anchor="middle">tag: type=ev-charger</text>
+  <text x="160" y="384" font-size="9" fill="#3C3C3B" text-anchor="middle">tag: site=manchester-01</text>
+  <text x="160" y="398" font-size="9" fill="#777777" text-anchor="middle">run script on all matching agents</text>
+
+  <!-- Certs note -->
+  <rect x="60" y="416" width="200" height="68" rx="3" fill="white" stroke="#C6C6C5" stroke-width="1.5"/>
+  <text x="160" y="434" font-size="10" font-weight="700" fill="#3C3C3B" text-anchor="middle">Per-Agent Certificates</text>
+  <line x1="60" y1="442" x2="260" y2="442" stroke="#C6C6C5" stroke-width="1"/>
+  <text x="160" y="456" font-size="9" fill="#3C3C3B" text-anchor="middle">each agent has unique cert</text>
+  <text x="160" y="470" font-size="9" fill="#3C3C3B" text-anchor="middle">revoke one without affecting</text>
+  <text x="160" y="482" font-size="9" fill="#3C3C3B" text-anchor="middle">rest of fleet</text>
+
+  <!-- ═══════════════════════════════════════════════
+       DISPATCH ARROWS — centre
+  ════════════════════════════════════════════════ -->
+
+  <!-- Outbound command arrows (solid, teal) -->
+  <line x1="280" y1="240" x2="380" y2="150" stroke="#32707E" stroke-width="2" marker-end="url(#arr-teal)"/>
+  <line x1="280" y1="255" x2="380" y2="280" stroke="#32707E" stroke-width="2" marker-end="url(#arr-teal)"/>
+  <line x1="280" y1="265" x2="380" y2="400" stroke="#32707E" stroke-width="2" marker-end="url(#arr-teal)"/>
+  <line x1="280" y1="268" x2="380" y2="510" stroke="#32707E" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-muted)"/>
+
+  <!-- Return poll arrows (dashed, forest) -->
+  <path d="M 380,165 C 340,165 310,260 280,260" fill="none" stroke="#43634A" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-forest)"/>
+  <path d="M 380,294 C 340,290 310,268 280,268" fill="none" stroke="#43634A" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-forest)"/>
+  <path d="M 380,415 C 340,408 310,278 280,272" fill="none" stroke="#43634A" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-forest)"/>
+
+  <!-- Flow labels -->
+  <rect x="285" y="186" width="86" height="24" rx="2" fill="#F4F0F7"/>
+  <text x="328" y="197" font-size="8" fill="#3F264F" text-anchor="middle" font-weight="700">command</text>
+  <text x="328" y="207" font-size="8" fill="#3F264F" text-anchor="middle">dispatched</text>
+
+  <rect x="285" y="316" width="86" height="24" rx="2" fill="#F0F7F4"/>
+  <text x="328" y="327" font-size="8" fill="#43634A" text-anchor="middle" font-weight="700">agent polls</text>
+  <text x="328" y="337" font-size="8" fill="#43634A" text-anchor="middle">result returned</text>
+
+
+  <!-- ═══════════════════════════════════════════════
+       REMOTE AGENTS — right column
+  ════════════════════════════════════════════════ -->
+
+  <!-- Agent 1 — EV Charger -->
+  <rect x="380" y="96" width="300" height="108" rx="3" fill="white" stroke="#C6C6C5" stroke-width="1.5"/>
+  <text x="530" y="118" font-size="12" font-weight="700" fill="#3C3C3B" text-anchor="middle">EV Charger — Site North-04</text>
+
+  <!-- NAT badge -->
+  <rect x="390" y="128" width="80" height="18" rx="9" fill="#D1A75C" fill-opacity="0.2" stroke="#D1A75C" stroke-width="1"/>
+  <text x="430" y="141" font-size="8" fill="#744210" text-anchor="middle" font-weight="700">behind NAT</text>
+
+  <!-- Tags -->
+  <rect x="480" y="128" width="90" height="18" rx="9" fill="#4E6A92" fill-opacity="0.15" stroke="#4E6A92" stroke-width="1"/>
+  <text x="525" y="141" font-size="8" fill="#4E6A92" text-anchor="middle">region=north</text>
+
+  <rect x="578" y="128" width="90" height="18" rx="9" fill="#4E6A92" fill-opacity="0.15" stroke="#4E6A92" stroke-width="1"/>
+  <text x="623" y="141" font-size="8" fill="#4E6A92" text-anchor="middle">type=ev-charger</text>
+
+  <rect x="390" y="152" width="276" height="30" rx="2" fill="#F0F7F4" stroke="#9AE6B4" stroke-width="1"/>
+  <text x="528" y="165" font-size="9" font-weight="700" fill="#276749" text-anchor="middle">ctrl-exec Agent</text>
+  <text x="528" y="178" font-size="8" fill="#48bb78" text-anchor="middle">outbound polling only · no inbound port required</text>
+
+  <!-- Agent 2 — ATM -->
+  <rect x="380" y="224" width="300" height="108" rx="3" fill="white" stroke="#C6C6C5" stroke-width="1.5"/>
+  <text x="530" y="246" font-size="12" font-weight="700" fill="#3C3C3B" text-anchor="middle">ATM — Branch Manchester-01</text>
+
+  <rect x="390" y="256" width="80" height="18" rx="9" fill="#D1A75C" fill-opacity="0.2" stroke="#D1A75C" stroke-width="1"/>
+  <text x="430" y="269" font-size="8" fill="#744210" text-anchor="middle" font-weight="700">behind NAT</text>
+
+  <rect x="480" y="256" width="100" height="18" rx="9" fill="#4E6A92" fill-opacity="0.15" stroke="#4E6A92" stroke-width="1"/>
+  <text x="530" y="269" font-size="8" fill="#4E6A92" text-anchor="middle">site=manchester-01</text>
+
+  <rect x="390" y="280" width="276" height="30" rx="2" fill="#F0F7F4" stroke="#9AE6B4" stroke-width="1"/>
+  <text x="528" y="293" font-size="9" font-weight="700" fill="#276749" text-anchor="middle">ctrl-exec Agent</text>
+  <text x="528" y="306" font-size="8" fill="#48bb78" text-anchor="middle">constrained hardware · low bandwidth · periodic poll</text>
+
+  <!-- Agent 3 — Kiosk -->
+  <rect x="380" y="352" width="300" height="108" rx="3" fill="white" stroke="#C6C6C5" stroke-width="1.5"/>
+  <text x="530" y="374" font-size="12" font-weight="700" fill="#3C3C3B" text-anchor="middle">Kiosk — Retail Site 07</text>
+
+  <rect x="390" y="384" width="80" height="18" rx="9" fill="#D1A75C" fill-opacity="0.2" stroke="#D1A75C" stroke-width="1"/>
+  <text x="430" y="397" font-size="8" fill="#744210" text-anchor="middle" font-weight="700">behind NAT</text>
+
+  <rect x="480" y="384" width="90" height="18" rx="9" fill="#4E6A92" fill-opacity="0.15" stroke="#4E6A92" stroke-width="1"/>
+  <text x="525" y="397" font-size="8" fill="#4E6A92" text-anchor="middle">type=kiosk</text>
+
+  <rect x="578" y="384" width="90" height="18" rx="9" fill="#4E6A92" fill-opacity="0.15" stroke="#4E6A92" stroke-width="1"/>
+  <text x="623" y="397" font-size="8" fill="#4E6A92" text-anchor="middle">region=south</text>
+
+  <rect x="390" y="408" width="276" height="30" rx="2" fill="#F0F7F4" stroke="#9AE6B4" stroke-width="1"/>
+  <text x="528" y="421" font-size="9" font-weight="700" fill="#276749" text-anchor="middle">ctrl-exec Agent</text>
+  <text x="528" y="434" font-size="8" fill="#48bb78" text-anchor="middle">outbound polling only · no inbound port required</text>
+
+  <!-- Agent N — dashed / implied more -->
+  <rect x="380" y="480" width="300" height="60" rx="3" fill="white" stroke="#E2E8F0" stroke-width="1" stroke-dasharray="5,3"/>
+  <text x="530" y="506" font-size="12" fill="#C6C6C5" text-anchor="middle" font-weight="700">· · · scales to fleet · · ·</text>
+  <text x="530" y="524" font-size="9" fill="#C6C6C5" text-anchor="middle">hundreds of agents, one control point</text>
+
+  <!-- ═══════════════════════════════════════════════
+       BUSINESS OUTCOME — bottom right callout
+  ════════════════════════════════════════════════ -->
+
+  <rect x="700" y="96" width="360" height="490" rx="4" fill="#F4F8F7" stroke="#32707E" stroke-width="1.5"/>
+  <rect x="700" y="96" width="360" height="32" rx="4" fill="#32707E"/>
+  <rect x="700" y="116" width="360" height="12" fill="#32707E"/>
+  <text x="880" y="118" font-size="10" font-weight="700" fill="white" text-anchor="middle" letter-spacing="1">BUSINESS OUTCOMES</text>
+
+  <!-- Outcome 1 -->
+  <text x="720" y="150" font-size="11" font-weight="700" fill="#3F264F">Field visit avoided</text>
+  <text x="720" y="166" font-size="9" fill="#3C3C3B">Configuration update, firmware check, log</text>
+  <text x="720" y="180" font-size="9" fill="#3C3C3B">retrieval — all done remotely via named</text>
+  <text x="720" y="194" font-size="9" fill="#3C3C3B">operation. No engineer dispatched.</text>
+
+  <line x1="720" y1="206" x2="1044" y2="206" stroke="#C6C6C5" stroke-width="1"/>
+
+  <!-- Outcome 2 -->
+  <text x="720" y="224" font-size="11" font-weight="700" fill="#3F264F">No inbound connectivity required</text>
+  <text x="720" y="240" font-size="9" fill="#3C3C3B">Agents poll outbound. Devices behind NAT,</text>
+  <text x="720" y="254" font-size="9" fill="#3C3C3B">4G, or intermittent links work without</text>
+  <text x="720" y="268" font-size="9" fill="#3C3C3B">firewall changes or VPN provisioning.</text>
+
+  <line x1="720" y1="280" x2="1044" y2="280" stroke="#C6C6C5" stroke-width="1"/>
+
+  <!-- Outcome 3 -->
+  <text x="720" y="298" font-size="11" font-weight="700" fill="#3F264F">Targeted operations by tag</text>
+  <text x="720" y="314" font-size="9" fill="#3C3C3B">Run a script on all EV chargers in the</text>
+  <text x="720" y="328" font-size="9" fill="#3C3C3B">northern region with one API call.</text>
+  <text x="720" y="342" font-size="9" fill="#3C3C3B">Tag combinations allow precise targeting.</text>
+
+  <line x1="720" y1="354" x2="1044" y2="354" stroke="#C6C6C5" stroke-width="1"/>
+
+  <!-- Outcome 4 -->
+  <text x="720" y="372" font-size="11" font-weight="700" fill="#3F264F">Per-device revocation</text>
+  <text x="720" y="388" font-size="9" fill="#3C3C3B">Each agent has its own certificate.</text>
+  <text x="720" y="402" font-size="9" fill="#3C3C3B">A compromised or decommissioned device</text>
+  <text x="720" y="416" font-size="9" fill="#3C3C3B">is revoked individually. Fleet unaffected.</text>
+
+  <line x1="720" y1="428" x2="1044" y2="428" stroke="#C6C6C5" stroke-width="1"/>
+
+  <!-- Outcome 5 -->
+  <text x="720" y="446" font-size="11" font-weight="700" fill="#3F264F">Full audit trail</text>
+  <text x="720" y="462" font-size="9" fill="#3C3C3B">Every operation logged: who initiated,</text>
+  <text x="720" y="476" font-size="9" fill="#3C3C3B">which device, which script, what result.</text>
+  <text x="720" y="490" font-size="9" fill="#3C3C3B">Regulatory and SLA evidence built in.</text>
+
+  <line x1="720" y1="502" x2="1044" y2="502" stroke="#C6C6C5" stroke-width="1"/>
+
+  <text x="880" y="526" font-size="9" fill="#32707E" text-anchor="middle" font-style="italic">ctrl-exec is infrastructure for operating deployed assets</text>
+  <text x="880" y="542" font-size="9" fill="#32707E" text-anchor="middle" font-style="italic">without physical access or persistent remote sessions.</text>
+
+  <!-- caption -->
+  <text x="1055" y="616" font-size="9" fill="#C6C6C5" text-anchor="end">ctrl-exec.run</text>
+
+</svg>
