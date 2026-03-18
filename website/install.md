@@ -199,17 +199,17 @@ exec ctrl-exec-api
 
 ## Agent container
 
-The agent uses a two-phase entrypoint: pair on first start, serve on subsequent starts. Set `CTRL_EXEC_HOST` to the hostname or address of the ctrl-exec container.
+The agent uses a two-phase entrypoint: pair on first start, serve on subsequent starts. Set `DISPATCHER_HOST` to the hostname or address of the ctrl-exec container.
 
 ```bash
 #!/bin/sh
 set -e
 CONF_DIR=/etc/ctrl-exec-agent
-if [ -z "$CTRL_EXEC_HOST" ]; then
-    echo "ERROR: CTRL_EXEC_HOST not set" >&2; exit 1
+if [ -z "$DISPATCHER_HOST" ]; then
+    echo "ERROR: DISPATCHER_HOST not set" >&2; exit 1
 fi
 if [ ! -f "$CONF_DIR/agent.crt" ]; then
-    ctrl-exec-agent request-pairing --dispatcher "$CTRL_EXEC_HOST"
+    ctrl-exec-agent request-pairing --dispatcher "$DISPATCHER_HOST"
     echo "Pairing request sent. Approve on ctrl-exec, then restart this container."
     exit 0
 fi
@@ -237,7 +237,7 @@ services:
       dockerfile: docker/Dockerfile.agent
     restart: on-failure
     environment:
-      CTRL_EXEC_HOST: ctrl-exec
+      DISPATCHER_HOST: ctrl-exec
     ports:
       - "7443:7443"
     volumes:
@@ -256,6 +256,6 @@ networks:
   ctrl-exec-net:
 ```
 
-`CTRL_EXEC_HOST: ctrl-exec` uses Docker's internal DNS. No IP addresses required.
+`DISPATCHER_HOST: ctrl-exec` uses Docker's internal DNS. No IP addresses required.
 
 On first start, approve the agent's pairing request on the ctrl-exec container, then restart the agent container to begin serving.

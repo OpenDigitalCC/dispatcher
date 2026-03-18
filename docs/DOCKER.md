@@ -1,22 +1,21 @@
 ---
 title: ctrl-exec - Docker Deployment
-subtitle: Running ctrl-exec and agents in Alpine Linux containers
+subtitle: Running dispatcher and agent containers with Alpine Linux
 brand: odcc
 ---
 
 # ctrl-exec - Docker Deployment
 
-This document covers deploying ctrl-exec and ctrl-exec-agent as Alpine Linux
+This document covers deploying the ctrl-exec dispatcher and agent as Alpine Linux
 Docker containers. The application has no awareness of containers - the
 differences from a bare-metal installation are in how services are started,
 how configuration is persisted, and how pairing is performed between containers.
 
 For bare-metal or VM installation see `INSTALL.md`.
 
-
 ## Overview
 
-ctrl-exec container
+dispatcher container
 : Runs `ctrl-exec-api` in the foreground. Exposes port 7445 (API) and
   optionally 7444 (pairing, only when pairing mode is active). The CA, registry,
   and ctrl-exec cert are stored on a named volume so they persist across
@@ -25,15 +24,19 @@ ctrl-exec container
 agent container
 : Runs `ctrl-exec-agent serve` in the foreground. Exposes port 7443. Agent
   cert and config are stored on a named volume. The container pairs with the
-  ctrl-exec on first start and then serves normally on subsequent starts.
+  dispatcher on first start and then serves normally on subsequent starts.
 
 Volumes hold all state. Containers are otherwise stateless and can be rebuilt
 from the image without loss of pairing or configuration.
 
+The dispatcher and agent each have their own `Dockerfile` and entrypoint script.
+Keeping them separate means either can be built and deployed independently.
+Both can be run together using the full-stack `compose.yml`.
 
-## ctrl-exec Container
 
-### Dockerfile
+## Dispatcher Container
+
+### Dockerfile.dispatcher
 
 ```dockerfile
 FROM alpine:3.21
@@ -51,17 +54,17 @@ COPY . .
 
 RUN ./install.sh --ctrl-exec --api
 
-COPY docker/ctrl-exec-entrypoint.sh /entrypoint.sh
-RUN chmod 755 /entrypoint.sh
+COPY dispatcher-entrypoint.sh /dispatcher-entrypoint.sh
+RUN chmod 755 /dispatcher-entrypoint.sh
 
 EXPOSE 7444 7445
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/dispatcher-entrypoint.sh"]
 ```
 
 ### Entrypoint script
 
-`docker/ctrl-exec-entrypoint.sh`:
+`dispatcher-entrypoint.sh`:
 
 ```bash
 #!/bin/sh
@@ -86,24 +89,26 @@ exec ctrl-exec-api
 The entrypoint uses `exec` so `ctrl-exec-api` runs as PID 1 and receives
 signals directly from Docker.
 
-### docker-compose.yml (ctrl-exec only)
+### compose.yml (dispatcher only)
 
 ```yaml
 services:
-  ctrl-exec:
-    build: .
-    container_name: ctrl-exec
+  dispatcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.dispatcher
+    container_name: dispatcher
     restart: unless-stopped
     ports:
       - "7444:7444"   # pairing - expose only when actively pairing
       - "7445:7445"   # API
     volumes:
-      - ctrl-exec-data:/etc/ctrl-exec
-      - ctrl-exec-registry:/var/lib/ctrl-exec
+      - dispatcher-data:/etc/ctrl-exec
+      - dispatcher-registry:/var/lib/ctrl-exec
 
 volumes:
-  ctrl-exec-data:
-  ctrl-exec-registry:
+  dispatcher-data:
+  dispatcher-registry:
 ```
 
 Port 7444 is the pairing port. If agents are on the same Docker network and
@@ -113,7 +118,7 @@ the host. Publish it only when pairing agents on external hosts.
 
 ## Agent Container
 
-### Dockerfile
+### Dockerfile.agent
 
 ```dockerfile
 FROM alpine:3.21
@@ -130,17 +135,17 @@ COPY . .
 
 RUN ./install.sh --agent
 
-COPY docker/agent-entrypoint.sh /entrypoint.sh
-RUN chmod 755 /entrypoint.sh
+COPY agent-entrypoint.sh /agent-entrypoint.sh
+RUN chmod 755 /agent-entrypoint.sh
 
 EXPOSE 7443
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/agent-entrypoint.sh"]
 ```
 
 ### Entrypoint script
 
-`docker/agent-entrypoint.sh`:
+`agent-entrypoint.sh`:
 
 ```bash
 #!/bin/sh
@@ -149,19 +154,19 @@ set -e
 CONF_DIR=/etc/ctrl-exec-agent
 CERT="$CONF_DIR/agent.crt"
 
-# CTRL_EXEC_HOST must be set in the container environment or compose file.
-if [ -z "$CTRL_EXEC_HOST" ]; then
-    echo "[entrypoint] ERROR: CTRL_EXEC_HOST environment variable not set." >&2
+# DISPATCHER_HOST must be set in the container environment or compose file.
+if [ -z "$DISPATCHER_HOST" ]; then
+    echo "[entrypoint] ERROR: DISPATCHER_HOST environment variable not set." >&2
     exit 1
 fi
 
 # First start: no cert means we have not paired yet.
-# Request pairing and then exit. The operator approves on the ctrl-exec,
+# Request pairing and then exit. The operator approves on the dispatcher,
 # then the container is restarted to begin serving.
 if [ ! -f "$CERT" ]; then
-    echo "[entrypoint] No cert found - requesting pairing with $CTRL_EXEC_HOST..."
-    ctrl-exec-agent request-pairing --dispatcher "$CTRL_EXEC_HOST"
-    echo "[entrypoint] Pairing request sent. Approve on the ctrl-exec, then restart this container."
+    echo "[entrypoint] No cert found - requesting pairing with $DISPATCHER_HOST..."
+    ctrl-exec-agent request-pairing --dispatcher "$DISPATCHER_HOST"
+    echo "[entrypoint] Pairing request sent. Approve on the dispatcher, then restart this container."
     exit 0
 fi
 
@@ -179,39 +184,39 @@ instead. This prints the `reqid` and pairing code to stdout, then waits for
 approval without requiring an interactive terminal:
 
 ```bash
-ctrl-exec-agent request-pairing --dispatcher "$CTRL_EXEC_HOST" --background
+ctrl-exec-agent request-pairing --dispatcher "$DISPATCHER_HOST" --background
 ```
 
 The container still exits after pairing; the `reqid` can be captured by the
 orchestration layer and passed to `ctrl-exec approve <reqid>` on the
-ctrl-exec. See REFERENCE.md `### Orchestrated pairing` for the full flow.
+dispatcher. See REFERENCE.md `### Orchestrated pairing` for the full flow.
 
-### docker-compose.yml (full stack)
+### compose.yml (full stack)
 
 ```yaml
 services:
-  ctrl-exec:
+  dispatcher:
     build:
       context: .
-      dockerfile: docker/Dockerfile.ctrl-exec
-    container_name: ctrl-exec
+      dockerfile: Dockerfile.dispatcher
+    container_name: dispatcher
     restart: unless-stopped
     ports:
       - "7445:7445"
     volumes:
-      - ctrl-exec-data:/etc/ctrl-exec
-      - ctrl-exec-registry:/var/lib/ctrl-exec
+      - dispatcher-data:/etc/ctrl-exec
+      - dispatcher-registry:/var/lib/ctrl-exec
     networks:
       - ctrl-exec-net
 
   agent:
     build:
       context: .
-      dockerfile: docker/Dockerfile.agent
+      dockerfile: Dockerfile.agent
     container_name: agent
     restart: on-failure
     environment:
-      CTRL_EXEC_HOST: ctrl-exec   # Docker DNS resolves service name
+      DISPATCHER_HOST: dispatcher   # Docker DNS resolves service name
     ports:
       - "7443:7443"
     volumes:
@@ -220,11 +225,11 @@ services:
     networks:
       - ctrl-exec-net
     depends_on:
-      - ctrl-exec
+      - dispatcher
 
 volumes:
-  ctrl-exec-data:
-  ctrl-exec-registry:
+  dispatcher-data:
+  dispatcher-registry:
   agent-data:
   agent-scripts:
 
@@ -232,8 +237,8 @@ networks:
   ctrl-exec-net:
 ```
 
-`CTRL_EXEC_HOST: ctrl-exec` uses Docker's internal DNS to resolve the
-ctrl-exec service by name. No IP addresses required.
+`DISPATCHER_HOST: dispatcher` uses Docker's internal DNS to resolve the
+dispatcher service by name. No IP addresses required.
 
 
 ## Pairing Workflow in Docker
@@ -241,25 +246,25 @@ ctrl-exec service by name. No IP addresses required.
 Pairing between containers follows the same protocol as bare-metal but uses
 `docker exec` instead of separate terminal sessions.
 
-### Step 1 - Start the ctrl-exec
+### Step 1 - Start the dispatcher
 
 ```bash
-docker compose up -d ctrl-exec
+docker compose up -d dispatcher
 ```
 
 Wait for the first-start initialisation to complete:
 
 ```bash
-docker logs ctrl-exec
+docker logs dispatcher
 # [entrypoint] First start: initialising CA...
 # [entrypoint] CA and ctrl-exec cert created.
 # [entrypoint] Starting ctrl-exec-api...
 ```
 
-### Step 2 - Start pairing mode on the ctrl-exec
+### Step 2 - Start pairing mode on the dispatcher
 
 ```bash
-docker exec -it ctrl-exec ctrl-exec pairing-mode
+docker exec -it dispatcher ctrl-exec pairing-mode
 ```
 
 This blocks, waiting for requests. Leave it running.
@@ -275,7 +280,7 @@ docker compose up agent
 The entrypoint finds no cert and sends a pairing request:
 
 ```
-[entrypoint] No cert found - requesting pairing with ctrl-exec...
+[entrypoint] No cert found - requesting pairing with dispatcher...
 ```
 
 The agent container exits after sending the request. This is expected.
@@ -295,8 +300,8 @@ Type `a` to approve.
 Alternatively, from a third terminal without interactive pairing mode:
 
 ```bash
-docker exec ctrl-exec ctrl-exec list-requests
-docker exec ctrl-exec ctrl-exec approve <reqid>
+docker exec dispatcher ctrl-exec list-requests
+docker exec dispatcher ctrl-exec approve <reqid>
 ```
 
 ### Step 5 - Restart the agent
@@ -314,8 +319,8 @@ The entrypoint finds the cert this time and starts serving:
 ### Step 6 - Verify
 
 ```bash
-docker exec ctrl-exec ctrl-exec ping agent
-docker exec ctrl-exec ctrl-exec run agent check-disk
+docker exec dispatcher ctrl-exec ping agent
+docker exec dispatcher ctrl-exec run agent check-disk
 ```
 
 
@@ -389,13 +394,13 @@ key management.
 At minimum, ensure:
 
 - The host running the ctrl-exec container has restricted access
-- The `ctrl-exec-data` volume is not world-readable
+- The `dispatcher-data` volume is not world-readable
 - The CA key is backed up to encrypted offline storage immediately after
   first-start initialisation
 
 ```bash
 # Backup CA key after first start
-docker exec ctrl-exec cat /etc/ctrl-exec/ca.key \
+docker exec dispatcher cat /etc/ctrl-exec/ca.key \
     | gpg --symmetric --cipher-algo AES256 \
     > ca.key.gpg
 # Store ca.key.gpg in offline/offsite storage
@@ -411,9 +416,9 @@ services:
   agent-db:
     build:
       context: .
-      dockerfile: docker/Dockerfile.agent
+      dockerfile: Dockerfile.agent
     environment:
-      CTRL_EXEC_HOST: ctrl-exec
+      DISPATCHER_HOST: dispatcher
     volumes:
       - agent-db-data:/etc/ctrl-exec-agent
       - agent-db-scripts:/opt/ctrl-exec-scripts
@@ -423,9 +428,9 @@ services:
   agent-web:
     build:
       context: .
-      dockerfile: docker/Dockerfile.agent
+      dockerfile: Dockerfile.agent
     environment:
-      CTRL_EXEC_HOST: ctrl-exec
+      DISPATCHER_HOST: dispatcher
     volumes:
       - agent-web-data:/etc/ctrl-exec-agent
       - agent-web-scripts:/opt/ctrl-exec-scripts
@@ -469,7 +474,7 @@ Then pass values via container environment:
 agent-db:
   hostname: agent-db
   environment:
-    CTRL_EXEC_HOST: ctrl-exec
+    DISPATCHER_HOST: dispatcher
     AGENT_ENV: production
     AGENT_ROLE: database
 ```
@@ -497,8 +502,8 @@ Because all state is on volumes, images can be rebuilt without losing pairing
 or configuration:
 
 ```bash
-docker compose build ctrl-exec
-docker compose up -d ctrl-exec
+docker compose build dispatcher
+docker compose up -d dispatcher
 # Volumes are reattached - CA and registry are intact
 ```
 

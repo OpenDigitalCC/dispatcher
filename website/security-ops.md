@@ -124,7 +124,7 @@ if [ "$ENVEXEC_TOKEN" != "$TOKEN_ROTATION" ]; then
     exit 2
 fi
 
-STATE_FILE="$RATE_DIR/$(echo "$CTRL_EXEC_HOST" | tr -cd 'a-zA-Z0-9._-').last"
+STATE_FILE="$RATE_DIR/$(echo "$DISPATCHER_HOST" | tr -cd 'a-zA-Z0-9._-').last"
 NOW=$(date +%s)
 if [ -f "$STATE_FILE" ]; then
     LAST=$(cat "$STATE_FILE")

@@ -197,7 +197,7 @@ fi
 
 # Rate limit: one successful call per agent per window
 mkdir -p "$RATE_DIR"
-STATE_FILE="$RATE_DIR/${CTRL_EXEC_HOST//[^a-zA-Z0-9._-]/_}.last"
+STATE_FILE="$RATE_DIR/${DISPATCHER_HOST//[^a-zA-Z0-9._-]/_}.last"
 NOW=$(date +%s)
 
 if [ -f "$STATE_FILE" ]; then
@@ -213,7 +213,7 @@ echo "$NOW" > "$STATE_FILE"
 exit 0
 ```
 
-`CTRL_EXEC_HOST` is the target agent hostname as recorded in the registry —
+`DISPATCHER_HOST` is the target agent hostname as recorded in the registry —
 it is not caller-supplied and cannot be spoofed. The state directory should
 be `0700` owned by the user the hook runs as. The hook should be set `0700`
 with root ownership; its parent directory should not be writable by the
@@ -415,15 +415,15 @@ Stale pairing request
   re-triggers the pairing, the request is silently deleted. Recovery: restart
   the agent container; it will send a fresh pairing request.
 
-`CTRL_EXEC_HOST` trust
-: The `CTRL_EXEC_HOST` environment variable in the agent container determines
+`DISPATCHER_HOST` trust
+: The `DISPATCHER_HOST` environment variable in the agent container determines
   which host receives the pairing request including the agent's CSR. If this
   variable is misconfigured to point at an attacker-controlled host, the
   attacker receives the CSR and can return a certificate signed by their own
   CA. The agent stores whatever cert is returned. All subsequent operations use
-  the attacker's CA as the trust anchor. Verify `CTRL_EXEC_HOST` points at
+  the attacker's CA as the trust anchor. Verify `DISPATCHER_HOST` points at
   the correct ctrl-exec before starting agent containers. For production
-  deployments, consider setting `CTRL_EXEC_HOST` in a compose file under
+  deployments, consider setting `DISPATCHER_HOST` in a compose file under
   version control rather than passing it as a runtime variable.
 
 `allowed_ips` in containerised deployments

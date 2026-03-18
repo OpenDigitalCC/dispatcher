@@ -91,4 +91,4 @@ These variables are passed to auth hooks by ctrl-exec and by the agent. They use
 
 | Variable | Description |
 | --- | --- |
-| `CTRL_EXEC_HOST` | Hostname or IP of the ctrl-exec instance, used in agent container entrypoints during pairing |
+| `DISPATCHER_HOST` | Hostname or IP of the ctrl-exec instance, used in agent container entrypoints during pairing |
