@@ -4,6 +4,8 @@ subtitle: Running dispatcher and agent containers with Alpine Linux
 brand: odcc
 ---
 
+# ctrl-exec - Docker Deployment
+
 This document covers deploying the ctrl-exec dispatcher and agent as Alpine Linux
 Docker containers. The application has no awareness of containers - the
 differences from a bare-metal installation are in how services are started,
@@ -31,26 +33,35 @@ The dispatcher and agent each have their own `Dockerfile` and entrypoint script.
 Keeping them separate means either can be built and deployed independently.
 Both can be run together using the full-stack `compose.yml`.
 
+The build directory should contain:
+
+```
+compose.yml
+Dockerfile.dispatcher
+Dockerfile.agent
+dispatcher-entrypoint.sh
+agent-entrypoint.sh
+ctrl-exec-<version>.tar.gz    ← download from https://ctrl-exec.io/downloads/
+```
+
 
 ## Dispatcher Container
 
 ### Dockerfile.dispatcher
 
+Before building, download the ctrl-exec release tarball from
+`https://ctrl-exec.io/downloads/` and place it in the same directory as
+`Dockerfile.dispatcher`. The Dockerfile extracts it at build time.
+
 ```dockerfile
 FROM alpine:3.21
 
-RUN apk add --no-cache \
-    perl \
-    perl-io-socket-ssl \
-    perl-json \
-    perl-libwww \
-    openssl
-
 WORKDIR /opt/ctrl-exec
 
-COPY . .
-
-RUN ./install.sh --ctrl-exec --api
+COPY ctrl-exec-*.tar.gz .
+RUN tar xzf ctrl-exec-*.tar.gz --strip-components=1 \
+    && ./install.sh --dispatcher --api \
+    && rm ctrl-exec-*.tar.gz
 
 COPY dispatcher-entrypoint.sh /dispatcher-entrypoint.sh
 RUN chmod 755 /dispatcher-entrypoint.sh
@@ -59,6 +70,9 @@ EXPOSE 7444 7445
 
 ENTRYPOINT ["/dispatcher-entrypoint.sh"]
 ```
+
+`install.sh` detects Alpine and installs all required Perl packages via
+`apk` before copying files. No separate `apk add` step is needed.
 
 ### Entrypoint script
 
@@ -118,20 +132,19 @@ the host. Publish it only when pairing agents on external hosts.
 
 ### Dockerfile.agent
 
+Before building, download the ctrl-exec release tarball from
+`https://ctrl-exec.io/downloads/` and place it in the same directory as
+`Dockerfile.agent`. The Dockerfile extracts it at build time.
+
 ```dockerfile
 FROM alpine:3.21
 
-RUN apk add --no-cache \
-    perl \
-    perl-io-socket-ssl \
-    perl-json \
-    openssl
-
 WORKDIR /opt/ctrl-exec
 
-COPY . .
-
-RUN ./install.sh --agent
+COPY ctrl-exec-*.tar.gz .
+RUN tar xzf ctrl-exec-*.tar.gz --strip-components=1 \
+    && ./install.sh --agent \
+    && rm ctrl-exec-*.tar.gz
 
 COPY agent-entrypoint.sh /agent-entrypoint.sh
 RUN chmod 755 /agent-entrypoint.sh
@@ -140,6 +153,9 @@ EXPOSE 7443
 
 ENTRYPOINT ["/agent-entrypoint.sh"]
 ```
+
+`install.sh` detects Alpine and installs all required Perl packages via
+`apk` before copying files. No separate `apk add` step is needed.
 
 ### Entrypoint script
 
