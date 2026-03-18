@@ -18,6 +18,9 @@
 
 set -euo pipefail
 
+# Outputs go to dist/. Add dist/ to .gitignore; release tarballs are
+# committed via git add -f to override the ignore rule.
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -30,6 +33,11 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 die()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+
+
+# --- output directory ---
+
+DIST_DIR="dist"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -62,7 +70,7 @@ if [[ -n "$BRAND" ]]; then
 
     # Locate source tarball
     if [[ -z "$FROM" ]]; then
-        FROM=$(find . -maxdepth 1 -name 'ctrl-exec-*.tar.gz' | sort -V | tail -1)
+        FROM=$(find "$DIST_DIR" -maxdepth 1 -name 'ctrl-exec-*.tar.gz' 2>/dev/null | sort -V | tail -1)
         [[ -n "$FROM" ]] || die "No ctrl-exec-*.tar.gz found. Use --from <tarball>."
         info "Using: $FROM"
     fi
@@ -74,7 +82,8 @@ if [[ -n "$BRAND" ]]; then
     [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
         || die "Could not extract semver from tarball name: $TARBALL_BASE"
 
-    BRAND_TARBALL="${BRAND}-exec-${VERSION}.tar.gz"
+    mkdir -p "$DIST_DIR"
+    BRAND_TARBALL="${DIST_DIR}/${BRAND}-exec-${VERSION}.tar.gz"
     BRAND_NAME="${BRAND}-exec-${VERSION}"
 
     info "Building $BRAND_TARBALL from $FROM (version $VERSION)"
@@ -244,7 +253,7 @@ PYEOF
     # Repack
     tar -czf "$BRAND_TARBALL" -C "$STAGE_DIR" "$BRAND_NAME"
     BRAND_HASH=$(sha256sum "$BRAND_TARBALL" | awk '{print $1}')
-    echo "$BRAND_HASH  $BRAND_TARBALL" > "${BRAND_TARBALL}.sha256"
+    echo "$BRAND_HASH  $BRAND_TARBALL" > "${BRAND_TARBALL%.tar.gz}.tar.gz.sha256"
 
     echo ""
     echo "================================================================"
@@ -255,7 +264,7 @@ PYEOF
     echo "  Brand:     ${BRAND}-exec"
     echo "  Version:   $VERSION"
     echo "  Tarball:   $BRAND_TARBALL"
-    echo "  Checksum:  ${BRAND_TARBALL}.sha256"
+    echo "  Checksum:  ${BRAND_TARBALL%.tar.gz}.tar.gz.sha256"
     echo "  SBOM:      $BRAND_SBOM"
     echo ""
     echo "  Deliver $BRAND_TARBALL and $BRAND_SBOM to the licensed distributor."
@@ -289,7 +298,8 @@ COMMIT=$(git rev-parse HEAD)
 info "Git commit: $COMMIT"
 
 RELEASE_NAME="ctrl-exec-${VERSION}"
-TARBALL="${RELEASE_NAME}.tar.gz"
+mkdir -p "$DIST_DIR"
+TARBALL="${DIST_DIR}/${RELEASE_NAME}.tar.gz"
 STAGE_DIR=$(mktemp -d)
 STAGE="${STAGE_DIR}/${RELEASE_NAME}"
 trap 'rm -rf "$STAGE_DIR"' EXIT
@@ -471,13 +481,13 @@ cp sbom.json "$STAGE/sbom.json"
 info "Creating tarball: $TARBALL"
 
 while IFS= read -r old; do
-    old_base="${old#./}"
+    old_base="${old}"
     [[ "$old_base" == "$TARBALL" ]] && continue
     old_sha="${old_base%.tar.gz}.tar.gz.sha256"
     rm -f "$old_base" "$old_sha"
     git rm --cached --quiet --ignore-unmatch "$old_base" "$old_sha" 2>/dev/null || true
     info "Removed previous tarball: $old_base"
-done < <(find . -maxdepth 1 -name 'ctrl-exec-*.tar.gz' | sort)
+done < <(find "$DIST_DIR" -maxdepth 1 -name 'ctrl-exec-*.tar.gz' | sort)
 
 tar -czf "$TARBALL" -C "$STAGE_DIR" "$RELEASE_NAME"
 
