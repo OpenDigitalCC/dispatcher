@@ -4,8 +4,6 @@ subtitle: Running dispatcher and agent containers with Alpine Linux
 brand: odcc
 ---
 
-# ctrl-exec - Docker Deployment
-
 This document covers deploying the ctrl-exec dispatcher and agent as Alpine Linux
 Docker containers. The application has no awareness of containers - the
 differences from a bare-metal installation are in how services are started,
