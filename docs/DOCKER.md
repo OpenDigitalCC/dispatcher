@@ -4,7 +4,7 @@ subtitle: Running dispatcher and agent containers with Alpine Linux
 brand: odcc
 ---
 
-# ctrl-exec - Docker Deployment
+
 
 This document covers deploying the ctrl-exec dispatcher and agent as Alpine Linux
 Docker containers. The application has no awareness of containers - the
@@ -59,9 +59,10 @@ FROM alpine:3.21
 WORKDIR /opt/ctrl-exec
 
 COPY ctrl-exec-*.tar.gz .
-RUN tar xzf ctrl-exec-*.tar.gz --strip-components=1 \
+RUN VERSION=$(ls ctrl-exec-*.tar.gz | sed 's/ctrl-exec-//;s/\.tar\.gz//') \
+    && tar xzf ctrl-exec-${VERSION}.tar.gz --strip-components=1 \
     && ./install.sh --dispatcher --api \
-    && rm ctrl-exec-*.tar.gz
+    && rm ctrl-exec-${VERSION}.tar.gz
 
 COPY dispatcher-entrypoint.sh /dispatcher-entrypoint.sh
 RUN chmod 755 /dispatcher-entrypoint.sh
@@ -142,9 +143,10 @@ FROM alpine:3.21
 WORKDIR /opt/ctrl-exec
 
 COPY ctrl-exec-*.tar.gz .
-RUN tar xzf ctrl-exec-*.tar.gz --strip-components=1 \
+RUN VERSION=$(ls ctrl-exec-*.tar.gz | sed 's/ctrl-exec-//;s/\.tar\.gz//') \
+    && tar xzf ctrl-exec-${VERSION}.tar.gz --strip-components=1 \
     && ./install.sh --agent \
-    && rm ctrl-exec-*.tar.gz
+    && rm ctrl-exec-${VERSION}.tar.gz
 
 COPY agent-entrypoint.sh /agent-entrypoint.sh
 RUN chmod 755 /agent-entrypoint.sh
