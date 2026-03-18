@@ -59,7 +59,7 @@ WORKDIR /opt/ctrl-exec
 
 COPY ctrl-exec-*.tar.gz .
 
-RUN apk add --no-cache bash openssl perl perl-libwww perl-io-socket-ssl perl-json \
+RUN apk add --no-cache bash openssl perl perl-libwww perl-io-socket-ssl perl-json perl-lwp-protocol-https \
     && VERSION=$(ls ctrl-exec-*.tar.gz | sed 's/ctrl-exec-//;s/\.tar\.gz//') \
     && tar xzf ctrl-exec-${VERSION}.tar.gz --strip-components=1 \
     && ./install.sh --dispatcher \
@@ -251,11 +251,17 @@ the host. Publish it only when pairing agents on external hosts.
 
 ## Agent Container
 
+A containerised agent is useful for testing and proof-of-concept work.
+In production, agents typically run directly on the VM or host they manage —
+either installed via `install.sh --agent` on bare metal, or added to an
+existing container that already runs the workload the agent needs to reach.
+A standalone agent container makes most sense when the agent's scripts make
+calls to other services in the same Docker network.
+
 ### Dockerfile.agent
 
-Before building, download the ctrl-exec release tarball from
-`https://ctrl-exec.io/downloads/` and place it in the same directory as
-`Dockerfile.agent`. The Dockerfile extracts it at build time.
+The same release tarball used for the dispatcher build is used here. Ensure
+it is present in the build directory before building.
 
 ```dockerfile
 FROM alpine:3.21
@@ -319,18 +325,55 @@ pairing - Docker's restart policy does not apply to a deliberate `exit 0`, so
 the container stays stopped until the operator approves and restarts it.
 
 For automated or orchestrated deployments, `--background` mode can be used
-instead. This prints the `reqid` and pairing code to stdout, then waits for
-approval without requiring an interactive terminal:
+instead. This prints the `reqid` to stdout and exits immediately, leaving a
+background process to wait for approval:
 
 ```bash
 ctrl-exec-agent request-pairing --dispatcher "$DISPATCHER_HOST" --background
 ```
 
-The container still exits after pairing; the `reqid` can be captured by the
-orchestration layer and passed to `ctrl-exec-dispatcher approve <reqid>` on the
-dispatcher. See REFERENCE.md `### Orchestrated pairing` for the full flow.
+The `reqid` can be captured by the orchestration layer and passed to
+`ctrl-exec-dispatcher approve <reqid>` on the dispatcher. See REFERENCE.md
+`### Orchestrated pairing` for the full flow.
+
+### compose.yml (agent only)
+
+For testing or deployments where the dispatcher runs elsewhere, the agent
+can be run independently. Set `DISPATCHER_HOST` to the hostname or IP of
+the external dispatcher.
+
+```yaml
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: agent
+    restart: on-failure
+    environment:
+      DISPATCHER_HOST: <dispatcher-hostname-or-ip>
+    ports:
+      - "7443:7443"
+    volumes:
+      - agent-data:/etc/ctrl-exec-agent
+      - agent-scripts:/opt/ctrl-exec-scripts
+    networks:
+      - ctrl-exec-net-agent
+
+volumes:
+  agent-data:
+  agent-scripts:
+
+networks:
+  ctrl-exec-net-agent:
+```
 
 ### compose.yml (full stack)
+
+Both services in a single compose. `depends_on` is an implementation
+choice — the dispatcher functions without agents, and the agent connects
+to the dispatcher independently at pairing time. Omit or adjust
+`depends_on` to suit your startup sequencing requirements.
 
 ```yaml
 services:
@@ -367,8 +410,6 @@ services:
       - agent-scripts:/opt/ctrl-exec-scripts
     networks:
       - ctrl-exec-net
-    depends_on:
-      - dispatcher
 
 volumes:
   dispatcher-data:
@@ -382,6 +423,24 @@ networks:
 
 `DISPATCHER_HOST: dispatcher` uses Docker's internal DNS to resolve the
 dispatcher service by name. No IP addresses required.
+
+
+## Networking
+
+Container-to-container communication works reliably in two configurations:
+
+- **Shared network** — both containers on the same Docker network. Use Docker DNS (service name) or container IP directly. This is the recommended approach for full-stack compose deployments.
+- **Different hosts** — dispatcher and agent on separate machines, each with ports published to the host. The agent connects to the dispatcher's host IP and published port. This is the intended production pattern.
+
+Same-host, different networks (container → host → container) is not reliable with default Docker networking. Docker's NAT and iptables rules do not consistently route traffic from one bridge network to a published port on another. If the dispatcher and agent must run on the same host in separate compose projects, either connect them to a shared network explicitly:
+
+```bash
+docker network connect <dispatcher-network> agent
+```
+
+Or set `DISPATCHER_HOST` to the dispatcher container's IP on the shared network rather than the host IP.
+
+This limitation does not affect real deployments where the dispatcher and agents run on separate hosts.
 
 
 ## Pairing Workflow in Docker
