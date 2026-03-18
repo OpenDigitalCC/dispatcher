@@ -59,10 +59,17 @@ FROM alpine:3.21
 WORKDIR /opt/ctrl-exec
 
 COPY ctrl-exec-*.tar.gz .
-RUN VERSION=$(ls ctrl-exec-*.tar.gz | sed 's/ctrl-exec-//;s/\.tar\.gz//') \
+
+RUN apk add --no-cache bash openssl perl perl-libwww perl-io-socket-ssl perl-json \
+    && VERSION=$(ls ctrl-exec-*.tar.gz | sed 's/ctrl-exec-//;s/\.tar\.gz//') \
     && tar xzf ctrl-exec-${VERSION}.tar.gz --strip-components=1 \
-    && ./install.sh --dispatcher --api \
+    && ./install.sh --dispatcher \
+    && ./install.sh --api \
     && rm ctrl-exec-${VERSION}.tar.gz
+    
+
+
+
 
 COPY dispatcher-entrypoint.sh /dispatcher-entrypoint.sh
 RUN chmod 755 /dispatcher-entrypoint.sh
@@ -90,8 +97,8 @@ CONF_DIR=/etc/ctrl-exec
 # block is skipped entirely.
 if [ ! -f "$CONF_DIR/ca.crt" ]; then
     echo "[entrypoint] First start: initialising CA..."
-    ctrl-exec setup-ca
-    ctrl-exec setup-ctrl-exec
+    ctrl-exec-dispatcher setup-ca
+    ctrl-exec-dispatcher setup-ctrl-exec
     echo "[entrypoint] CA and ctrl-exec cert created."
 fi
 
