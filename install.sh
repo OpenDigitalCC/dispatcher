@@ -742,7 +742,7 @@ print_next_steps_agent() {
     echo ""
     echo "  4. Once approved, verify:"
     echo "       $SUDO_CMD ctrl-exec-agent pairing-status"
-    echo "       $SUDO_CMD ctrl-exec-agent ping-self"
+    echo "       $SUDO_CMD ctrl-exec-agent self-check"
     echo ""
     echo -e "$svc_note"
     echo ""
