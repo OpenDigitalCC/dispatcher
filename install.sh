@@ -402,6 +402,12 @@ install_lib() {
     find "$LIB_DIR" -name '*.pm' -exec chmod 644 {} \;
     find "$LIB_DIR" -type d   -exec chmod 755 {} \;
 
+    # Install VERSION file so API.pm can report the release version at runtime.
+    if [[ -f "$SOURCE_DIR/VERSION" ]]; then
+        cp "$SOURCE_DIR/VERSION" "$LIB_DIR/VERSION"
+        chmod 644 "$LIB_DIR/VERSION"
+    fi
+
     # OpenWRT ships JSON::PP but not JSON. Install a thin shim so all
     # modules can use 'use JSON' unchanged on all platforms.
     if [[ "$PKG_MGR" == openwrt* ]]; then
