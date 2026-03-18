@@ -278,13 +278,18 @@ fi
 # Standard ctrl-exec release
 # ---------------------------------------------------------------------------
 
-VERSION_FILE="VERSION"
-[[ -f "$VERSION_FILE" ]] || die "VERSION file not found."
-VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
+# Read version to release from NEXT_VERSION if present, otherwise VERSION
+if [[ -f "NEXT_VERSION" ]]; then
+    VERSION=$(cat "NEXT_VERSION" | tr -d '[:space:]')
+    info "Release version: $VERSION (from NEXT_VERSION)"
+elif [[ -f "VERSION" ]]; then
+    VERSION=$(cat "VERSION" | tr -d '[:space:]')
+    info "Release version: $VERSION (from VERSION)"
+else
+    die "Neither NEXT_VERSION nor VERSION file found."
+fi
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     || die "VERSION must be semver n.n.n, got: $VERSION"
-
-info "Release version: $VERSION"
 
 if ! git rev-parse --git-dir &>/dev/null; then
     die "Not a git repository."
@@ -507,8 +512,9 @@ MAJOR=$(echo "$VERSION" | cut -d. -f1)
 MINOR=$(echo "$VERSION" | cut -d. -f2)
 PATCH=$(echo "$VERSION" | cut -d. -f3)
 NEXT_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
-echo "$NEXT_VERSION" > VERSION
-info "VERSION bumped to $NEXT_VERSION for next release."
+echo "$VERSION" > VERSION          # VERSION = current release, for dist/ link
+echo "$NEXT_VERSION" > NEXT_VERSION  # NEXT_VERSION = what the next run will build
+info "VERSION set to $VERSION (current release). NEXT_VERSION set to $NEXT_VERSION."
 
 echo ""
 echo "================================================================"
@@ -519,7 +525,7 @@ echo "  Tarball:   $TARBALL"
 echo "  Checksum:  ${TARBALL}.sha256"
 echo "  SBOM:      sbom.json"
 echo "  Tag:       $TAG  ($COMMIT)"
-echo "  Next ver:  $NEXT_VERSION"
+echo "  Next ver:  $NEXT_VERSION  (written to NEXT_VERSION)"
 echo ""
 echo "  To build a branded package from this release:"
 echo "    ./make-release.sh --brand <name> --from $TARBALL"
@@ -528,7 +534,7 @@ echo ""
 if [[ "$AUTO" -eq 1 ]]; then
     info "Auto mode: committing and pushing..."
     git add -u                             # stages any deletions from git rm above
-    git add sbom.json VERSION
+    git add sbom.json VERSION NEXT_VERSION
     git add -f "$TARBALL" "${TARBALL}.sha256"
     git commit -m "release: $VERSION"
     git push
@@ -539,7 +545,7 @@ else
     echo ""
     echo "  1. Review sbom.json and commit everything for the release:"
     echo "       git add -u"
-    echo "       git add sbom.json VERSION"
+    echo "       git add sbom.json VERSION NEXT_VERSION"
     echo "       git add -f $TARBALL ${TARBALL}.sha256"
     echo "       git commit -m 'release: $VERSION'"
     echo ""
