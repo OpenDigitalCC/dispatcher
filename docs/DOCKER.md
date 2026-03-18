@@ -5,7 +5,6 @@ brand: odcc
 ---
 
 
-
 This document covers deploying the ctrl-exec dispatcher and agent as Alpine Linux
 Docker containers. The application has no awareness of containers - the
 differences from a bare-metal installation are in how services are started,
@@ -66,10 +65,6 @@ RUN apk add --no-cache bash openssl perl perl-libwww perl-io-socket-ssl perl-jso
     && ./install.sh --dispatcher \
     && ./install.sh --api \
     && rm ctrl-exec-${VERSION}.tar.gz
-    
-
-
-
 
 COPY dispatcher-entrypoint.sh /dispatcher-entrypoint.sh
 RUN chmod 755 /dispatcher-entrypoint.sh
@@ -79,8 +74,9 @@ EXPOSE 7444 7445
 ENTRYPOINT ["/dispatcher-entrypoint.sh"]
 ```
 
-`install.sh` detects Alpine and installs all required Perl packages via
-`apk` before copying files. No separate `apk add` step is needed.
+`install.sh` detects Alpine and verifies Perl module availability. The
+`apk add` step ensures `bash` and `openssl` are present — `install.sh`
+requires bash and checks for openssl before proceeding.
 
 ### Entrypoint script
 
@@ -92,14 +88,17 @@ set -e
 
 CONF_DIR=/etc/ctrl-exec
 
-# First-start initialisation: create CA and ctrl-exec cert if absent.
-# On subsequent starts the volume already contains these files and this
-# block is skipped entirely.
 if [ ! -f "$CONF_DIR/ca.crt" ]; then
     echo "[entrypoint] First start: initialising CA..."
     ctrl-exec-dispatcher setup-ca
     ctrl-exec-dispatcher setup-ctrl-exec
     echo "[entrypoint] CA and ctrl-exec cert created."
+fi
+
+if [ ! -f "$CONF_DIR/auth-hook" ]; then
+    echo "[entrypoint] Installing default auth hook..."
+    cp /usr/local/lib/ctrl-exec/auth-hook.example "$CONF_DIR/auth-hook"
+    chmod 755 "$CONF_DIR/auth-hook"
 fi
 
 echo "[entrypoint] Starting ctrl-exec-api..."
@@ -150,7 +149,8 @@ FROM alpine:3.21
 WORKDIR /opt/ctrl-exec
 
 COPY ctrl-exec-*.tar.gz .
-RUN VERSION=$(ls ctrl-exec-*.tar.gz | sed 's/ctrl-exec-//;s/\.tar\.gz//') \
+RUN apk add --no-cache bash openssl perl perl-io-socket-ssl perl-json \
+    && VERSION=$(ls ctrl-exec-*.tar.gz | sed 's/ctrl-exec-//;s/\.tar\.gz//') \
     && tar xzf ctrl-exec-${VERSION}.tar.gz --strip-components=1 \
     && ./install.sh --agent \
     && rm ctrl-exec-${VERSION}.tar.gz
@@ -163,8 +163,10 @@ EXPOSE 7443
 ENTRYPOINT ["/agent-entrypoint.sh"]
 ```
 
-`install.sh` detects Alpine and installs all required Perl packages via
-`apk` before copying files. No separate `apk add` step is needed.
+`install.sh` detects Alpine and verifies Perl module availability. The
+`apk add` step ensures `bash` and `openssl` are present — `install.sh`
+requires bash and checks for openssl before proceeding. The agent does not
+need `perl-libwww`.
 
 ### Entrypoint script
 
@@ -211,7 +213,7 @@ ctrl-exec-agent request-pairing --dispatcher "$DISPATCHER_HOST" --background
 ```
 
 The container still exits after pairing; the `reqid` can be captured by the
-orchestration layer and passed to `ctrl-exec approve <reqid>` on the
+orchestration layer and passed to `ctrl-exec-dispatcher approve <reqid>` on the
 dispatcher. See REFERENCE.md `### Orchestrated pairing` for the full flow.
 
 ### compose.yml (full stack)
@@ -287,7 +289,7 @@ docker logs dispatcher
 ### Step 2 - Start pairing mode on the dispatcher
 
 ```bash
-docker exec -it dispatcher ctrl-exec pairing-mode
+docker exec -it dispatcher ctrl-exec-dispatcher pairing-mode
 ```
 
 This blocks, waiting for requests. Leave it running.
@@ -323,8 +325,8 @@ Type `a` to approve.
 Alternatively, from a third terminal without interactive pairing mode:
 
 ```bash
-docker exec dispatcher ctrl-exec list-requests
-docker exec dispatcher ctrl-exec approve <reqid>
+docker exec dispatcher ctrl-exec-dispatcher list-requests
+docker exec dispatcher ctrl-exec-dispatcher approve <reqid>
 ```
 
 ### Step 5 - Restart the agent
@@ -342,8 +344,8 @@ The entrypoint finds the cert this time and starts serving:
 ### Step 6 - Verify
 
 ```bash
-docker exec dispatcher ctrl-exec ping agent
-docker exec dispatcher ctrl-exec run agent check-disk
+docker exec dispatcher ctrl-exec-dispatcher ping agent
+docker exec dispatcher ctrl-exec-dispatcher run agent check-disk
 ```
 
 
@@ -461,7 +463,7 @@ services:
       - ctrl-exec-net
 ```
 
-Each agent pairs independently and appears separately in `ctrl-exec list-agents`.
+Each agent pairs independently and appears separately in `ctrl-exec-dispatcher list-agents`.
 The agent hostname in the registry is taken from the hostname reported in the
 pairing request - set `hostname` in each container to something meaningful:
 
